@@ -1,0 +1,5 @@
+# 离线包 — 不要提交到版本控制
+installers/
+pip-packages/
+node-modules.zip
+node-modules.tar.gz
