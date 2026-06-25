@@ -1,6 +1,6 @@
 import * as echarts from 'echarts';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Point, TrendItem } from '../types';
+import { CrackRecord, Point, TrendItem } from '../types';
 
 export interface PointTrend {
   point: Point;
@@ -10,7 +10,10 @@ export interface PointTrend {
 interface Props {
   trends: PointTrend[];
   height?: number;
+  expandedHeight?: number;
   expandable?: boolean;
+  crackRecords?: CrackRecord[];
+  onCrackSelect?: (record: CrackRecord) => void;
 }
 
 const palette = [
@@ -31,11 +34,38 @@ const palette = [
   '#0284c7',
 ];
 
+interface CrackPointData {
+  name: string;
+  value: [number, number];
+  crackRecordId: number;
+}
+
 function colorForIndex(index: number): string {
   return palette[index % palette.length];
 }
 
-function buildOption(trends: PointTrend[], focusPointId: number | null) {
+function isCrackPointData(value: CrackPointData | null): value is CrackPointData {
+  return value !== null;
+}
+
+function buildCrackData(trends: PointTrend[], crackRecords: CrackRecord[]): CrackPointData[] {
+  return crackRecords
+    .map((record) => {
+      const pointTrend = trends.find((item) => item.point.id === record.point_db_id);
+      const trend = pointTrend?.trend.find(
+        (item) => item.cycle_count === record.cycle_count && item.stress_amplitude_mpa != null,
+      );
+      if (!trend || trend.stress_amplitude_mpa == null) return null;
+      return {
+        name: `${record.point_id} 裂纹`,
+        value: [record.cycle_count, trend.stress_amplitude_mpa],
+        crackRecordId: record.id,
+      };
+    })
+    .filter(isCrackPointData);
+}
+
+function buildOption(trends: PointTrend[], focusPointId: number | null, crackRecords: CrackRecord[]) {
   return {
     color: palette,
     tooltip: {
@@ -45,22 +75,44 @@ function buildOption(trends: PointTrend[], focusPointId: number | null) {
     grid: { left: 58, right: 24, top: 24, bottom: 42 },
     xAxis: { type: 'value', name: '循环次数' },
     yAxis: { type: 'value', name: '应力幅 MPa' },
-    series: trends.map(({ point, trend }, index) => {
-      const focused = focusPointId == null || focusPointId === point.id;
-      return {
-        name: `${point.point_id} ${point.point_name}`,
-        type: 'line',
-        smooth: true,
-        showSymbol: true,
-        symbolSize: focused ? 8 : 5,
-        lineStyle: { color: colorForIndex(index), width: focused ? 3 : 1.5, opacity: focused ? 1 : 0.14 },
-        itemStyle: { color: colorForIndex(index), opacity: focused ? 1 : 0.22 },
-        emphasis: { focus: 'series' },
-        data: trend
-          .filter((item) => item.stress_amplitude_mpa != null)
-          .map((item) => [item.cycle_count, item.stress_amplitude_mpa]),
-      };
-    }),
+    series: [
+      ...trends.map(({ point, trend }, index) => {
+        const focused = focusPointId == null || focusPointId === point.id;
+        return {
+          name: `${point.point_id} ${point.point_name}`,
+          type: 'line',
+          smooth: true,
+          showSymbol: true,
+          symbolSize: focused ? 8 : 5,
+          lineStyle: { color: colorForIndex(index), width: focused ? 3 : 1.5, opacity: focused ? 1 : 0.14 },
+          itemStyle: { color: colorForIndex(index), opacity: focused ? 1 : 0.22 },
+          emphasis: { focus: 'series' },
+          data: trend
+            .filter((item) => item.stress_amplitude_mpa != null)
+            .map((item) => [item.cycle_count, item.stress_amplitude_mpa]),
+        };
+      }),
+      {
+        name: '裂纹记录',
+        type: 'scatter',
+        symbol: 'circle',
+        symbolSize: 18,
+        z: 8,
+        itemStyle: {
+          color: 'rgba(255,255,255,0.08)',
+          borderColor: '#dc2626',
+          borderWidth: 3,
+        },
+        emphasis: {
+          itemStyle: {
+            color: 'rgba(220,38,38,0.12)',
+            borderColor: '#b91c1c',
+            borderWidth: 4,
+          },
+        },
+        data: buildCrackData(trends, crackRecords),
+      },
+    ],
   };
 }
 
@@ -68,24 +120,39 @@ function ChartCanvas({
   trends,
   height,
   focusPointId,
+  crackRecords,
+  onCrackSelect,
+  onChartClick,
 }: {
   trends: PointTrend[];
   height: number;
   focusPointId: number | null;
+  crackRecords: CrackRecord[];
+  onCrackSelect?: (record: CrackRecord) => void;
+  onChartClick?: () => void;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!ref.current) return;
     const chart = echarts.init(ref.current);
-    chart.setOption(buildOption(trends, focusPointId), true);
+    chart.setOption(buildOption(trends, focusPointId, crackRecords), true);
+    chart.on('click', (params) => {
+      const data = params.data as { crackRecordId?: number } | undefined;
+      const crackRecord = crackRecords.find((record) => record.id === data?.crackRecordId);
+      if (crackRecord) onCrackSelect?.(crackRecord);
+      else onChartClick?.();
+    });
+    chart.getZr().on('click', (event) => {
+      if (!event.target) onChartClick?.();
+    });
     const resize = () => chart.resize();
     window.addEventListener('resize', resize);
     return () => {
       window.removeEventListener('resize', resize);
       chart.dispose();
     };
-  }, [trends, focusPointId]);
+  }, [trends, focusPointId, crackRecords, onCrackSelect, onChartClick]);
 
   return <div className="chart multi-chart" style={{ height }} ref={ref} />;
 }
@@ -94,15 +161,17 @@ function SideLegend({
   trends,
   focusPointId,
   onFocus,
+  maxHeight,
   interactive = false,
 }: {
   trends: PointTrend[];
   focusPointId: number | null;
   onFocus?: (pointId: number | null) => void;
+  maxHeight: number;
   interactive?: boolean;
 }) {
   return (
-    <div className="side-legend" aria-label="点位标注">
+    <div className="side-legend" aria-label="点位标注" style={{ maxHeight }}>
       {trends.map(({ point, trend }, index) => {
         const latest = [...trend].reverse().find((item) => item.stress_amplitude_mpa != null);
         const active = focusPointId === point.id;
@@ -130,7 +199,14 @@ function SideLegend({
   );
 }
 
-export function MultiPointTrendChart({ trends, height = 420, expandable = true }: Props) {
+export function MultiPointTrendChart({
+  trends,
+  height = 520,
+  expandedHeight = 660,
+  expandable = true,
+  crackRecords = [],
+  onCrackSelect,
+}: Props) {
   const [expanded, setExpanded] = useState(false);
   const [focusPointId, setFocusPointId] = useState<number | null>(null);
   const availableTrends = useMemo(() => trends.filter((item) => item.trend.length), [trends]);
@@ -142,16 +218,25 @@ export function MultiPointTrendChart({ trends, height = 420, expandable = true }
   return (
     <>
       <div className={expandable ? 'trend-chart-layout clickable' : 'trend-chart-layout'}>
-        <button
+        <div
           className="chart-click-layer"
-          type="button"
-          disabled={!expandable}
-          onClick={() => setExpanded(true)}
+          role={expandable ? 'button' : undefined}
+          tabIndex={expandable ? 0 : undefined}
+          onKeyDown={(event) => {
+            if (expandable && (event.key === 'Enter' || event.key === ' ')) setExpanded(true);
+          }}
           title={expandable ? '点击放大图表' : undefined}
         >
-          <ChartCanvas trends={availableTrends} height={height} focusPointId={null} />
-        </button>
-        <SideLegend trends={availableTrends} focusPointId={null} />
+          <ChartCanvas
+            trends={availableTrends}
+            height={height}
+            focusPointId={null}
+            crackRecords={crackRecords}
+            onCrackSelect={onCrackSelect}
+            onChartClick={expandable ? () => setExpanded(true) : undefined}
+          />
+        </div>
+        <SideLegend trends={availableTrends} focusPointId={null} maxHeight={height} />
       </div>
 
       {expanded && (
@@ -165,11 +250,18 @@ export function MultiPointTrendChart({ trends, height = 420, expandable = true }
               <button className="button" onClick={() => setExpanded(false)}>关闭</button>
             </div>
             <div className="trend-chart-layout expanded">
-              <ChartCanvas trends={availableTrends} height={560} focusPointId={focusPointId} />
+              <ChartCanvas
+                trends={availableTrends}
+                height={expandedHeight}
+                focusPointId={focusPointId}
+                crackRecords={crackRecords}
+                onCrackSelect={onCrackSelect}
+              />
               <SideLegend
                 trends={availableTrends}
                 focusPointId={focusPointId}
                 onFocus={setFocusPointId}
+                maxHeight={expandedHeight}
                 interactive
               />
             </div>

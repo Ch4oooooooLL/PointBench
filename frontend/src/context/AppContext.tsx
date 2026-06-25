@@ -8,6 +8,11 @@ export interface RiskSettings {
   criticalPercent: number;
 }
 
+export interface ChartSettings {
+  overviewHeight: number;
+  overviewExpandedHeight: number;
+}
+
 interface AppContextValue {
   projects: Project[];
   selectedProjectId: number | null;
@@ -16,6 +21,8 @@ interface AppContextValue {
   refreshProjects: () => Promise<void>;
   riskSettings: RiskSettings;
   setRiskSettings: (settings: RiskSettings) => void;
+  chartSettings: ChartSettings;
+  setChartSettings: (settings: ChartSettings) => void;
   debugMode: boolean;
   setDebugMode: (enabled: boolean) => void;
 }
@@ -24,6 +31,11 @@ const DEFAULT_RISK: RiskSettings = {
   warnPercent: 20,
   dangerPercent: 50,
   criticalPercent: 100,
+};
+
+const DEFAULT_CHART: ChartSettings = {
+  overviewHeight: 520,
+  overviewExpandedHeight: 660,
 };
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -35,6 +47,16 @@ function loadRiskSettings(): RiskSettings {
     return { ...DEFAULT_RISK, ...JSON.parse(raw) };
   } catch {
     return DEFAULT_RISK;
+  }
+}
+
+function loadChartSettings(): ChartSettings {
+  const raw = localStorage.getItem('chartSettings');
+  if (!raw) return DEFAULT_CHART;
+  try {
+    return { ...DEFAULT_CHART, ...JSON.parse(raw) };
+  } catch {
+    return DEFAULT_CHART;
   }
 }
 
@@ -53,6 +75,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectIdState] = useState<number | null>(loadSelectedProjectId);
   const [riskSettings, setRiskSettingsState] = useState<RiskSettings>(loadRiskSettings);
+  const [chartSettings, setChartSettingsState] = useState<ChartSettings>(loadChartSettings);
   const [debugMode, setDebugModeState] = useState<boolean>(loadDebugMode);
 
   const refreshProjects = async () => {
@@ -81,6 +104,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('riskSettings', JSON.stringify(settings));
   };
 
+  const setChartSettings = (settings: ChartSettings) => {
+    setChartSettingsState(settings);
+    localStorage.setItem('chartSettings', JSON.stringify(settings));
+  };
+
   const setDebugMode = (enabled: boolean) => {
     setDebugModeState(enabled);
     localStorage.setItem('debugMode', String(enabled));
@@ -101,6 +129,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         refreshProjects,
         riskSettings,
         setRiskSettings,
+        chartSettings,
+        setChartSettings,
         debugMode,
         setDebugMode,
       }}

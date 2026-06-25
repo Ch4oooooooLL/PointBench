@@ -101,6 +101,23 @@ export interface TestRun {
   created_at: string;
 }
 
+export interface CrackRecord {
+  id: number;
+  project_db_id: number;
+  point_db_id: number;
+  test_run_id?: number | null;
+  cycle_count: number;
+  filename: string;
+  content_type?: string | null;
+  sha256?: string | null;
+  remark?: string | null;
+  created_at: string;
+  updated_at: string;
+  point_id: string;
+  point_name: string;
+  run_name?: string | null;
+}
+
 export interface ImportPreview {
   temporary_import_id: string;
   export_id?: string | null;

@@ -345,6 +345,25 @@ class TrendItem(BaseModel):
     abnormal_reason: str | None
 
 
+class CrackRecordOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    project_db_id: int
+    point_db_id: int
+    test_run_id: int | None
+    cycle_count: int
+    filename: str
+    content_type: str | None
+    sha256: str | None
+    remark: str | None
+    created_at: datetime
+    updated_at: datetime
+    point_id: str
+    point_name: str
+    run_name: str | None
+
+
 class AnalysisSummary(BaseModel):
     project_db_id: int
     point_count: int

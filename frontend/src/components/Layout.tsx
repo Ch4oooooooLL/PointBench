@@ -1,4 +1,4 @@
-import { ActivitySquare, FilePlus2, FileUp, LayoutDashboard, ListChecks, Settings } from 'lucide-react';
+import { ActivitySquare, Camera, FilePlus2, FileUp, LayoutDashboard, ListChecks, Settings } from 'lucide-react';
 import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAppContext } from '../context/AppContext';
@@ -26,6 +26,10 @@ export function Layout() {
               <ListChecks size={18} />
               项目详情
             </NavLink>
+            <NavLink to="/crack-records">
+              <Camera size={18} />
+              裂纹记录
+            </NavLink>
             <NavLink to="/projects/new">
               <FilePlus2 size={18} />
               创建项目
@@ -50,10 +54,12 @@ export function Layout() {
 }
 
 function SettingsModal({ onClose }: { onClose: () => void }) {
-  const { riskSettings, setRiskSettings, debugMode, setDebugMode } = useAppContext();
+  const { riskSettings, setRiskSettings, chartSettings, setChartSettings, debugMode, setDebugMode } = useAppContext();
   const [warnPercent, setWarnPercent] = useState(String(riskSettings.warnPercent));
   const [dangerPercent, setDangerPercent] = useState(String(riskSettings.dangerPercent));
   const [criticalPercent, setCriticalPercent] = useState(String(riskSettings.criticalPercent));
+  const [overviewHeight, setOverviewHeight] = useState(String(chartSettings.overviewHeight));
+  const [overviewExpandedHeight, setOverviewExpandedHeight] = useState(String(chartSettings.overviewExpandedHeight));
   const [debugEnabled, setDebugEnabled] = useState(debugMode);
 
   function save() {
@@ -61,6 +67,10 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
       warnPercent: Number(warnPercent),
       dangerPercent: Number(dangerPercent),
       criticalPercent: Number(criticalPercent),
+    });
+    setChartSettings({
+      overviewHeight: clampNumber(Number(overviewHeight), 360, 760),
+      overviewExpandedHeight: clampNumber(Number(overviewExpandedHeight), 480, 860),
     });
     setDebugMode(debugEnabled);
     onClose();
@@ -94,6 +104,15 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="settings-section">
+          <h3>概览折线图</h3>
+          <p>调整项目概览中全点位应力幅趋势图的高度。</p>
+          <div className="settings-grid">
+            <label>普通视图高度 px<input type="number" min="360" max="760" value={overviewHeight} onChange={(event) => setOverviewHeight(event.target.value)} /></label>
+            <label>放大视图高度 px<input type="number" min="480" max="860" value={overviewExpandedHeight} onChange={(event) => setOverviewExpandedHeight(event.target.value)} /></label>
+          </div>
+        </div>
+
+        <div className="settings-section">
           <h3>Debug 模式</h3>
           <label className="toggle-row">
             <input type="checkbox" checked={debugEnabled} onChange={(event) => setDebugEnabled(event.target.checked)} />
@@ -105,4 +124,9 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
       </div>
     </div>
   );
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(Math.max(value, min), max);
 }

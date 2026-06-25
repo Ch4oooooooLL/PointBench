@@ -1,12 +1,12 @@
 import { ClipboardPlus, Download } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api } from '../api/client';
+import { api, crackImageUrl } from '../api/client';
 import { DebugCsvImporter } from '../components/DebugCsvImporter';
 import { MultiPointTrendChart, PointTrend } from '../components/MultiPointTrendChart';
 import { ProjectSelector } from '../components/ProjectSelector';
 import { useAppContext } from '../context/AppContext';
-import { Point, TrendItem } from '../types';
+import { CrackRecord, Point, TrendItem } from '../types';
 
 type SummaryValue = string | number | null | undefined;
 
@@ -64,10 +64,12 @@ interface Summary {
 }
 
 export function ProjectOverviewPage() {
-  const { selectedProject, selectedProjectId, debugMode } = useAppContext();
+  const { selectedProject, selectedProjectId, chartSettings, debugMode } = useAppContext();
   const [points, setPoints] = useState<Point[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [trends, setTrends] = useState<PointTrend[]>([]);
+  const [crackRecords, setCrackRecords] = useState<CrackRecord[]>([]);
+  const [selectedCrackRecord, setSelectedCrackRecord] = useState<CrackRecord | null>(null);
   const [error, setError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -76,19 +78,23 @@ export function ProjectOverviewPage() {
       setPoints([]);
       setSummary(null);
       setTrends([]);
+      setCrackRecords([]);
       return;
     }
     setPoints([]);
     setSummary(null);
     setTrends([]);
+    setCrackRecords([]);
     setError('');
     Promise.all([
       api.get<Point[]>(`/api/projects/${selectedProjectId}/points`),
       api.get<Summary>(`/api/projects/${selectedProjectId}/analysis/summary`),
+      api.get<CrackRecord[]>(`/api/projects/${selectedProjectId}/crack-records`),
     ])
-      .then(async ([pointData, summaryData]) => {
+      .then(async ([pointData, summaryData, crackData]) => {
         setPoints(pointData);
         setSummary(summaryData);
+        setCrackRecords(crackData);
         const trendData = await Promise.all(
           pointData.map(async (point) => ({
             point,
@@ -179,7 +185,13 @@ export function ProjectOverviewPage() {
                 <p>每个点位一条折线；点击图表可放大，放大后点击标注突出单条折线。</p>
               </div>
             </div>
-            <MultiPointTrendChart trends={trends} />
+            <MultiPointTrendChart
+              trends={trends}
+              height={chartSettings.overviewHeight}
+              expandedHeight={chartSettings.overviewExpandedHeight}
+              crackRecords={crackRecords}
+              onCrackSelect={setSelectedCrackRecord}
+            />
           </div>
 
           <div className="overview-columns">
@@ -188,7 +200,37 @@ export function ProjectOverviewPage() {
           </div>
         </>
       )}
+
+      {selectedCrackRecord && (
+        <CrackOverviewModal record={selectedCrackRecord} onClose={() => setSelectedCrackRecord(null)} />
+      )}
     </section>
+  );
+}
+
+function CrackOverviewModal({ record, onClose }: { record: CrackRecord; onClose: () => void }) {
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal crack-detail-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="section-head">
+          <div>
+            <h2>{record.point_id} 裂纹详情</h2>
+            <p>{record.point_name} · {record.cycle_count} 次</p>
+          </div>
+          <button className="button" onClick={onClose}>关闭</button>
+        </div>
+        <img src={crackImageUrl(record.id)} alt={`${record.point_id} 裂纹详情`} />
+        <div className="kv-grid compact">
+          <div><span>点位</span><strong>{record.point_id}</strong></div>
+          <div><span>点位名称</span><strong>{record.point_name}</strong></div>
+          <div><span>循环次数</span><strong>{record.cycle_count}</strong></div>
+          <div><span>轮次</span><strong>{record.run_name || '-'}</strong></div>
+          <div><span>记录时间</span><strong>{formatDateTime(record.created_at)}</strong></div>
+          <div><span>文件名</span><strong>{record.filename}</strong></div>
+        </div>
+        {record.remark && <div className="crack-remark">{record.remark}</div>}
+      </div>
+    </div>
   );
 }
 
@@ -305,4 +347,8 @@ function formatCycleRange(previous: SummaryValue, latest: SummaryValue): string 
 function joinText(values: SummaryValue[]): string | null {
   const parts = values.filter(hasValue).map(String);
   return parts.length ? parts.join(' / ') : null;
+}
+
+function formatDateTime(value: string): string {
+  return new Date(value).toLocaleString('zh-CN', { hour12: false });
 }

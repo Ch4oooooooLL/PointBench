@@ -32,6 +32,7 @@ class Project(Base):
     media_files: Mapped[list["MediaFile"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     test_runs: Mapped[list["TestRun"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     dewesoft_imports: Mapped[list["DewesoftImport"]] = relationship(back_populates="project", cascade="all, delete-orphan")
+    crack_records: Mapped[list["CrackRecord"]] = relationship(back_populates="project", cascade="all, delete-orphan")
 
 
 class TestPoint(Base):
@@ -61,6 +62,7 @@ class TestPoint(Base):
     media_files: Mapped[list["MediaFile"]] = relationship(back_populates="point", cascade="all, delete-orphan")
     cae_mappings: Mapped[list["CaeMapping"]] = relationship(back_populates="point", cascade="all, delete-orphan")
     measurements: Mapped[list["MeasurementRecord"]] = relationship(back_populates="point", cascade="all, delete-orphan")
+    crack_records: Mapped[list["CrackRecord"]] = relationship(back_populates="point", cascade="all, delete-orphan")
 
 
 class SensorChannel(Base):
@@ -123,6 +125,7 @@ class TestRun(Base):
 
     project: Mapped[Project] = relationship(back_populates="test_runs")
     measurements: Mapped[list["MeasurementRecord"]] = relationship(back_populates="run", cascade="all, delete-orphan")
+    crack_records: Mapped[list["CrackRecord"]] = relationship(back_populates="run")
 
 
 class MeasurementRecord(Base):
@@ -150,6 +153,27 @@ class MeasurementRecord(Base):
 
     run: Mapped[TestRun] = relationship(back_populates="measurements")
     point: Mapped[TestPoint] = relationship(back_populates="measurements")
+
+
+class CrackRecord(Base):
+    __tablename__ = "crack_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_db_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    point_db_id: Mapped[int] = mapped_column(ForeignKey("test_points.id", ondelete="CASCADE"), index=True)
+    test_run_id: Mapped[int | None] = mapped_column(ForeignKey("test_runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    cycle_count: Mapped[int] = mapped_column(Integer, index=True)
+    stored_path: Mapped[str] = mapped_column(String(500))
+    filename: Mapped[str] = mapped_column(String(255))
+    content_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    sha256: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    remark: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
+
+    project: Mapped[Project] = relationship(back_populates="crack_records")
+    point: Mapped[TestPoint] = relationship(back_populates="crack_records")
+    run: Mapped[TestRun | None] = relationship(back_populates="crack_records")
 
 
 class ImportJob(Base):

@@ -35,3 +35,7 @@ export const api = {
 export function mediaUrl(mediaId: number): string {
   return `/api/media/${mediaId}`;
 }
+
+export function crackImageUrl(recordId: number): string {
+  return `/api/crack-records/${recordId}/image`;
+}

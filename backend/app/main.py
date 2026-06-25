@@ -2,7 +2,16 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import init_db
-from app.routers import analysis_router, dewesoft_router, import_router, measurement_router, media_router, point_router, project_router
+from app.routers import (
+    analysis_router,
+    crack_router,
+    dewesoft_router,
+    import_router,
+    measurement_router,
+    media_router,
+    point_router,
+    project_router,
+)
 
 
 app = FastAPI(title="实验点位数据管理与分析系统", version="0.1.0")
@@ -33,3 +42,4 @@ app.include_router(media_router.router)
 app.include_router(measurement_router.router)
 app.include_router(analysis_router.router)
 app.include_router(dewesoft_router.router)
+app.include_router(crack_router.router)

@@ -3,6 +3,7 @@ import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { AppProvider } from './context/AppContext';
 import { AnalysisPage } from './pages/AnalysisPage';
+import { CrackRecordsPage } from './pages/CrackRecordsPage';
 import { DewesoftImportsPage } from './pages/DewesoftImportsPage';
 import { ImportPage } from './pages/ImportPage';
 import { PointDetailPage } from './pages/PointDetailPage';
@@ -19,6 +20,7 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <ProjectOverviewPage /> },
       { path: 'project-detail', element: <ProjectRowsPage /> },
+      { path: 'crack-records', element: <CrackRecordsPage /> },
       { path: 'projects/new', element: <ProjectCreatePage /> },
       { path: 'import', element: <ImportPage /> },
       { path: 'projects/:projectId', element: <ProjectDetailPage /> },
