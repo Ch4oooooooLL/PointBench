@@ -1,9 +1,9 @@
-import { ImageOff, ImagePlus, Pencil, Plus, Save, Trash2, Upload, X } from 'lucide-react';
+import { ImageOff, Pencil, Plus, Save, Trash2, Upload, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { api, mediaUrl } from '../api/client';
 import { ProjectSelector } from '../components/ProjectSelector';
 import { TrendChart } from '../components/TrendChart';
-import { useAppContext } from '../context/AppContext';
+import { useAppContext, type RiskSettings } from '../context/AppContext';
 import { Point, PointMeasurementRow, Project, TrendItem } from '../types';
 import { growthPercent, riskLabel, riskLevel, riskPercentText } from '../utils/risk';
 
@@ -48,6 +48,9 @@ interface EditableMeasurementRow {
   abnormal_reason: string;
   remark: string;
 }
+
+type PointEditTab = 'main' | 'optional' | 'photos' | 'cycles';
+type MediaType = 'overall' | 'local';
 
 function toProjectForm(project: Project | null): ProjectForm {
   return {
@@ -96,6 +99,12 @@ function numberOrNull(value: string): number | null {
   if (value.trim() === '') return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function mediaTypeLabel(type: string): string {
+  if (type === 'overall') return '整体';
+  if (type === 'local') return '局部';
+  return '未分类';
 }
 
 export function ProjectRowsPage() {
@@ -182,12 +191,12 @@ export function ProjectRowsPage() {
 
   return (
     <section>
-      <div className="page-head">
+      <div className="page-head project-detail-head">
         <div>
           <h1>项目详情</h1>
           <p>每行一个点位，展示图片、名称、历次应力幅和按初始值增长百分比计算的风险标识。</p>
         </div>
-        <div className="actions">
+        <div className="actions project-detail-actions">
           <ProjectSelector compact />
           {editMode && <button className="button" disabled={busy} onClick={addPoint}><Plus size={18} />新增点位</button>}
           {editMode && <button className="button primary" disabled={busy} onClick={saveProject}><Save size={18} />保存</button>}
@@ -299,12 +308,15 @@ function PointRiskModal({
   const [previewUrl, setPreviewUrl] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [activeTab, setActiveTab] = useState<PointEditTab>('main');
+  const [pasteMediaType, setPasteMediaType] = useState<MediaType>('overall');
   const initial = firstStress(trend);
 
   useEffect(() => {
     setPoint(row.point);
     setTrend(row.trend);
     setForm(toPointForm(row.point));
+    setActiveTab('main');
     loadMeasurementRows(row.point.id);
   }, [row.point.id]);
 
@@ -316,11 +328,11 @@ function PointRiskModal({
       const file = imageItem?.getAsFile();
       if (!file) return;
       event.preventDefault();
-      uploadImage(file);
+      uploadImage(file, pasteMediaType);
     }
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
-  }, [editMode, point.id]);
+  }, [editMode, point.id, pasteMediaType]);
 
   async function refreshPoint() {
     const [nextPoint, nextTrend] = await Promise.all([
@@ -365,16 +377,17 @@ function PointRiskModal({
     setMeasurements((current) => current.filter((item) => item.localKey !== rowItem.localKey));
   }
 
-  async function uploadImage(file?: File | null) {
+  async function uploadImage(file?: File | null, mediaType: MediaType = 'overall') {
     if (!file) return;
     setBusy(true);
     setMessage('');
     try {
       const formData = new FormData();
       formData.append('file', file);
+      formData.append('media_type', mediaType);
       await api.post(`/api/points/${point.id}/media`, formData);
       await refreshPoint();
-      setMessage('图片已上传。');
+      setMessage(`${mediaTypeLabel(mediaType)}照片已上传。`);
     } catch (err) {
       setMessage(`上传失败：${(err as Error).message}`);
     } finally {
@@ -397,6 +410,11 @@ function PointRiskModal({
   }
 
   async function savePoint() {
+    if (!form.point_id.trim() || !form.point_name.trim()) {
+      setMessage('保存失败：点位编号和名称不能为空。');
+      setActiveTab('main');
+      return;
+    }
     const invalidRow = measurements.find((item) => !item.cycle_count.trim());
     if (invalidRow) {
       setMessage('保存失败：循环次数不能为空。');
@@ -451,163 +469,133 @@ function PointRiskModal({
           </div>
         </div>
         {message && <div className={message.includes('失败') ? 'alert danger' : 'alert ok'}>{message}</div>}
-        {editMode && (
-          <div className="panel">
-            <h2>点位信息</h2>
-            <div className="point-edit-grid">
-              <label>点位编号<input value={form.point_id} onChange={(event) => setForm({ ...form, point_id: event.target.value })} /></label>
-              <label>点位名称<input value={form.point_name} onChange={(event) => setForm({ ...form, point_name: event.target.value })} /></label>
-              <label>点位类型
-                <select value={form.point_type} onChange={(event) => setForm({ ...form, point_type: event.target.value })}>
-                  <option value="strain">应变</option>
-                  <option value="temperature">温度</option>
-                  <option value="displacement">位移</option>
-                  <option value="pressure">压力</option>
-                  <option value="other">其他</option>
-                </select>
-              </label>
-              <label>部件<input value={form.component} onChange={(event) => setForm({ ...form, component: event.target.value })} /></label>
-              <label>方位
-                <select value={form.side} onChange={(event) => setForm({ ...form, side: event.target.value })}>
-                  <option value="">未填写</option>
-                  <option value="left">left</option>
-                  <option value="right">right</option>
-                  <option value="front">front</option>
-                  <option value="rear">rear</option>
-                  <option value="center">center</option>
-                </select>
-              </label>
-              <label>方向
-                <select value={form.direction} onChange={(event) => setForm({ ...form, direction: event.target.value })}>
-                  <option value="">未填写</option>
-                  <option value="X">X</option>
-                  <option value="Y">Y</option>
-                  <option value="Z">Z</option>
-                  <option value="45">45</option>
-                  <option value="-45">-45</option>
-                </select>
-              </label>
-              <label>桥路类型
-                <select value={form.bridge_type} onChange={(event) => setForm({ ...form, bridge_type: event.target.value })}>
-                  <option value="">未填写</option>
-                  <option value="quarter">quarter</option>
-                  <option value="half">half</option>
-                  <option value="full">full</option>
-                  <option value="other">other</option>
-                </select>
-              </label>
-              <label>电阻<input type="number" value={form.resistance_ohm} onChange={(event) => setForm({ ...form, resistance_ohm: event.target.value })} /></label>
-              <label>安装状态
-                <select value={form.install_status} onChange={(event) => setForm({ ...form, install_status: event.target.value })}>
-                  <option value="planned">planned</option>
-                  <option value="installed">installed</option>
-                  <option value="removed">removed</option>
-                  <option value="damaged">damaged</option>
-                  <option value="abandoned">abandoned</option>
-                </select>
-              </label>
-              <label>检查状态
-                <select value={form.check_status} onChange={(event) => setForm({ ...form, check_status: event.target.value })}>
-                  <option value="">未填写</option>
-                  <option value="unchecked">unchecked</option>
-                  <option value="ok">ok</option>
-                  <option value="warning">warning</option>
-                  <option value="failed">failed</option>
-                </select>
-              </label>
-              <label className="wide">位置描述<textarea rows={3} value={form.position_description} onChange={(event) => setForm({ ...form, position_description: event.target.value })} /></label>
-              <label className="wide">备注<textarea rows={3} value={form.remark} onChange={(event) => setForm({ ...form, remark: event.target.value })} /></label>
+        {editMode ? (
+          <div className="point-editor">
+            <div className="mode-tabs point-edit-tabs">
+              <button className={activeTab === 'main' ? 'active' : ''} onClick={() => setActiveTab('main')}>主信息</button>
+              <button className={activeTab === 'optional' ? 'active' : ''} onClick={() => setActiveTab('optional')}>可选信息</button>
+              <button className={activeTab === 'photos' ? 'active' : ''} onClick={() => setActiveTab('photos')}>照片</button>
+              <button className={activeTab === 'cycles' ? 'active' : ''} onClick={() => setActiveTab('cycles')}>循环数据</button>
             </div>
-          </div>
-        )}
-        <div className="detail-grid">
-          <div>
-            <div className="section-head">
-              <h2>照片</h2>
-              {editMode && (
-                <label className="button file-button">
-                  <Upload size={18} />
-                  上传图片
-                  <input type="file" accept="image/*" disabled={busy} onChange={(event) => uploadImage(event.target.files?.[0])} />
-                </label>
-              )}
-            </div>
-            {editMode && <div className="template-note"><ImagePlus size={18} />可选择图片文件，也可以直接粘贴剪贴板中的图片。</div>}
-            <div className="photo-grid">
-              {point.media_files.map((media) => (
-                <div className="photo-item" key={media.id}>
-                  <button className="photo-button" onClick={() => setPreviewUrl(mediaUrl(media.id))}>
-                    <img src={mediaUrl(media.id)} alt={media.filename} />
-                    <span>{media.type} · {media.filename}</span>
-                  </button>
-                  {editMode && <button className="icon-button danger-text photo-delete" disabled={busy} onClick={() => deleteImage(media.id)} title="删除图片"><Trash2 size={16} /></button>}
+
+            {activeTab === 'main' && (
+              <div className="panel point-editor-panel">
+                <h2>主信息</h2>
+                <div className="point-main-grid">
+                  <label>点位编号（必填）<input value={form.point_id} onChange={(event) => setForm({ ...form, point_id: event.target.value })} /></label>
+                  <label>点位名称（必填）<input value={form.point_name} onChange={(event) => setForm({ ...form, point_name: event.target.value })} /></label>
                 </div>
-              ))}
-              {!point.media_files.length && <div className="empty">暂无图片</div>}
+              </div>
+            )}
+
+            {activeTab === 'optional' && (
+              <div className="panel point-editor-panel">
+                <h2>可选信息</h2>
+                <div className="point-edit-grid">
+                  <label>点位类型
+                    <select value={form.point_type} onChange={(event) => setForm({ ...form, point_type: event.target.value })}>
+                      <option value="strain">应变</option>
+                      <option value="temperature">温度</option>
+                      <option value="displacement">位移</option>
+                      <option value="pressure">压力</option>
+                      <option value="other">其他</option>
+                    </select>
+                  </label>
+                  <label>部件<input value={form.component} onChange={(event) => setForm({ ...form, component: event.target.value })} /></label>
+                  <label>方位
+                    <select value={form.side} onChange={(event) => setForm({ ...form, side: event.target.value })}>
+                      <option value="">未填写</option>
+                      <option value="left">left</option>
+                      <option value="right">right</option>
+                      <option value="front">front</option>
+                      <option value="rear">rear</option>
+                      <option value="center">center</option>
+                    </select>
+                  </label>
+                  <label>方向
+                    <select value={form.direction} onChange={(event) => setForm({ ...form, direction: event.target.value })}>
+                      <option value="">未填写</option>
+                      <option value="X">X</option>
+                      <option value="Y">Y</option>
+                      <option value="Z">Z</option>
+                      <option value="45">45</option>
+                      <option value="-45">-45</option>
+                    </select>
+                  </label>
+                  <label>桥路类型
+                    <select value={form.bridge_type} onChange={(event) => setForm({ ...form, bridge_type: event.target.value })}>
+                      <option value="">未填写</option>
+                      <option value="quarter">quarter</option>
+                      <option value="half">half</option>
+                      <option value="full">full</option>
+                      <option value="other">other</option>
+                    </select>
+                  </label>
+                  <label>电阻<input type="number" value={form.resistance_ohm} onChange={(event) => setForm({ ...form, resistance_ohm: event.target.value })} /></label>
+                  <label>安装状态
+                    <select value={form.install_status} onChange={(event) => setForm({ ...form, install_status: event.target.value })}>
+                      <option value="planned">planned</option>
+                      <option value="installed">installed</option>
+                      <option value="removed">removed</option>
+                      <option value="damaged">damaged</option>
+                      <option value="abandoned">abandoned</option>
+                    </select>
+                  </label>
+                  <label>检查状态
+                    <select value={form.check_status} onChange={(event) => setForm({ ...form, check_status: event.target.value })}>
+                      <option value="">未填写</option>
+                      <option value="unchecked">unchecked</option>
+                      <option value="ok">ok</option>
+                      <option value="warning">warning</option>
+                      <option value="failed">failed</option>
+                    </select>
+                  </label>
+                  <label className="wide">位置描述<textarea rows={3} value={form.position_description} onChange={(event) => setForm({ ...form, position_description: event.target.value })} /></label>
+                  <label className="wide">备注<textarea rows={3} value={form.remark} onChange={(event) => setForm({ ...form, remark: event.target.value })} /></label>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'photos' && (
+              <div className="panel point-editor-panel">
+                <div className="section-head">
+                  <h2>照片</h2>
+                  <div className="actions">
+                    <button className={pasteMediaType === 'overall' ? 'button primary' : 'button'} onClick={() => setPasteMediaType('overall')}>粘贴为整体</button>
+                    <button className={pasteMediaType === 'local' ? 'button primary' : 'button'} onClick={() => setPasteMediaType('local')}>粘贴为局部</button>
+                  </div>
+                </div>
+                <div className="photo-upload-grid">
+                  <PhotoSection title="整体照片" mediaType="overall" media={point.media_files} busy={busy} onUpload={uploadImage} onPreview={setPreviewUrl} onDelete={deleteImage} />
+                  <PhotoSection title="局部照片" mediaType="local" media={point.media_files} busy={busy} onUpload={uploadImage} onPreview={setPreviewUrl} onDelete={deleteImage} />
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'cycles' && (
+              <div className="panel point-editor-panel">
+                <div className="section-head">
+                  <h2>循环数据</h2>
+                  <button className="button" onClick={addMeasurement}><Plus size={18} />新增循环</button>
+                </div>
+                <MeasurementTable measurements={measurements} initial={initial} riskSettings={riskSettings} updateMeasurement={updateMeasurement} removeMeasurement={removeMeasurement} />
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="detail-grid point-read-layout">
+              <div>
+                <h2>照片</h2>
+                <ReadOnlyPhotoGrid point={point} onPreview={setPreviewUrl} />
+              </div>
+              <div>
+                <TrendChart data={trend} metric="stress_amplitude_mpa" />
+              </div>
             </div>
-          </div>
-          <div>
-            <TrendChart data={trend} metric="stress_amplitude_mpa" />
-          </div>
-        </div>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>轮次</th>
-                <th>循环次数</th>
-                <th>最大应变</th>
-                <th>最小应变</th>
-                <th>应变幅</th>
-                <th>应力幅</th>
-                <th>相对初始</th>
-                <th>异常原因</th>
-                {editMode && <th>操作</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {(editMode ? measurements : trend).map((item) => {
-                if ('localKey' in item) {
-                  const max = numberOrNull(item.max_strain_ue);
-                  const min = numberOrNull(item.min_strain_ue);
-                  const amplitude = max == null || min == null ? null : (max - min) / 2;
-                  const stress = amplitude == null ? null : amplitude * 0.206;
-                  const percent = growthPercent(stress, initial);
-                  const level = riskLevel(percent, riskSettings);
-                  return (
-                    <tr key={item.localKey}>
-                      <td><input value={item.run_name} onChange={(event) => updateMeasurement(item.localKey, { run_name: event.target.value })} /></td>
-                      <td><input type="number" value={item.cycle_count} onChange={(event) => updateMeasurement(item.localKey, { cycle_count: event.target.value })} /></td>
-                      <td><input type="number" value={item.max_strain_ue} onChange={(event) => updateMeasurement(item.localKey, { max_strain_ue: event.target.value })} /></td>
-                      <td><input type="number" value={item.min_strain_ue} onChange={(event) => updateMeasurement(item.localKey, { min_strain_ue: event.target.value })} /></td>
-                      <td>{amplitude == null ? '-' : amplitude.toFixed(1)}</td>
-                      <td>{stress == null ? '-' : stress.toFixed(2)}</td>
-                      <td><span className={`risk-badge ${level}`}>{riskPercentText(percent)}</span></td>
-                      <td><input value={item.abnormal_reason} onChange={(event) => updateMeasurement(item.localKey, { abnormal_reason: event.target.value })} /></td>
-                      <td><button className="icon-button danger-text" onClick={() => removeMeasurement(item)} title="删除循环"><Trash2 size={16} /></button></td>
-                    </tr>
-                  );
-                }
-                const percent = growthPercent(item.stress_amplitude_mpa, initial);
-                const level = riskLevel(percent, riskSettings);
-                return (
-                  <tr key={item.run_id}>
-                    <td>{item.run_name}</td>
-                    <td>{item.cycle_count}</td>
-                    <td>{item.max_strain_ue ?? '-'}</td>
-                    <td>{item.min_strain_ue ?? '-'}</td>
-                    <td>{item.amplitude_strain_ue?.toFixed(1) ?? '-'}</td>
-                    <td>{item.stress_amplitude_mpa?.toFixed(2) ?? '-'}</td>
-                    <td><span className={`risk-badge ${level}`}>{riskPercentText(percent)}</span></td>
-                    <td>{item.abnormal_reason || '-'}</td>
-                  </tr>
-                );
-              })}
-              {editMode && <tr><td colSpan={9}><button className="button" onClick={addMeasurement}><Plus size={18} />新增循环</button></td></tr>}
-              {!(editMode ? measurements.length : trend.length) && <tr><td colSpan={editMode ? 9 : 8} className="empty">暂无测试记录</td></tr>}
-            </tbody>
-          </table>
-        </div>
+            <ReadOnlyTrendTable trend={trend} initial={initial} riskSettings={riskSettings} />
+          </>
+        )}
         {previewUrl && (
           <div className="modal-backdrop" onClick={() => setPreviewUrl('')}>
             <div className="modal image-preview-modal" onClick={(event) => event.stopPropagation()}>
@@ -620,6 +608,162 @@ function PointRiskModal({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function PhotoSection({
+  title,
+  mediaType,
+  media,
+  busy,
+  onUpload,
+  onPreview,
+  onDelete,
+}: {
+  title: string;
+  mediaType: MediaType;
+  media: Point['media_files'];
+  busy: boolean;
+  onUpload: (file?: File | null, mediaType?: MediaType) => void;
+  onPreview: (url: string) => void;
+  onDelete: (mediaId: number) => void;
+}) {
+  const items = media.filter((item) => item.type === mediaType);
+  return (
+    <div className="photo-upload-section">
+      <div className="section-head compact-head">
+        <h3>{title}</h3>
+        <label className="button file-button">
+          <Upload size={18} />
+          上传
+          <input type="file" accept="image/*" disabled={busy} onChange={(event) => onUpload(event.target.files?.[0], mediaType)} />
+        </label>
+      </div>
+      <div className="photo-grid">
+        {items.map((mediaItem) => (
+          <div className="photo-item" key={mediaItem.id}>
+            <button className="photo-button" onClick={() => onPreview(mediaUrl(mediaItem.id))}>
+              <img src={mediaUrl(mediaItem.id)} alt={mediaItem.filename} />
+              <span>{mediaTypeLabel(mediaItem.type)} · {mediaItem.filename}</span>
+            </button>
+            <button className="icon-button danger-text photo-delete" disabled={busy} onClick={() => onDelete(mediaItem.id)} title="删除图片"><Trash2 size={16} /></button>
+          </div>
+        ))}
+        {!items.length && <div className="empty">暂无{title}</div>}
+      </div>
+    </div>
+  );
+}
+
+function ReadOnlyPhotoGrid({ point, onPreview }: { point: Point; onPreview: (url: string) => void }) {
+  return (
+    <div className="photo-grid">
+      {point.media_files.map((media) => (
+        <button className="photo-button" onClick={() => onPreview(mediaUrl(media.id))} key={media.id}>
+          <img src={mediaUrl(media.id)} alt={media.filename} />
+          <span>{mediaTypeLabel(media.type)} · {media.filename}</span>
+        </button>
+      ))}
+      {!point.media_files.length && <div className="empty">暂无图片</div>}
+    </div>
+  );
+}
+
+function MeasurementTable({
+  measurements,
+  initial,
+  riskSettings,
+  updateMeasurement,
+  removeMeasurement,
+}: {
+  measurements: EditableMeasurementRow[];
+  initial: number | null;
+  riskSettings: RiskSettings;
+  updateMeasurement: (localKey: string, patch: Partial<EditableMeasurementRow>) => void;
+  removeMeasurement: (rowItem: EditableMeasurementRow) => void;
+}) {
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>轮次</th>
+            <th>循环次数</th>
+            <th>最大应变</th>
+            <th>最小应变</th>
+            <th>应变幅</th>
+            <th>应力幅</th>
+            <th>相对初始</th>
+            <th>异常原因</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {measurements.map((item) => {
+            const max = numberOrNull(item.max_strain_ue);
+            const min = numberOrNull(item.min_strain_ue);
+            const amplitude = max == null || min == null ? null : (max - min) / 2;
+            const stress = amplitude == null ? null : amplitude * 0.206;
+            const percent = growthPercent(stress, initial);
+            const level = riskLevel(percent, riskSettings);
+            return (
+              <tr key={item.localKey}>
+                <td><input value={item.run_name} onChange={(event) => updateMeasurement(item.localKey, { run_name: event.target.value })} /></td>
+                <td><input type="number" value={item.cycle_count} onChange={(event) => updateMeasurement(item.localKey, { cycle_count: event.target.value })} /></td>
+                <td><input type="number" value={item.max_strain_ue} onChange={(event) => updateMeasurement(item.localKey, { max_strain_ue: event.target.value })} /></td>
+                <td><input type="number" value={item.min_strain_ue} onChange={(event) => updateMeasurement(item.localKey, { min_strain_ue: event.target.value })} /></td>
+                <td>{amplitude == null ? '-' : amplitude.toFixed(1)}</td>
+                <td>{stress == null ? '-' : stress.toFixed(2)}</td>
+                <td><span className={`risk-badge ${level}`}>{riskPercentText(percent)}</span></td>
+                <td><input value={item.abnormal_reason} onChange={(event) => updateMeasurement(item.localKey, { abnormal_reason: event.target.value })} /></td>
+                <td><button className="icon-button danger-text" onClick={() => removeMeasurement(item)} title="删除循环"><Trash2 size={16} /></button></td>
+              </tr>
+            );
+          })}
+          {!measurements.length && <tr><td colSpan={9} className="empty">暂无测试记录</td></tr>}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ReadOnlyTrendTable({ trend, initial, riskSettings }: { trend: TrendItem[]; initial: number | null; riskSettings: RiskSettings }) {
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>轮次</th>
+            <th>循环次数</th>
+            <th>最大应变</th>
+            <th>最小应变</th>
+            <th>应变幅</th>
+            <th>应力幅</th>
+            <th>相对初始</th>
+            <th>异常原因</th>
+          </tr>
+        </thead>
+        <tbody>
+          {trend.map((item) => {
+            const percent = growthPercent(item.stress_amplitude_mpa, initial);
+            const level = riskLevel(percent, riskSettings);
+            return (
+              <tr key={item.run_id}>
+                <td>{item.run_name}</td>
+                <td>{item.cycle_count}</td>
+                <td>{item.max_strain_ue ?? '-'}</td>
+                <td>{item.min_strain_ue ?? '-'}</td>
+                <td>{item.amplitude_strain_ue?.toFixed(1) ?? '-'}</td>
+                <td>{item.stress_amplitude_mpa?.toFixed(2) ?? '-'}</td>
+                <td><span className={`risk-badge ${level}`}>{riskPercentText(percent)}</span></td>
+                <td>{item.abnormal_reason || '-'}</td>
+              </tr>
+            );
+          })}
+          {!trend.length && <tr><td colSpan={8} className="empty">暂无测试记录</td></tr>}
+        </tbody>
+      </table>
     </div>
   );
 }

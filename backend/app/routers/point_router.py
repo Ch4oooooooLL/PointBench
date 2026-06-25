@@ -3,7 +3,7 @@ import re
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -81,6 +81,7 @@ def update_point(point_id: int, payload: PointUpdate, db: Session = Depends(get_
 async def upload_point_media(
     point_id: int,
     file: UploadFile = File(...),
+    media_type: str = Form("overall"),
     db: Session = Depends(get_db),
 ) -> MediaFileOut:
     point = db.execute(
@@ -94,6 +95,8 @@ async def upload_point_media(
         raise HTTPException(status_code=400, detail="请选择图片文件")
     if file.content_type and not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="只支持上传图片文件")
+    if media_type not in {"overall", "local"}:
+        raise HTTPException(status_code=400, detail="图片类型只能是 overall 或 local")
 
     safe_name = _safe_filename(file.filename)
     target_dir = STORAGE_DIR / "projects" / point.project.project_id / "uploads" / str(point.id)
@@ -107,7 +110,7 @@ async def upload_point_media(
         project_db_id=point.project_db_id,
         point_db_id=point.id,
         photo_id=f"manual-{uuid.uuid4().hex[:12]}",
-        type="photo",
+        type=media_type,
         path=f"uploads/{point.id}/{safe_name}",
         stored_path=_relative_to_backend(target),
         filename=safe_name,

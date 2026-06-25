@@ -998,6 +998,27 @@ label {
   gap: 12px;
 }
 
+.project-detail-head {
+  align-items: center;
+}
+
+.project-detail-actions {
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.project-detail-actions .project-selector {
+  align-items: center;
+}
+
+.project-detail-actions .project-select {
+  min-width: 220px;
+}
+
+.project-edit-panel {
+  max-width: 980px;
+}
+
 .point-risk-row {
   width: 100%;
   border: 1px solid #d7e0e3;
@@ -1062,6 +1083,58 @@ label {
 
 .point-modal {
   width: min(1180px, 98vw);
+  display: block;
+}
+
+.point-modal > .section-head {
+  align-items: center;
+}
+
+.point-editor {
+  display: grid;
+  gap: 14px;
+}
+
+.point-edit-tabs {
+  margin-bottom: 0;
+}
+
+.point-editor-panel {
+  margin-bottom: 0;
+}
+
+.point-main-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(240px, 1fr));
+  gap: 12px;
+  max-width: 720px;
+}
+
+.photo-upload-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.photo-upload-section {
+  border: 1px solid #e4ebee;
+  border-radius: 8px;
+  padding: 12px;
+  min-width: 0;
+}
+
+.compact-head {
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.compact-head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.point-read-layout {
+  margin-bottom: 14px;
 }
 
 .project-select {
