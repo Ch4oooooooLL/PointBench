@@ -38,7 +38,7 @@ const features = [
   {
     icon: LayoutDashboard,
     title: '项目概览',
-    text: '汇总当前项目的点位数量、测试轮次、测量记录、异常记录、最新循环次数和应力幅趋势。',
+    text: '汇总当前项目的点位数量、测试轮次、测量记录、异常点位、最新循环次数和应力幅趋势。',
   },
   {
     icon: ListChecks,

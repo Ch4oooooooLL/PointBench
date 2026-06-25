@@ -37,7 +37,7 @@ export function AnalysisPage() {
         <div><span>点位数</span><strong>{summary.point_count}</strong></div>
         <div><span>测试轮次</span><strong>{summary.run_count}</strong></div>
         <div><span>测量记录</span><strong>{summary.measurement_count}</strong></div>
-        <div><span>异常记录</span><strong>{summary.abnormal_count}</strong></div>
+        <div><span>异常点位</span><strong>{summary.abnormal_count}</strong></div>
       </div>
       <DataPanel title="异常点列表" rows={abnormal} />
       <DataPanel title="应变幅最大的前 10 个点" rows={summary.max_amplitude_points} />

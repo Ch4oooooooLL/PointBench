@@ -190,7 +190,7 @@ def summary_for_project(db: Session, project_db_id: int) -> dict:
     )
     abnormal_count = (
         db.scalar(
-            select(func.count())
+            select(func.count(func.distinct(models.MeasurementRecord.point_db_id)))
             .select_from(models.MeasurementRecord)
             .join(models.TestPoint)
             .where(models.TestPoint.project_db_id == project_db_id, models.MeasurementRecord.is_abnormal.is_(True))

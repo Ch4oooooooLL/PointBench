@@ -150,7 +150,7 @@ export function ProjectOverviewPage() {
             <div><span>点位数量</span><strong>{summary.point_count}</strong></div>
             <div><span>测试轮次</span><strong>{summary.run_count}</strong></div>
             <div><span>测量记录</span><strong>{summary.measurement_count}</strong></div>
-            <div><span>异常记录</span><strong>{summary.abnormal_count}</strong></div>
+            <div><span>异常点位</span><strong>{summary.abnormal_count}</strong></div>
             <div><span>最新循环次数</span><strong>{latestCycle ?? '-'}</strong></div>
             <div><span>当前最大应力幅</span><strong>{topPoint?.stress_amplitude_mpa ? Number(topPoint.stress_amplitude_mpa).toFixed(1) : '-'}</strong></div>
           </div>
