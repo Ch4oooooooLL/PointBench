@@ -1003,16 +1003,22 @@ label {
 }
 
 .project-detail-actions {
-  align-items: center;
+  align-items: flex-end;
   justify-content: flex-end;
+  flex: 0 0 auto;
 }
 
 .project-detail-actions .project-selector {
-  align-items: center;
+  align-items: flex-end;
+  flex-wrap: nowrap;
 }
 
 .project-detail-actions .project-select {
   min-width: 220px;
+}
+
+.project-detail-actions .button {
+  min-height: 38px;
 }
 
 .project-edit-panel {
