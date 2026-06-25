@@ -36,6 +36,9 @@ REM ============================================================
 echo [Prep] Cleaning up old files...
 if exist "%INSTALLER_DIR%" rmdir /s /q "%INSTALLER_DIR%"
 if exist "%PIP_DIR%"       rmdir /s /q "%PIP_DIR%"
+if exist "%SCRIPT_DIR%node_modules" rmdir /s /q "%SCRIPT_DIR%node_modules"
+if exist "%SCRIPT_DIR%node-modules" rmdir /s /q "%SCRIPT_DIR%node-modules"
+if exist "%SCRIPT_DIR%package-lock.json" del "%SCRIPT_DIR%package-lock.json"
 if exist "%SCRIPT_DIR%node-modules.zip" del "%SCRIPT_DIR%node-modules.zip"
 
 mkdir "%INSTALLER_DIR%" 2>nul
@@ -52,10 +55,16 @@ echo.
 echo   URL: %PYTHON_URL%
 echo.
 
-curl -L --progress-bar -o "%INSTALLER_DIR%\python-installer.exe" "%PYTHON_URL%"
+curl --fail -L --retry 3 --progress-bar -o "%INSTALLER_DIR%\python-installer.exe" "%PYTHON_URL%"
 if %ERRORLEVEL% NEQ 0 (
     echo   [FAIL] Failed to download Python installer
     echo   Please check your internet connection
+    pause
+    exit /b 1
+)
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$p='%INSTALLER_DIR%\python-installer.exe'; if ((Get-Item $p).Length -lt 10485760) { throw 'Python installer is too small; download may be incomplete.' }"
+if %ERRORLEVEL% NEQ 0 (
+    echo   [FAIL] Python installer validation failed
     pause
     exit /b 1
 )
@@ -72,14 +81,30 @@ echo.
 echo   URL: %NODE_URL%
 echo.
 
-curl -L --progress-bar -o "%INSTALLER_DIR%\nodejs.zip" "%NODE_URL%"
+curl --fail -L --retry 3 --progress-bar -o "%INSTALLER_DIR%\nodejs.zip" "%NODE_URL%"
 if %ERRORLEVEL% NEQ 0 (
     echo   [FAIL] Failed to download Node.js
     echo   Please check your internet connection
     pause
     exit /b 1
 )
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Type -AssemblyName System.IO.Compression.FileSystem; $p='%INSTALLER_DIR%\nodejs.zip'; $z=[System.IO.Compression.ZipFile]::OpenRead($p); try { if (-not ($z.Entries | Where-Object { $_.FullName -like 'node-v*/node.exe' } | Select-Object -First 1)) { throw 'node.exe was not found in the Node.js zip.' }; Write-Host '  [OK] Node.js zip verified' } finally { $z.Dispose() }"
+if %ERRORLEVEL% NEQ 0 (
+    echo   [FAIL] Node.js zip validation failed
+    echo   Delete installers\nodejs.zip and run this script again.
+    pause
+    exit /b 1
+)
 echo   [OK] Node.js zip saved
+
+echo   Extracting Node.js for encrypted-file environments...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path '%INSTALLER_DIR%\nodejs.zip' -DestinationPath '%INSTALLER_DIR%' -Force"
+if %ERRORLEVEL% NEQ 0 (
+    echo   [FAIL] Failed to extract Node.js zip
+    pause
+    exit /b 1
+)
+echo   [OK] Node.js extracted under installers\
 echo.
 
 REM ============================================================
@@ -127,6 +152,20 @@ if %ERRORLEVEL% NEQ 0 (
     pause
     exit /b 1
 )
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Type -AssemblyName System.IO.Compression.FileSystem; $p='%SCRIPT_DIR%node-modules.zip'; $z=[System.IO.Compression.ZipFile]::OpenRead($p); try { if (-not ($z.Entries | Where-Object { $_.FullName -like 'node_modules/*' } | Select-Object -First 1)) { throw 'node_modules was not found in the archive.' }; Write-Host '  [OK] node-modules.zip verified' } finally { $z.Dispose() }"
+if %ERRORLEVEL% NEQ 0 (
+    echo   [FAIL] node-modules.zip validation failed
+    pause
+    exit /b 1
+)
+
+echo   Copying extracted node_modules for encrypted-file environments...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Copy-Item -LiteralPath '%PROJECT_DIR%\frontend\node_modules' -Destination '%SCRIPT_DIR%node_modules' -Recurse -Force; Copy-Item -LiteralPath '%PROJECT_DIR%\frontend\package-lock.json' -Destination '%SCRIPT_DIR%package-lock.json' -Force"
+if %ERRORLEVEL% NEQ 0 (
+    echo   [FAIL] Failed to copy extracted node_modules
+    pause
+    exit /b 1
+)
 
 echo   [OK] node_modules packed to node-modules.zip
 echo.
@@ -141,8 +180,11 @@ echo.
 echo   Offline package contents:
 echo     installers\python-installer.exe
 echo     installers\nodejs.zip
+echo     installers\node-v24.16.0-win-x64\  (preferred on encrypted PCs)
 echo     pip-packages\          (Python wheel files)
 echo     node-modules.zip       (frontend deps)
+echo     node_modules\          (preferred on encrypted PCs)
+echo     package-lock.json
 echo.
 echo   Next step:
 echo     1. Copy the entire offline-install\ folder to the target PC

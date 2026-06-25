@@ -36,6 +36,108 @@ function Add-ProcessPathEntry {
     }
 }
 
+function Copy-DirectoryWithProgress {
+    param(
+        [Parameter(Mandatory=$true)][string]$SourcePath,
+        [Parameter(Mandatory=$true)][string]$DestinationPath,
+        [Parameter(Mandatory=$true)][string]$Label
+    )
+
+    if (-not (Test-Path $SourcePath)) {
+        throw "$Label source not found: $SourcePath"
+    }
+
+    if (Test-Path $DestinationPath) {
+        Remove-Item $DestinationPath -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+
+    $files = @(Get-ChildItem -Path $SourcePath -Recurse -Force -File)
+    $dirs = @(Get-ChildItem -Path $SourcePath -Recurse -Force -Directory)
+    $total = $files.Count
+
+    Write-Info "Copying $Label ($total files)..."
+    foreach ($dir in $dirs) {
+        $relative = $dir.FullName.Substring($SourcePath.Length).TrimStart('\', '/')
+        New-Item -ItemType Directory -Path (Join-Path $DestinationPath $relative) -Force | Out-Null
+    }
+
+    for ($i = 0; $i -lt $total; $i++) {
+        $file = $files[$i]
+        $relative = $file.FullName.Substring($SourcePath.Length).TrimStart('\', '/')
+        $target = Join-Path $DestinationPath $relative
+        $parent = Split-Path -Parent $target
+        if (-not (Test-Path $parent)) {
+            New-Item -ItemType Directory -Path $parent -Force | Out-Null
+        }
+        Copy-Item -LiteralPath $file.FullName -Destination $target -Force
+
+        $done = $i + 1
+        if (($done % 500 -eq 0) -or ($done -eq $total)) {
+            Write-Info "[$Label] copied $done/$total"
+        }
+    }
+}
+
+function Find-ExtractedNodeSource {
+    $exact = Join-Path $InstallerDir 'node-v24.16.0-win-x64'
+    if (Test-Path (Join-Path $exact 'node.exe')) {
+        return $exact
+    }
+
+    $child = Get-ChildItem -Path $InstallerDir -Directory -Filter 'node-v*' -ErrorAction SilentlyContinue |
+        Where-Object { Test-Path (Join-Path $_.FullName 'node.exe') } |
+        Select-Object -First 1
+    if ($child) {
+        return $child.FullName
+    }
+
+    return $null
+}
+
+function Find-NodeModulesSource {
+    $candidates = @(
+        (Join-Path $ScriptDir 'node_modules'),
+        (Join-Path $ScriptDir 'node-modules\node_modules'),
+        (Join-Path $ScriptDir 'node-modules')
+    )
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate -PathType Container) {
+            return [System.IO.Path]::GetFullPath($candidate)
+        }
+    }
+
+    return $null
+}
+
+function Find-OfflinePackageJson {
+    $packageLocks = @(
+        (Join-Path $ScriptDir 'package-lock.json'),
+        (Join-Path $ScriptDir 'node-modules\package-lock.json')
+    )
+
+    foreach ($packageLock in $packageLocks) {
+        if (Test-Path $packageLock) {
+            return $packageLock
+        }
+    }
+
+    $packageJson = Get-ChildItem -Path $ScriptDir -File -Filter '*.json' -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($packageJson) {
+        return $packageJson.FullName
+    }
+
+    $nestedJson = Get-ChildItem -Path (Join-Path $ScriptDir 'node-modules') -File -Filter '*.json' -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($nestedJson) {
+        return $nestedJson.FullName
+    }
+
+    return $null
+}
+
 function Add-UserPathEntry {
     param([string]$PathEntry)
 
@@ -266,8 +368,15 @@ function Install-Node {
         Remove-Item $NodeDir -Recurse -Force
     }
 
-    $nodeZip = Join-Path $InstallerDir 'nodejs.zip'
-    Expand-ZipWithProgress -ZipPath $nodeZip -DestinationPath $NodeDir -Label 'Node.js'
+    $nodeSource = Find-ExtractedNodeSource
+    if ($nodeSource) {
+        Write-Info "Using extracted Node.js: $nodeSource"
+        Copy-DirectoryWithProgress -SourcePath $nodeSource -DestinationPath $NodeDir -Label 'Node.js'
+    } else {
+        $nodeZip = Join-Path $InstallerDir 'nodejs.zip'
+        Write-Info "Extracted Node.js folder not found; falling back to zip: $nodeZip"
+        Expand-ZipWithProgress -ZipPath $nodeZip -DestinationPath $NodeDir -Label 'Node.js'
+    }
 
     $nodeBin = $NodeDir
     if (-not (Test-Path (Join-Path $nodeBin 'node.exe'))) {
@@ -345,14 +454,24 @@ function Install-NodeDeps {
 
     $frontendDir = Join-Path $ProjectDir 'frontend'
     $nodeModules = Join-Path $frontendDir 'node_modules'
-    if (Test-Path $nodeModules) {
-        Write-Info 'Found existing frontend\node_modules, replacing...'
-        Remove-Item $nodeModules -Recurse -Force
+
+    $nodeModulesSource = Find-NodeModulesSource
+    if ($nodeModulesSource) {
+        Write-Info "Using extracted node_modules: $nodeModulesSource"
+        Copy-DirectoryWithProgress -SourcePath $nodeModulesSource -DestinationPath $nodeModules -Label 'node_modules'
+    } else {
+        $nodeModulesZip = Join-Path $ScriptDir 'node-modules.zip'
+        Write-Info "Extracted node_modules folder not found; falling back to zip: $nodeModulesZip"
+        Expand-ZipWithProgress -ZipPath $nodeModulesZip -DestinationPath $frontendDir -Label 'node_modules'
     }
 
-    $nodeModulesZip = Join-Path $ScriptDir 'node-modules.zip'
-    Expand-ZipWithProgress -ZipPath $nodeModulesZip -DestinationPath $frontendDir -Label 'node_modules'
-    Write-Info '[OK] node_modules extracted'
+    $offlineJson = Find-OfflinePackageJson
+    if ($offlineJson) {
+        Copy-Item -LiteralPath $offlineJson -Destination (Join-Path $frontendDir (Split-Path -Leaf $offlineJson)) -Force
+        Write-Info "Copied frontend json: $offlineJson"
+    }
+
+    Write-Info '[OK] node_modules installed'
     Write-Host ''
 }
 
@@ -426,14 +545,14 @@ function Assert-OfflinePackage {
     if (-not (Test-Path (Join-Path $InstallerDir 'python-installer.exe'))) {
         $missing.Add('installers\python-installer.exe')
     }
-    if (-not (Test-Path (Join-Path $InstallerDir 'nodejs.zip'))) {
-        $missing.Add('installers\nodejs.zip')
+    if (-not (Find-ExtractedNodeSource) -and -not (Test-Path (Join-Path $InstallerDir 'nodejs.zip'))) {
+        $missing.Add('installers\node-v24.16.0-win-x64\ or installers\nodejs.zip')
     }
     if (-not (Test-Path $PipDir)) {
         $missing.Add('pip-packages\')
     }
-    if (-not (Test-Path (Join-Path $ScriptDir 'node-modules.zip'))) {
-        $missing.Add('node-modules.zip')
+    if (-not (Find-NodeModulesSource) -and -not (Test-Path (Join-Path $ScriptDir 'node-modules.zip'))) {
+        $missing.Add('node_modules\ or node-modules.zip')
     }
 
     if ($missing.Count -gt 0) {
@@ -442,6 +561,20 @@ function Assert-OfflinePackage {
         }
         Write-Host ''
         throw "Offline package is incomplete. Run download-deps.bat on a PC with internet, then copy the entire offline-install folder."
+    }
+
+    $nodeSource = Find-ExtractedNodeSource
+    if ($nodeSource) {
+        Write-Info "[OK] Extracted Node.js present: $nodeSource"
+    } else {
+        Write-Info '[OK] Node.js zip present'
+    }
+
+    $nodeModulesSource = Find-NodeModulesSource
+    if ($nodeModulesSource) {
+        Write-Info "[OK] Extracted node_modules present: $nodeModulesSource"
+    } else {
+        Write-Info '[OK] node-modules.zip present'
     }
 
     Write-Info '[OK] All offline packages present'
