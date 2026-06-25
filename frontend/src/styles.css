@@ -1025,6 +1025,90 @@ label {
   white-space: pre-wrap;
 }
 
+.guide-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.guide-hero svg {
+  flex: 0 0 auto;
+  color: #0f766e;
+}
+
+.guide-hero p {
+  margin-bottom: 0;
+}
+
+.guide-steps {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.guide-step {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  background: #ffffff;
+  border: 1px solid #d7e0e3;
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.guide-step > span {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: #e6f4f1;
+  color: #0f766e;
+  font-weight: 700;
+}
+
+.guide-step h2,
+.guide-feature h3 {
+  margin: 0;
+}
+
+.guide-step p,
+.guide-feature p {
+  margin: 6px 0 0;
+}
+
+.guide-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.guide-feature {
+  border: 1px solid #e4ebee;
+  border-radius: 8px;
+  background: #f7fafb;
+  padding: 14px;
+}
+
+.guide-feature svg {
+  color: #0f766e;
+  margin-bottom: 10px;
+}
+
+.guide-note-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.guide-note-list > div {
+  border-left: 3px solid #0f766e;
+  background: #f7fafb;
+  padding: 10px 12px;
+  color: #42525a;
+}
+
 .settings-grid {
   display: grid;
   gap: 12px;

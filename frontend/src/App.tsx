@@ -12,6 +12,7 @@ import { ProjectDetailPage } from './pages/ProjectDetailPage';
 import { ProjectOverviewPage } from './pages/ProjectOverviewPage';
 import { ProjectRowsPage } from './pages/ProjectRowsPage';
 import { TestRunNewPage } from './pages/TestRunNewPage';
+import { UsageGuidePage } from './pages/UsageGuidePage';
 
 const router = createBrowserRouter([
   {
@@ -23,6 +24,7 @@ const router = createBrowserRouter([
       { path: 'crack-records', element: <CrackRecordsPage /> },
       { path: 'projects/new', element: <ProjectCreatePage /> },
       { path: 'import', element: <ImportPage /> },
+      { path: 'help', element: <UsageGuidePage /> },
       { path: 'projects/:projectId', element: <ProjectDetailPage /> },
       { path: 'projects/:projectId/test-runs/new', element: <TestRunNewPage /> },
       { path: 'projects/:projectId/analysis', element: <AnalysisPage /> },
