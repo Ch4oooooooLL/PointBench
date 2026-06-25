@@ -82,13 +82,6 @@ const features = [
   },
 ];
 
-const notes = [
-  '左侧导航和设置按钮固定在屏幕左侧，页面滚动时不会离开视口。',
-  '裂纹红圈只会显示在已有趋势数据的循环坐标上；如果某次循环没有应力幅数据，裂纹仍会保存在裂纹记录页。',
-  '图片上传支持普通文件选择，也支持在裂纹记录弹窗中聚焦上传区域后粘贴截图。',
-  '导出 JSON 和 CSV 位于项目概览的操作区，用于将当前项目数据带出系统。',
-];
-
 export function UsageGuidePage() {
   return (
     <section>
@@ -140,14 +133,6 @@ export function UsageGuidePage() {
         </div>
       </div>
 
-      <div className="panel">
-        <h2>注意事项</h2>
-        <div className="guide-note-list">
-          {notes.map((note) => (
-            <div key={note}>{note}</div>
-          ))}
-        </div>
-      </div>
     </section>
   );
 }

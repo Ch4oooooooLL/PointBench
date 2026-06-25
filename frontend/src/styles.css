@@ -1096,19 +1096,6 @@ label {
   margin-bottom: 10px;
 }
 
-.guide-note-list {
-  display: grid;
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.guide-note-list > div {
-  border-left: 3px solid #0f766e;
-  background: #f7fafb;
-  padding: 10px 12px;
-  color: #42525a;
-}
-
 .settings-grid {
   display: grid;
   gap: 12px;
