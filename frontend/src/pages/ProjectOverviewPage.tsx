@@ -182,7 +182,7 @@ export function ProjectOverviewPage() {
             <div className="section-head">
               <div>
                 <h2>全点位应力幅趋势</h2>
-                <p>每个点位一条折线；点击图表可放大，放大后点击标注突出单条折线。</p>
+                <p>每个点位一条折线；红圈表示该点位在对应循环次数记录了裂纹，点击红圈可查看详情。</p>
               </div>
             </div>
             <MultiPointTrendChart
