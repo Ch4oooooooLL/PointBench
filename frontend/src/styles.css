@@ -231,6 +231,22 @@ th {
   margin-bottom: 18px;
 }
 
+.upload-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.upload-grid .upload-box {
+  margin-bottom: 0;
+}
+
+.upload-box span {
+  color: #667980;
+  font-size: 13px;
+}
+
 .upload-box input {
   display: none;
 }

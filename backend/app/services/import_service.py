@@ -17,6 +17,10 @@ from app.utils.hash_utils import file_sha256
 from app.utils.zip_utils import is_safe_zip_path, normalize_zip_name, safe_extract, validate_zip_members
 
 
+ENCRYPTED_FILE_HINT = "如果文件在公司内网文档加密目录中，请先手动打开或解压为明文文件夹后再导入，或联系 IT 将本系统加入解密白名单。"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
 def _temp_id() -> str:
     return f"TMP-{uuid.uuid4().hex[:12]}"
 
@@ -36,6 +40,46 @@ def _load_manifest(path: Path) -> dict:
 
 def _duplicates(values: list[str]) -> list[str]:
     return sorted([value for value, count in Counter(values).items() if value and count > 1])
+
+
+def _relative_to_project(path: Path) -> str:
+    return str(path.relative_to(PROJECT_ROOT))
+
+
+def _unsafe_folder_path_error(path: str) -> HTTPException:
+    return HTTPException(status_code=400, detail=f"文件夹内路径不安全: {path}")
+
+
+def _normalize_folder_upload_paths(uploads: list[UploadFile]) -> list[tuple[UploadFile, str]]:
+    raw_paths = [normalize_zip_name(upload.filename or "") for upload in uploads]
+    if not raw_paths:
+        raise HTTPException(status_code=400, detail="请选择包含 manifest.json 的文件夹")
+    for raw_path in raw_paths:
+        if not is_safe_zip_path(raw_path):
+            raise _unsafe_folder_path_error(raw_path)
+
+    paths = raw_paths
+    if "manifest.json" not in paths:
+        first_parts = [PurePosixPath(path).parts for path in paths]
+        common_root = first_parts[0][0] if first_parts and len(first_parts[0]) > 1 else None
+        if common_root and all(len(parts) > 1 and parts[0] == common_root for parts in first_parts):
+            stripped = [PurePosixPath(*parts[1:]).as_posix() for parts in first_parts]
+            if "manifest.json" in stripped:
+                paths = stripped
+
+    normalized: list[tuple[UploadFile, str]] = []
+    for upload, path in zip(uploads, paths, strict=True):
+        if not is_safe_zip_path(path):
+            raise _unsafe_folder_path_error(path)
+        normalized.append((upload, path))
+    return normalized
+
+
+async def _write_upload(upload: UploadFile, target: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("wb") as output:
+        while chunk := await upload.read(1024 * 1024):
+            output.write(chunk)
 
 
 def _validate_manifest_business(manifest: ManifestIn, zip_names: set[str], db: Session) -> tuple[list[str], list[str], list[str], list[str], list[str]]:
@@ -95,38 +139,28 @@ def _validate_manifest_business(manifest: ManifestIn, zip_names: set[str], db: S
     return missing_files, duplicate_point_ids, duplicate_channel_names, warnings, errors
 
 
-async def create_preview(db: Session, upload: UploadFile) -> ImportPreview:
-    if not upload.filename or not upload.filename.lower().endswith(".zip"):
-        raise HTTPException(status_code=400, detail="请上传 zip 文件")
-
-    temporary_import_id = _temp_id()
-    temp_dir = _preview_path(temporary_import_id)
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    zip_path = temp_dir / upload.filename
-    with zip_path.open("wb") as output:
-        while chunk := await upload.read(1024 * 1024):
-            output.write(chunk)
-
-    errors: list[str] = []
-    warnings: list[str] = []
+def _build_preview_from_extract(
+    db: Session,
+    temporary_import_id: str,
+    temp_dir: Path,
+    extract_dir: Path,
+    source_name: str,
+    zip_path: Path | None,
+    errors: list[str] | None = None,
+    warnings: list[str] | None = None,
+) -> ImportPreview:
+    errors = errors or []
+    warnings = warnings or []
     manifest_data: dict | None = None
     manifest: ManifestIn | None = None
-    zip_names: set[str] = set()
+    zip_names = {path.relative_to(extract_dir).as_posix() for path in extract_dir.rglob("*") if path.is_file()}
 
-    try:
-        with ZipFile(zip_path) as zip_file:
-            errors.extend(validate_zip_members(zip_file))
-            zip_names = {normalize_zip_name(name) for name in zip_file.namelist() if not name.endswith("/")}
-            if "manifest.json" not in zip_names:
-                errors.append("zip 中缺少 manifest.json")
-            if not errors:
-                extract_dir = temp_dir / "extract"
-                safe_extract(zip_file, extract_dir)
-                manifest_data = _load_manifest(extract_dir / "manifest.json")
-    except BadZipFile as exc:
-        raise HTTPException(status_code=400, detail="zip 文件不可读取或已损坏") from exc
+    if "manifest.json" not in zip_names:
+        errors.append("导入内容根目录缺少 manifest.json。请选择已解压后的非嵌套文件夹，或上传原始 zip 数据包。")
 
-    validation_errors: list[str] = []
+    if not errors:
+        manifest_data = _load_manifest(extract_dir / "manifest.json")
+
     if manifest_data is not None:
         try:
             manifest = ManifestIn.model_validate(manifest_data)
@@ -144,12 +178,13 @@ async def create_preview(db: Session, upload: UploadFile) -> ImportPreview:
         warnings.extend(business_warnings)
         errors.extend(business_errors)
 
+    stored_path = zip_path if zip_path else extract_dir
     job = models.ImportJob(
         export_id=manifest.export_info.export_id if manifest else None,
         project_id=manifest.project.project_id if manifest else None,
-        zip_filename=upload.filename,
-        zip_stored_path=str(zip_path.relative_to(Path(__file__).resolve().parents[2])),
-        temp_dir=str(temp_dir.relative_to(Path(__file__).resolve().parents[2])),
+        zip_filename=source_name,
+        zip_stored_path=_relative_to_project(stored_path),
+        temp_dir=_relative_to_project(temp_dir),
         status="previewed" if not errors else "preview_failed",
         message="; ".join(errors or warnings),
     )
@@ -172,6 +207,57 @@ async def create_preview(db: Session, upload: UploadFile) -> ImportPreview:
     )
 
 
+async def create_preview(db: Session, upload: UploadFile) -> ImportPreview:
+    if not upload.filename or not upload.filename.lower().endswith(".zip"):
+        raise HTTPException(status_code=400, detail="请上传 zip 文件")
+
+    temporary_import_id = _temp_id()
+    temp_dir = _preview_path(temporary_import_id)
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    zip_path = temp_dir / upload.filename
+    await _write_upload(upload, zip_path)
+
+    errors: list[str] = []
+    try:
+        with ZipFile(zip_path) as zip_file:
+            errors.extend(validate_zip_members(zip_file))
+            zip_names = {normalize_zip_name(name) for name in zip_file.namelist() if not name.endswith("/")}
+            if "manifest.json" not in zip_names:
+                errors.append("zip 中缺少 manifest.json")
+            if not errors:
+                extract_dir = temp_dir / "extract"
+                safe_extract(zip_file, extract_dir)
+            else:
+                extract_dir = temp_dir / "extract"
+    except BadZipFile as exc:
+        raise HTTPException(status_code=400, detail=f"zip 文件不可读取或已损坏。{ENCRYPTED_FILE_HINT}") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return _build_preview_from_extract(db, temporary_import_id, temp_dir, extract_dir, upload.filename, zip_path, errors=errors)
+
+
+async def create_folder_preview(db: Session, uploads: list[UploadFile]) -> ImportPreview:
+    if not uploads:
+        raise HTTPException(status_code=400, detail="请选择包含 manifest.json 的文件夹")
+
+    temporary_import_id = _temp_id()
+    temp_dir = _preview_path(temporary_import_id)
+    extract_dir = temp_dir / "extract"
+    extract_dir.mkdir(parents=True, exist_ok=True)
+
+    normalized_uploads = _normalize_folder_upload_paths(uploads)
+    source_parts = PurePosixPath(normalize_zip_name(uploads[0].filename or "folder")).parts
+    source_name = source_parts[0] if source_parts else "folder"
+    for upload, relative_path in normalized_uploads:
+        target = (extract_dir / relative_path).resolve()
+        if extract_dir.resolve() not in target.parents and target != extract_dir.resolve():
+            raise _unsafe_folder_path_error(relative_path)
+        await _write_upload(upload, target)
+
+    return _build_preview_from_extract(db, temporary_import_id, temp_dir, extract_dir, f"{source_name} (folder)", None)
+
+
 def _copy_member(source_root: Path, relative_path: str, project_root: Path) -> str:
     normalized = normalize_zip_name(relative_path)
     source = (source_root / normalized).resolve()
@@ -182,7 +268,7 @@ def _copy_member(source_root: Path, relative_path: str, project_root: Path) -> s
         raise HTTPException(status_code=400, detail=f"目标路径越界: {relative_path}")
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, target)
-    return str(target.relative_to(Path(__file__).resolve().parents[2]))
+    return _relative_to_project(target)
 
 
 def confirm_import(db: Session, temporary_import_id: str) -> models.Project:
@@ -207,7 +293,7 @@ def confirm_import(db: Session, temporary_import_id: str) -> models.Project:
         imports_target = STORAGE_DIR / "imports" / f"{temporary_import_id}_{zip_files[0].name}"
         shutil.copy2(zip_files[0], imports_target)
     else:
-        imports_target = STORAGE_DIR / "imports" / f"{temporary_import_id}.zip"
+        imports_target = temp_dir
 
     project = models.Project(
         project_id=manifest.project.project_id,
@@ -252,7 +338,7 @@ def confirm_import(db: Session, temporary_import_id: str) -> models.Project:
 
         for photo in point_in.photos:
             stored_path = _copy_member(extract_dir, photo.path, project_root)
-            stored_file = Path(__file__).resolve().parents[2] / stored_path
+            stored_file = PROJECT_ROOT / stored_path
             sha256 = photo.sha256 or file_sha256(stored_file)
             db.add(
                 models.MediaFile(
@@ -277,11 +363,11 @@ def confirm_import(db: Session, temporary_import_id: str) -> models.Project:
                 shutil.rmtree(target)
             shutil.copytree(source, target)
 
-    job = db.scalar(select(models.ImportJob).where(models.ImportJob.temp_dir == str(temp_dir.relative_to(Path(__file__).resolve().parents[2]))))
+    job = db.scalar(select(models.ImportJob).where(models.ImportJob.temp_dir == _relative_to_project(temp_dir)))
     if job:
         job.status = "imported"
         job.message = f"已导入项目 {project.project_id}"
-        job.zip_stored_path = str(imports_target.relative_to(Path(__file__).resolve().parents[2]))
+        job.zip_stored_path = _relative_to_project(imports_target)
 
     db.commit()
     db.refresh(project)

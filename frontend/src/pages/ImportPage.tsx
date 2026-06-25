@@ -1,4 +1,4 @@
-import { CheckCircle2, FileUp } from 'lucide-react';
+import { CheckCircle2, FileArchive, FolderOpen } from 'lucide-react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
@@ -16,10 +16,30 @@ export function ImportPage() {
     if (!file) return;
     setBusy(true);
     setError('');
+    setPreview(null);
     const form = new FormData();
     form.append('file', file);
     try {
       setPreview(await api.post<ImportPreview>('/api/import/preview', form));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function uploadFolder(fileList?: FileList | null) {
+    const files = Array.from(fileList ?? []);
+    if (!files.length) return;
+    setBusy(true);
+    setError('');
+    setPreview(null);
+    const form = new FormData();
+    for (const file of files) {
+      form.append('files', file, file.webkitRelativePath || file.name);
+    }
+    try {
+      setPreview(await api.post<ImportPreview>('/api/import/preview-folder', form));
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -49,14 +69,31 @@ export function ImportPage() {
       <div className="page-head">
         <div>
           <h1>导入项目</h1>
-          <p>上传 Android App 导出的 zip 数据包，先预览校验，再确认写入数据库。</p>
+          <p>上传 Android App 导出的 zip 数据包，或选择手动解压后的非嵌套文件夹，先预览校验，再确认写入数据库。</p>
         </div>
       </div>
-      <label className="upload-box">
-        <FileUp size={28} />
-        <strong>{busy ? '处理中...' : '选择 zip 文件'}</strong>
-        <input type="file" accept=".zip" disabled={busy} onChange={(event) => upload(event.target.files?.[0])} />
-      </label>
+      <div className="alert warn">
+        公司内网文档加密可能导致浏览器上传到密文字节，从而出现 zip 不可读取。遇到这种情况，请先手动打开或解压为明文文件夹，再使用“选择解压文件夹”导入。
+      </div>
+      <div className="upload-grid">
+        <label className="upload-box">
+          <FileArchive size={28} />
+          <strong>{busy ? '处理中...' : '选择 zip 文件'}</strong>
+          <input type="file" accept=".zip" disabled={busy} onChange={(event) => upload(event.target.files?.[0])} />
+        </label>
+        <label className="upload-box">
+          <FolderOpen size={28} />
+          <strong>{busy ? '处理中...' : '选择解压文件夹'}</strong>
+          <span>文件夹根目录需包含 manifest.json</span>
+          <input
+            type="file"
+            multiple
+            disabled={busy}
+            onChange={(event) => uploadFolder(event.target.files)}
+            {...directoryInputProps}
+          />
+        </label>
+      </div>
       {error && <div className="alert danger">{error}</div>}
       {preview && (
         <div className="panel">
@@ -86,6 +123,11 @@ export function ImportPage() {
     </section>
   );
 }
+
+const directoryInputProps = {
+  directory: '',
+  webkitdirectory: '',
+} as Record<string, string>;
 
 function IssueList({ title, items, danger }: { title: string; items: string[]; danger?: boolean }) {
   if (!items.length) return null;
