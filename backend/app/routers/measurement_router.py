@@ -9,7 +9,16 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.database import get_db
-from app.schemas import MeasurementBatchCreate, MeasurementCreate, MeasurementOut, MeasurementUpdate, TestRunOut
+from app.schemas import (
+    MeasurementBatchCreate,
+    MeasurementCreate,
+    MeasurementOut,
+    MeasurementUpdate,
+    PointMeasurementRowCreate,
+    PointMeasurementRowOut,
+    PointMeasurementRowUpdate,
+    TestRunOut,
+)
 from app.services.analysis_service import compute_measurement_fields, refresh_point_abnormal_flags
 
 
@@ -117,6 +126,24 @@ def _create_or_update_measurement(
     compute_measurement_fields(record)
     db.add(record)
     return record
+
+
+def _measurement_row_out(record: models.MeasurementRecord) -> PointMeasurementRowOut:
+    data = MeasurementOut.model_validate(record).model_dump()
+    data["run_name"] = record.run.run_name
+    data["cycle_count"] = record.run.cycle_count
+    return PointMeasurementRowOut.model_validate(data)
+
+
+def _measurement_payload_from_row(payload: PointMeasurementRowCreate | PointMeasurementRowUpdate) -> MeasurementUpdate:
+    data = payload.model_dump(exclude_unset=True)
+    return MeasurementUpdate(
+        **{
+            key: data[key]
+            for key in ["max_strain_ue", "min_strain_ue", "is_abnormal", "abnormal_reason", "remark"]
+            if key in data
+        }
+    )
 
 
 @router.get("/api/test-runs/{run_id}", response_model=TestRunOut)
@@ -257,6 +284,82 @@ def list_point_measurements(point_id: int, db: Session = Depends(get_db)) -> lis
         .order_by(models.TestRun.cycle_count, models.TestRun.id)
     ).scalars()
     return [MeasurementOut.model_validate(record) for record in records]
+
+
+@router.get("/api/points/{point_id}/measurement-rows", response_model=list[PointMeasurementRowOut])
+def list_point_measurement_rows(point_id: int, db: Session = Depends(get_db)) -> list[PointMeasurementRowOut]:
+    records = db.execute(
+        select(models.MeasurementRecord)
+        .join(models.TestRun)
+        .where(models.MeasurementRecord.point_db_id == point_id)
+        .order_by(models.TestRun.cycle_count, models.TestRun.id)
+    ).scalars()
+    return [_measurement_row_out(record) for record in records]
+
+
+@router.post("/api/points/{point_id}/measurement-rows", response_model=PointMeasurementRowOut)
+def create_point_measurement_row(
+    point_id: int,
+    payload: PointMeasurementRowCreate,
+    db: Session = Depends(get_db),
+) -> PointMeasurementRowOut:
+    point = db.get(models.TestPoint, point_id)
+    if not point:
+        raise HTTPException(status_code=404, detail="点位不存在")
+    run = db.scalar(
+        select(models.TestRun).where(
+            models.TestRun.project_db_id == point.project_db_id,
+            models.TestRun.cycle_count == payload.cycle_count,
+        )
+    )
+    if not run:
+        run = models.TestRun(
+            project_db_id=point.project_db_id,
+            run_name=(payload.run_name or f"R{payload.cycle_count}").strip() or f"R{payload.cycle_count}",
+            cycle_count=payload.cycle_count,
+        )
+        db.add(run)
+        db.flush()
+    elif payload.run_name:
+        run.run_name = payload.run_name.strip() or run.run_name
+    record = db.scalar(
+        select(models.MeasurementRecord).where(
+            models.MeasurementRecord.run_id == run.id,
+            models.MeasurementRecord.point_db_id == point.id,
+        )
+    )
+    if not record:
+        record = models.MeasurementRecord(run_id=run.id, point_db_id=point.id)
+    apply_measurement_payload(record, _measurement_payload_from_row(payload))
+    db.add(record)
+    db.flush()
+    refresh_point_abnormal_flags(db, point.id)
+    db.commit()
+    db.refresh(record)
+    return _measurement_row_out(record)
+
+
+@router.put("/api/points/{point_id}/measurement-rows/{measurement_id}", response_model=PointMeasurementRowOut)
+def update_point_measurement_row(
+    point_id: int,
+    measurement_id: int,
+    payload: PointMeasurementRowUpdate,
+    db: Session = Depends(get_db),
+) -> PointMeasurementRowOut:
+    record = db.get(models.MeasurementRecord, measurement_id)
+    if not record or record.point_db_id != point_id:
+        raise HTTPException(status_code=404, detail="测量记录不存在")
+    data = payload.model_dump(exclude_unset=True)
+    if "cycle_count" in data and data["cycle_count"] is not None:
+        record.run.cycle_count = data["cycle_count"]
+    if "run_name" in data and data["run_name"] is not None:
+        record.run.run_name = data["run_name"].strip() or record.run.run_name
+    apply_measurement_payload(record, _measurement_payload_from_row(payload))
+    db.flush()
+    refresh_point_abnormal_flags(db, record.point_db_id)
+    db.commit()
+    db.refresh(record)
+    return _measurement_row_out(record)
 
 
 @router.put("/api/measurements/{measurement_id}", response_model=MeasurementOut)

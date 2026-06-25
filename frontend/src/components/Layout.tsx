@@ -1,4 +1,4 @@
-import { ActivitySquare, FileUp, LayoutDashboard, ListChecks, Settings } from 'lucide-react';
+import { ActivitySquare, FilePlus2, FileUp, LayoutDashboard, ListChecks, Settings } from 'lucide-react';
 import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAppContext } from '../context/AppContext';
@@ -25,6 +25,10 @@ export function Layout() {
             <NavLink to="/project-detail">
               <ListChecks size={18} />
               项目详情
+            </NavLink>
+            <NavLink to="/projects/new">
+              <FilePlus2 size={18} />
+              创建项目
             </NavLink>
             <NavLink to="/import">
               <FileUp size={18} />

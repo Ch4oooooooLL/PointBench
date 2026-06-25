@@ -8,13 +8,59 @@ import { ProjectSelector } from '../components/ProjectSelector';
 import { useAppContext } from '../context/AppContext';
 import { Point, TrendItem } from '../types';
 
+type SummaryValue = string | number | null | undefined;
+
+interface SummaryPoint {
+  point_db_id: number;
+  point_id: string;
+  point_name: string;
+  point_type?: string | null;
+  component?: string | null;
+  side?: string | null;
+  position_description?: string | null;
+  direction?: string | null;
+  bridge_type?: string | null;
+  resistance_ohm?: number | null;
+  install_status?: string | null;
+  check_status?: string | null;
+  remark?: string | null;
+  channel_name?: string | null;
+  channel_device?: string | null;
+  channel_unit?: string | null;
+  sample_rate_hz?: number | null;
+  cae_point_id?: string | null;
+  cae_component?: string | null;
+  cae_result_type?: string | null;
+  danger_level?: string | null;
+  photo_count?: number | null;
+  tags?: string | null;
+  custom_fields?: string | null;
+  metadata_created_time?: string | null;
+  metadata_updated_time?: string | null;
+  run_id?: number | null;
+  run_name?: string | null;
+  cycle_count?: number | null;
+  amplitude_strain_ue?: number | null;
+  stress_amplitude_mpa?: number | null;
+  previous_run_name?: string | null;
+  latest_run_name?: string | null;
+  previous_cycle_count?: number | null;
+  latest_cycle_count?: number | null;
+  previous_amplitude_strain_ue?: number | null;
+  latest_amplitude_strain_ue?: number | null;
+  previous_stress_amplitude_mpa?: number | null;
+  latest_stress_amplitude_mpa?: number | null;
+  growth_ratio?: number | null;
+  [key: string]: SummaryValue;
+}
+
 interface Summary {
   point_count: number;
   run_count: number;
   measurement_count: number;
   abnormal_count: number;
-  max_amplitude_points: Array<Record<string, string | number | null>>;
-  fastest_growth_points: Array<Record<string, string | number | null>>;
+  max_amplitude_points: SummaryPoint[];
+  fastest_growth_points: SummaryPoint[];
 }
 
 export function ProjectOverviewPage() {
@@ -137,8 +183,8 @@ export function ProjectOverviewPage() {
           </div>
 
           <div className="overview-columns">
-            <DataPanel title="应力幅最大的点位" rows={summary.max_amplitude_points} />
-            <DataPanel title="增长最快的点位" rows={summary.fastest_growth_points} />
+            <DataPanel title="应力幅最大的点位" rows={summary.max_amplitude_points} mode="amplitude" />
+            <DataPanel title="增长最快的点位" rows={summary.fastest_growth_points} mode="growth" />
           </div>
         </>
       )}
@@ -146,20 +192,117 @@ export function ProjectOverviewPage() {
   );
 }
 
-function DataPanel({ title, rows }: { title: string; rows: Array<Record<string, string | number | null>> }) {
-  const columns = rows[0] ? Object.keys(rows[0]) : [];
+function DataPanel({ title, rows, mode }: { title: string; rows: SummaryPoint[]; mode: 'amplitude' | 'growth' }) {
   return (
     <div className="panel">
       <h2>{title}</h2>
       <div className="compact-list">
         {rows.slice(0, 5).map((row, index) => (
-          <div key={index}>
-            <strong>{row.point_id || '-'}</strong>
-            <span>{columns.map((column) => `${column}: ${row[column] ?? '-'}`).join(' · ')}</span>
-          </div>
+          <SummaryPointCard key={`${row.point_db_id}-${index}`} row={row} mode={mode} />
         ))}
         {!rows.length && <p className="empty">暂无数据</p>}
       </div>
     </div>
   );
+}
+
+function SummaryPointCard({ row, mode }: { row: SummaryPoint; mode: 'amplitude' | 'growth' }) {
+  const metricItems =
+    mode === 'amplitude'
+      ? [
+          ['应力幅', formatNumber(row.stress_amplitude_mpa, ' MPa')],
+          ['应变幅', formatNumber(row.amplitude_strain_ue, ' ue')],
+          ['循环次数', formatInteger(row.cycle_count)],
+          ['轮次', row.run_name],
+        ]
+      : [
+          ['增长率', formatPercent(row.growth_ratio)],
+          ['最新应力幅', formatNumber(row.latest_stress_amplitude_mpa, ' MPa')],
+          ['上一轮应力幅', formatNumber(row.previous_stress_amplitude_mpa, ' MPa')],
+          ['循环变化', formatCycleRange(row.previous_cycle_count, row.latest_cycle_count)],
+        ];
+
+  const metadataItems = [
+    ['部件', row.component],
+    ['位置', joinText([row.side, row.position_description])],
+    ['方向', row.direction],
+    ['点位类型', row.point_type],
+    ['桥路', row.bridge_type],
+    ['电阻', formatNumber(row.resistance_ohm, ' Ω')],
+    ['通道', joinText([row.channel_device, row.channel_name])],
+    ['采样率', formatNumber(row.sample_rate_hz, ' Hz')],
+    ['CAE', joinText([row.cae_point_id, row.cae_component, row.cae_result_type])],
+    ['危险等级', row.danger_level],
+    ['状态', joinText([row.install_status, row.check_status])],
+    ['照片', row.photo_count === null || row.photo_count === undefined ? null : `${row.photo_count} 张`],
+    ['标签', row.tags],
+    ['自定义', row.custom_fields],
+    ['备注', row.remark],
+  ].filter(([, value]) => hasValue(value));
+
+  return (
+    <div className="summary-point-card">
+      <div className="summary-point-title">
+        <div>
+          <Link to={`/points/${row.point_db_id}`}>
+            <strong>{row.point_id || '-'}</strong>
+          </Link>
+          <span>{row.point_name || '-'}</span>
+        </div>
+        {hasValue(row.danger_level) && <em>{row.danger_level}</em>}
+      </div>
+      <div className="summary-metrics">
+        {metricItems.map(([label, value]) => (
+          <div key={label}>
+            <span>{label}</span>
+            <strong>{hasValue(value) ? value : '-'}</strong>
+          </div>
+        ))}
+      </div>
+      <div className="summary-meta">
+        {metadataItems.slice(0, 8).map(([label, value]) => (
+          <span key={label}>
+            <b>{label}</b>{value}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function hasValue(value: SummaryValue): boolean {
+  return value !== null && value !== undefined && value !== '';
+}
+
+function formatNumber(value: SummaryValue, suffix = ''): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  const numeric = Number(value);
+  if (Number.isNaN(numeric)) return String(value);
+  return `${numeric.toFixed(1)}${suffix}`;
+}
+
+function formatInteger(value: SummaryValue): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  const numeric = Number(value);
+  if (Number.isNaN(numeric)) return String(value);
+  return String(Math.round(numeric));
+}
+
+function formatPercent(value: SummaryValue): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  const numeric = Number(value);
+  if (Number.isNaN(numeric)) return String(value);
+  return `${(numeric * 100).toFixed(1)}%`;
+}
+
+function formatCycleRange(previous: SummaryValue, latest: SummaryValue): string | null {
+  const previousText = formatInteger(previous);
+  const latestText = formatInteger(latest);
+  if (!previousText && !latestText) return null;
+  return `${previousText || '-'} -> ${latestText || '-'}`;
+}
+
+function joinText(values: SummaryValue[]): string | null {
+  const parts = values.filter(hasValue).map(String);
+  return parts.length ? parts.join(' / ') : null;
 }

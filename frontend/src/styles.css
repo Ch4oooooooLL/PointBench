@@ -93,6 +93,29 @@ textarea {
   min-width: 0;
 }
 
+.mobile-block {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #eef3f5;
+  color: #172026;
+}
+
+.mobile-block > div {
+  width: min(520px, 100%);
+  background: #ffffff;
+  border: 1px solid #d7e0e3;
+  border-radius: 8px;
+  padding: 28px;
+  text-align: center;
+  box-shadow: 0 12px 36px rgba(15, 23, 27, 0.12);
+}
+
+.mobile-block p {
+  margin-bottom: 0;
+}
+
 .page-head,
 .section-head {
   display: flex;
@@ -374,6 +397,87 @@ th {
   font-size: 12px;
 }
 
+.summary-point-card {
+  display: grid;
+  gap: 10px;
+}
+
+.summary-point-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.summary-point-title strong {
+  color: #0f766e;
+  font-size: 16px;
+}
+
+.summary-point-title em {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #fff1c2;
+  color: #7a4a00;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.summary-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.summary-metrics > div {
+  min-width: 0;
+  border: 1px solid #e4ebee;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 8px;
+}
+
+.summary-metrics span,
+.summary-metrics strong {
+  display: block;
+}
+
+.summary-metrics span {
+  color: #6d7d84;
+  font-size: 12px;
+}
+
+.summary-metrics strong {
+  margin-top: 3px;
+  font-size: 15px;
+  color: #172026;
+  overflow-wrap: anywhere;
+}
+
+.summary-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.summary-meta span {
+  width: auto;
+  max-width: 100%;
+  margin: 0;
+  border-radius: 999px;
+  background: #edf1f2;
+  color: #42525a;
+  padding: 4px 8px;
+  overflow-wrap: anywhere;
+}
+
+.summary-meta b {
+  margin-right: 4px;
+  color: #172026;
+  font-weight: 600;
+}
+
 .pill {
   border-radius: 999px;
   display: inline-flex;
@@ -531,6 +635,19 @@ label {
   gap: 12px;
 }
 
+.photo-item {
+  position: relative;
+}
+
+.photo-button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  cursor: zoom-in;
+}
+
 .photo-grid img {
   width: 100%;
   aspect-ratio: 4 / 3;
@@ -544,6 +661,40 @@ label {
   color: #5f6f76;
   font-size: 12px;
   margin-top: 6px;
+}
+
+.photo-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.image-preview-modal {
+  width: min(980px, 96vw);
+  display: block;
+}
+
+.image-preview-modal img {
+  width: 100%;
+  max-height: 76vh;
+  object-fit: contain;
+  border-radius: 8px;
+  background: #0f171b;
+}
+
+.project-edit-panel {
+  margin-top: -4px;
+}
+
+.point-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.point-edit-grid .wide {
+  grid-column: 1 / -1;
 }
 
 .chart {

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app import models
 from app.database import STORAGE_DIR, get_db
-from app.schemas import ProjectOut, ProjectUpdate, TestRunCreate, TestRunOut
+from app.schemas import PointCreate, PointOut, ProjectCreate, ProjectOut, ProjectUpdate, TestRunCreate, TestRunOut
 from app.services.dewesoft_service import delete_dewesoft_project_files
 
 
@@ -27,6 +27,35 @@ def project_out(db: Session, project: models.Project) -> ProjectOut:
 def list_projects(db: Session = Depends(get_db)) -> list[ProjectOut]:
     projects = db.execute(select(models.Project).order_by(models.Project.updated_at.desc())).scalars().all()
     return [project_out(db, project) for project in projects]
+
+
+@router.post("", response_model=ProjectOut)
+def create_project(payload: ProjectCreate, db: Session = Depends(get_db)) -> ProjectOut:
+    project_id = payload.project_id.strip()
+    project_name = payload.project_name.strip()
+    if not project_id:
+        raise HTTPException(status_code=400, detail="项目 ID 不能为空")
+    if not project_name:
+        raise HTTPException(status_code=400, detail="项目名称不能为空")
+    exists = db.scalar(select(models.Project).where(models.Project.project_id == project_id))
+    if exists:
+        raise HTTPException(status_code=400, detail="项目 ID 已存在")
+    project = models.Project(
+        project_id=project_id,
+        project_name=project_name,
+        test_object=payload.test_object,
+        test_type=payload.test_type,
+        department=payload.department,
+        vehicle_or_product=payload.vehicle_or_product,
+        test_stage=payload.test_stage,
+        description=payload.description,
+        raw_manifest_json=json.dumps({"source": "manual"}, ensure_ascii=False),
+    )
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+    (STORAGE_DIR / "projects" / project.project_id).mkdir(parents=True, exist_ok=True)
+    return project_out(db, project)
 
 
 @router.get("/{project_id}", response_model=ProjectOut)
@@ -131,6 +160,54 @@ def list_project_points(project_id: int, db: Session = Depends(get_db)) -> list[
             }
         )
     return result
+
+
+def _next_point_id(db: Session, project_id: int) -> str:
+    used = set(
+        db.execute(select(models.TestPoint.point_id).where(models.TestPoint.project_db_id == project_id)).scalars().all()
+    )
+    index = len(used) + 1
+    while True:
+        candidate = f"P{index:03d}"
+        if candidate not in used:
+            return candidate
+        index += 1
+
+
+@router.post("/{project_id}/points", response_model=PointOut)
+def create_project_point(project_id: int, payload: PointCreate | None = None, db: Session = Depends(get_db)) -> PointOut:
+    project = db.get(models.Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    data = payload.model_dump(exclude_unset=True) if payload else {}
+    point_id = (data.get("point_id") or _next_point_id(db, project_id)).strip()
+    if not point_id:
+        raise HTTPException(status_code=400, detail="点位编号不能为空")
+    exists = db.scalar(
+        select(models.TestPoint).where(models.TestPoint.project_db_id == project_id, models.TestPoint.point_id == point_id)
+    )
+    if exists:
+        raise HTTPException(status_code=400, detail="点位编号已存在")
+    point = models.TestPoint(
+        project_db_id=project_id,
+        point_id=point_id,
+        point_name=(data.get("point_name") or "未命名点位").strip() or "未命名点位",
+        point_type=(data.get("point_type") or "strain").strip() or "strain",
+        component=data.get("component"),
+        side=data.get("side"),
+        position_description=data.get("position_description"),
+        direction=data.get("direction"),
+        bridge_type=data.get("bridge_type"),
+        resistance_ohm=data.get("resistance_ohm"),
+        install_status=(data.get("install_status") or "planned").strip() or "planned",
+        check_status=data.get("check_status"),
+        remark=data.get("remark"),
+        raw_json=json.dumps({"source": "manual"}, ensure_ascii=False),
+    )
+    db.add(point)
+    db.commit()
+    db.refresh(point)
+    return PointOut.model_validate(point)
 
 
 @router.post("/{project_id}/test-runs", response_model=TestRunOut)

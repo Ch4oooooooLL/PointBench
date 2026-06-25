@@ -124,6 +124,7 @@ function PointRiskRow({ row, onOpen }: { row: PointRow; onOpen: () => void }) {
 function PointRiskModal({ row, onClose }: { row: PointRow; onClose: () => void }) {
   const { riskSettings } = useAppContext();
   const initial = firstStress(row.trend);
+  const [previewUrl, setPreviewUrl] = useState('');
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -138,10 +139,10 @@ function PointRiskModal({ row, onClose }: { row: PointRow; onClose: () => void }
         <div className="detail-grid">
           <div className="photo-grid">
             {row.point.media_files.map((media) => (
-              <a href={mediaUrl(media.id)} target="_blank" key={media.id}>
+              <button className="photo-button" onClick={() => setPreviewUrl(mediaUrl(media.id))} key={media.id}>
                 <img src={mediaUrl(media.id)} alt={media.filename} />
                 <span>{media.type} · {media.filename}</span>
-              </a>
+              </button>
             ))}
           </div>
           <div>
@@ -183,6 +184,17 @@ function PointRiskModal({ row, onClose }: { row: PointRow; onClose: () => void }
             </tbody>
           </table>
         </div>
+        {previewUrl && (
+          <div className="modal-backdrop" onClick={() => setPreviewUrl('')}>
+            <div className="modal image-preview-modal" onClick={(event) => event.stopPropagation()}>
+              <div className="section-head">
+                <h2>图片预览</h2>
+                <button className="button" onClick={() => setPreviewUrl('')}>关闭</button>
+              </div>
+              <img src={previewUrl} alt="图片预览" />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

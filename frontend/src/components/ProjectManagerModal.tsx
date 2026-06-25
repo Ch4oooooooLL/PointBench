@@ -1,5 +1,6 @@
 import { Download, Save, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAppContext } from '../context/AppContext';
 import { Project } from '../types';
@@ -82,6 +83,9 @@ export function ProjectManagerModal({ onClose }: Props) {
             <p>选择当前项目，编辑项目基础信息，或导出、删除项目。</p>
           </div>
           <button className="button" onClick={onClose}>关闭</button>
+        </div>
+        <div className="manager-actions top-actions">
+          <Link className="button primary" to="/projects/new" onClick={onClose}>创建新项目</Link>
         </div>
 
         <div className="manager-layout">

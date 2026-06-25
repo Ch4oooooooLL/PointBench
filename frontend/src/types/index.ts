@@ -65,6 +65,11 @@ export interface Measurement {
   updated_at: string;
 }
 
+export interface PointMeasurementRow extends Measurement {
+  run_name: string;
+  cycle_count: number;
+}
+
 export interface Point {
   id: number;
   project_db_id: number;

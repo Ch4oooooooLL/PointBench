@@ -154,7 +154,9 @@ class MediaFileOut(BaseModel):
 
 
 class PointUpdate(BaseModel):
+    point_id: str | None = None
     point_name: str | None = None
+    point_type: str | None = None
     component: str | None = None
     side: str | None = None
     position_description: str | None = None
@@ -207,6 +209,17 @@ class ProjectOut(BaseModel):
     point_count: int = 0
 
 
+class ProjectCreate(BaseModel):
+    project_id: str = Field(min_length=1)
+    project_name: str = Field(min_length=1)
+    test_object: str | None = None
+    test_type: str | None = None
+    department: str | None = None
+    vehicle_or_product: str | None = None
+    test_stage: str | None = None
+    description: str | None = None
+
+
 class ProjectUpdate(BaseModel):
     project_name: str | None = None
     test_object: str | None = None
@@ -215,6 +228,21 @@ class ProjectUpdate(BaseModel):
     vehicle_or_product: str | None = None
     test_stage: str | None = None
     description: str | None = None
+
+
+class PointCreate(BaseModel):
+    point_id: str | None = None
+    point_name: str | None = None
+    point_type: str | None = None
+    component: str | None = None
+    side: str | None = None
+    position_description: str | None = None
+    direction: str | None = None
+    bridge_type: str | None = None
+    resistance_ohm: float | None = None
+    install_status: str | None = None
+    check_status: str | None = None
+    remark: str | None = None
 
 
 class TestRunCreate(BaseModel):
@@ -278,6 +306,31 @@ class MeasurementOut(BaseModel):
 
 class MeasurementBatchCreate(BaseModel):
     measurements: list[MeasurementCreate]
+
+
+class PointMeasurementRowCreate(BaseModel):
+    run_name: str | None = None
+    cycle_count: int
+    max_strain_ue: float | None = None
+    min_strain_ue: float | None = None
+    is_abnormal: bool | None = None
+    abnormal_reason: str | None = None
+    remark: str | None = None
+
+
+class PointMeasurementRowUpdate(BaseModel):
+    run_name: str | None = None
+    cycle_count: int | None = None
+    max_strain_ue: float | None = None
+    min_strain_ue: float | None = None
+    is_abnormal: bool | None = None
+    abnormal_reason: str | None = None
+    remark: str | None = None
+
+
+class PointMeasurementRowOut(MeasurementOut):
+    run_name: str
+    cycle_count: int
 
 
 class TrendItem(BaseModel):
