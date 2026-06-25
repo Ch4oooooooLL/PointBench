@@ -53,7 +53,7 @@ export function CrackRecordsPage() {
           <h1>裂纹记录</h1>
           <p>记录并浏览各点位在指定循环次数下的裂纹图片和备注。</p>
         </div>
-        <div className="actions">
+        <div className="crack-page-actions">
           <ProjectSelector />
           <button className="button" onClick={refresh} disabled={!selectedProjectId}>
             <RefreshCw size={18} />
