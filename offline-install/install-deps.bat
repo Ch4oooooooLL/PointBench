@@ -13,7 +13,7 @@ set "SCRIPT_DIR=%~dp0"
 set "PROJECT_DIR=%SCRIPT_DIR%.."
 set "INSTALLER_DIR=%SCRIPT_DIR%installers"
 set "PIP_DIR=%SCRIPT_DIR%pip-packages"
-set "NODE_DIR=C:\nodejs"
+set "NODE_DIR=%LOCALAPPDATA%\Programs\nodejs"
 
 echo ========================================
 echo   Offline Dependency Installer
@@ -79,36 +79,43 @@ REM  InstallAllUsers=0  = current user only (no admin needed)
 REM  PrependPath=1      = auto-add to PATH
 REM  Include_test=0     = skip test suite (faster)
 REM  Include_pip=1      = include pip (default)
-"%PY_EXE%" /quiet InstallAllUsers=0 PrependPath=1 Include_test=0
+start "" /wait "%PY_EXE%" /quiet InstallAllUsers=0 PrependPath=1 Include_test=0 Include_pip=1
 
-if %ERRORLEVEL% NEQ 0 (
-    echo   [FAIL] Python installation failed (exit code: %ERRORLEVEL%)
+set "PY_INSTALL_EXIT=%ERRORLEVEL%"
+if not "%PY_INSTALL_EXIT%"=="0" if not "%PY_INSTALL_EXIT%"=="3010" (
+    echo   [FAIL] Python installation failed (exit code: %PY_INSTALL_EXIT%)
+    pause
+    exit /b 1
+)
+if "%PY_INSTALL_EXIT%"=="3010" (
+    echo   [INFO] Python installer requested a reboot, continuing with this session.
+)
+
+REM Locate Python and refresh PATH for current session.
+set "PYTHON_EXE="
+set "PY_BASE=%LOCALAPPDATA%\Programs\Python\Python314"
+if exist "%PY_BASE%\python.exe" set "PYTHON_EXE=%PY_BASE%\python.exe"
+if not defined PYTHON_EXE (
+    set "PY_BASE=C:\Program Files\Python314"
+    if exist "!PY_BASE!\python.exe" set "PYTHON_EXE=!PY_BASE!\python.exe"
+)
+if not defined PYTHON_EXE (
+    for /f "delims=" %%P in ('where python 2^>nul') do (
+        if not defined PYTHON_EXE set "PYTHON_EXE=%%P"
+    )
+)
+if not defined PYTHON_EXE (
+    echo   [WARNING] Python installed but not usable in this window
+    echo   Please restart your PC and run this script again
     pause
     exit /b 1
 )
 
-REM Refresh PATH for current session
-REM Python 3.14 per-user default location:
-set "PY_BASE=%LOCALAPPDATA%\Programs\Python\Python314"
-set "PATH=%PY_BASE%\Scripts;%PY_BASE%;%PATH%"
-
-REM Verify
-python --version >nul 2>&1
-if %ERRORLEVEL% NEQ 0 (
-    REM Try all-users install path
-    set "PY_BASE=C:\Program Files\Python314"
-    set "PATH=!PY_BASE!\Scripts;!PY_BASE!;%PATH%"
-    python --version >nul 2>&1
-    if !ERRORLEVEL! NEQ 0 (
-        echo   [WARNING] Python installed but not usable in this window
-        echo   Please restart your PC and run this script again
-        pause
-        exit /b 1
-    )
-)
+for %%P in ("%PYTHON_EXE%") do set "PY_BASE=%%~dpP"
+set "PATH=%PY_BASE%Scripts;%PY_BASE%;%PATH%"
 
 echo.
-python --version
+"%PYTHON_EXE%" --version
 echo   [OK] Python installed successfully
 echo.
 
@@ -134,19 +141,31 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
+set "NODE_BIN=%NODE_DIR%"
+if not exist "%NODE_BIN%\node.exe" (
+    for /d %%D in ("%NODE_DIR%\node-v*") do (
+        if exist "%%~fD\node.exe" set "NODE_BIN=%%~fD"
+    )
+)
+if not exist "%NODE_BIN%\node.exe" (
+    echo   [FAIL] Node.js executable not found after extraction
+    pause
+    exit /b 1
+)
+
 REM Add to current session PATH
-set "PATH=%NODE_DIR%;%PATH%"
+set "PATH=%NODE_BIN%;%PATH%"
 
 REM Permanently add to user PATH
 echo   Setting PATH environment variable...
 setx PATH "%PATH%" >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
     echo   [WARNING] setx failed (PATH may exceed 1024 chars)
-    echo   Please manually add %NODE_DIR% to your system PATH
+    echo   Please manually add %NODE_BIN% to your user PATH
 )
 
 REM Verify
-node --version >nul 2>&1
+"%NODE_BIN%\node.exe" --version >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
     echo   [FAIL] Node.js is not runnable
     pause
@@ -154,8 +173,8 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo.
-node --version
-call npm --version
+"%NODE_BIN%\node.exe" --version
+call "%NODE_BIN%\npm.cmd" --version
 echo   [OK] Node.js installed successfully
 echo.
 
@@ -173,7 +192,7 @@ echo.
 
 REM Note: dwdatareader may fail due to missing DWDataReaderLib native library
 REM This is expected - CSV/TXT imports still work fine
-pip install --no-index --find-links="%PIP_DIR%" -r "%PROJECT_DIR%\backend\requirements.txt"
+"%PYTHON_EXE%" -m pip install --no-index --find-links="%PIP_DIR%" -r "%PROJECT_DIR%\backend\requirements.txt"
 
 if %ERRORLEVEL% NEQ 0 (
     echo.
@@ -223,22 +242,22 @@ echo.
 
 echo   Python environment:
 echo   ----------------------------------------
-python --version >nul 2>&1 && (
+"%PYTHON_EXE%" --version >nul 2>&1 && (
     echo     Python ........... OK
 ) || (
     echo     Python ........... FAIL
 )
-python -c "import fastapi;          print('    fastapi ......... OK')" 2>nul || echo     fastapi ......... FAIL
-python -c "import sqlalchemy;       print('    sqlalchemy ...... OK')" 2>nul || echo     sqlalchemy ...... FAIL
-python -c "import pydantic;         print('    pydantic ........ OK')" 2>nul || echo     pydantic ........ FAIL
-python -c "import openpyxl;         print('    openpyxl ........ OK')" 2>nul || echo     openpyxl ........ FAIL
-python -c "import uvicorn;          print('    uvicorn ......... OK')" 2>nul || echo     uvicorn ......... FAIL
+"%PYTHON_EXE%" -c "import fastapi;          print('    fastapi ......... OK')" 2>nul || echo     fastapi ......... FAIL
+"%PYTHON_EXE%" -c "import sqlalchemy;       print('    sqlalchemy ...... OK')" 2>nul || echo     sqlalchemy ...... FAIL
+"%PYTHON_EXE%" -c "import pydantic;         print('    pydantic ........ OK')" 2>nul || echo     pydantic ........ FAIL
+"%PYTHON_EXE%" -c "import openpyxl;         print('    openpyxl ........ OK')" 2>nul || echo     openpyxl ........ FAIL
+"%PYTHON_EXE%" -c "import uvicorn;          print('    uvicorn ......... OK')" 2>nul || echo     uvicorn ......... FAIL
 
 echo.
 echo   Node.js environment:
 echo   ----------------------------------------
-node  --version >nul 2>&1 && echo     Node.js ......... OK || echo     Node.js ......... FAIL
-npm   --version >nul 2>&1 && echo     npm .............. OK || echo     npm .............. FAIL
+"%NODE_BIN%\node.exe" --version >nul 2>&1 && echo     Node.js ......... OK || echo     Node.js ......... FAIL
+call "%NODE_BIN%\npm.cmd" --version >nul 2>&1 && echo     npm .............. OK || echo     npm .............. FAIL
 if exist "%PROJECT_DIR%\frontend\node_modules" (
     echo     node_modules ..... OK
 ) else (
