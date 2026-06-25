@@ -41,7 +41,7 @@ export function ProjectCreatePage() {
       const project = await api.post<Project>('/api/projects', form);
       await refreshProjects();
       setSelectedProjectId(project.id);
-      navigate(`/projects/${project.id}`);
+      navigate('/project-detail');
     } catch (err) {
       setMessage(`创建失败：${(err as Error).message}`);
     } finally {

@@ -1,10 +1,10 @@
-import { ImageOff } from 'lucide-react';
+import { ImageOff, ImagePlus, Pencil, Plus, Save, Trash2, Upload, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { api, mediaUrl } from '../api/client';
 import { ProjectSelector } from '../components/ProjectSelector';
 import { TrendChart } from '../components/TrendChart';
 import { useAppContext } from '../context/AppContext';
-import { Point, TrendItem } from '../types';
+import { Point, PointMeasurementRow, Project, TrendItem } from '../types';
 import { growthPercent, riskLabel, riskLevel, riskPercentText } from '../utils/risk';
 
 interface PointRow {
@@ -12,31 +12,160 @@ interface PointRow {
   trend: TrendItem[];
 }
 
+interface ProjectForm {
+  project_name: string;
+  test_object: string;
+  test_type: string;
+  department: string;
+  vehicle_or_product: string;
+  test_stage: string;
+  description: string;
+}
+
+interface PointForm {
+  point_id: string;
+  point_name: string;
+  point_type: string;
+  component: string;
+  side: string;
+  position_description: string;
+  direction: string;
+  bridge_type: string;
+  resistance_ohm: string;
+  install_status: string;
+  check_status: string;
+  remark: string;
+}
+
+interface EditableMeasurementRow {
+  localKey: string;
+  id?: number;
+  run_name: string;
+  cycle_count: string;
+  max_strain_ue: string;
+  min_strain_ue: string;
+  is_abnormal: boolean;
+  abnormal_reason: string;
+  remark: string;
+}
+
+function toProjectForm(project: Project | null): ProjectForm {
+  return {
+    project_name: project?.project_name ?? '',
+    test_object: project?.test_object ?? '',
+    test_type: project?.test_type ?? '',
+    department: project?.department ?? '',
+    vehicle_or_product: project?.vehicle_or_product ?? '',
+    test_stage: project?.test_stage ?? '',
+    description: project?.description ?? '',
+  };
+}
+
+function toPointForm(point: Point): PointForm {
+  return {
+    point_id: point.point_id,
+    point_name: point.point_name,
+    point_type: point.point_type || 'strain',
+    component: point.component ?? '',
+    side: point.side ?? '',
+    position_description: point.position_description ?? '',
+    direction: point.direction ?? '',
+    bridge_type: point.bridge_type ?? '',
+    resistance_ohm: point.resistance_ohm == null ? '' : String(point.resistance_ohm),
+    install_status: point.install_status || 'planned',
+    check_status: point.check_status ?? '',
+    remark: point.remark ?? '',
+  };
+}
+
+function toEditableRows(rows: PointMeasurementRow[]): EditableMeasurementRow[] {
+  return rows.map((row) => ({
+    localKey: String(row.id),
+    id: row.id,
+    run_name: row.run_name,
+    cycle_count: String(row.cycle_count),
+    max_strain_ue: row.max_strain_ue == null ? '' : String(row.max_strain_ue),
+    min_strain_ue: row.min_strain_ue == null ? '' : String(row.min_strain_ue),
+    is_abnormal: row.is_abnormal,
+    abnormal_reason: row.abnormal_reason ?? '',
+    remark: row.remark ?? '',
+  }));
+}
+
+function numberOrNull(value: string): number | null {
+  if (value.trim() === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 export function ProjectRowsPage() {
-  const { selectedProject, selectedProjectId, riskSettings } = useAppContext();
+  const { selectedProject, selectedProjectId, riskSettings, refreshProjects } = useAppContext();
   const [rows, setRows] = useState<PointRow[]>([]);
   const [active, setActive] = useState<PointRow | null>(null);
+  const [editMode, setEditMode] = useState(false);
+  const [projectForm, setProjectForm] = useState<ProjectForm>(toProjectForm(selectedProject));
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    setProjectForm(toProjectForm(selectedProject));
+  }, [selectedProject]);
+
+  useEffect(() => {
+    loadRows();
+  }, [selectedProjectId]);
+
+  async function loadRows() {
     if (!selectedProjectId) {
       setRows([]);
       return;
     }
     setRows([]);
     setError('');
-    api.get<Point[]>(`/api/projects/${selectedProjectId}/points`)
-      .then(async (points) => {
-        const data = await Promise.all(
-          points.map(async (point) => ({
-            point,
-            trend: await api.get<TrendItem[]>(`/api/points/${point.id}/trend`),
-          })),
-        );
-        setRows(data);
-      })
-      .catch((err) => setError(err.message));
-  }, [selectedProjectId]);
+    try {
+      const points = await api.get<Point[]>(`/api/projects/${selectedProjectId}/points`);
+      const data = await Promise.all(
+        points.map(async (point) => ({
+          point,
+          trend: await api.get<TrendItem[]>(`/api/points/${point.id}/trend`),
+        })),
+      );
+      setRows(data);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function saveProject() {
+    if (!selectedProject) return;
+    setBusy(true);
+    setMessage('');
+    try {
+      await api.put<Project>(`/api/projects/${selectedProject.id}`, projectForm);
+      await refreshProjects();
+      setMessage('项目基础信息已保存。');
+    } catch (err) {
+      setMessage(`保存失败：${(err as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function addPoint() {
+    if (!selectedProjectId) return;
+    setBusy(true);
+    setMessage('');
+    try {
+      const point = await api.post<Point>(`/api/projects/${selectedProjectId}/points`);
+      setActive({ point, trend: [] });
+      await loadRows();
+    } catch (err) {
+      setMessage(`新增点位失败：${(err as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const riskCounts = useMemo(() => {
     return rows.reduce(
@@ -58,14 +187,36 @@ export function ProjectRowsPage() {
           <h1>项目详情</h1>
           <p>每行一个点位，展示图片、名称、历次应力幅和按初始值增长百分比计算的风险标识。</p>
         </div>
-        <ProjectSelector />
+        <div className="actions">
+          <ProjectSelector compact />
+          {editMode && <button className="button" disabled={busy} onClick={addPoint}><Plus size={18} />新增点位</button>}
+          {editMode && <button className="button primary" disabled={busy} onClick={saveProject}><Save size={18} />保存</button>}
+          <button className="button" onClick={() => setEditMode(!editMode)}>
+            {editMode ? <X size={18} /> : <Pencil size={18} />}
+            {editMode ? '退出编辑' : '编辑模式'}
+          </button>
+        </div>
       </div>
 
       {!selectedProject && <div className="empty panel">暂无可用项目，请先导入项目 zip。</div>}
       {error && <div className="alert danger">{error}</div>}
+      {message && <div className={message.includes('失败') ? 'alert danger' : 'alert ok'}>{message}</div>}
 
       {selectedProject && (
         <>
+          {editMode && (
+            <div className="panel project-edit-panel">
+              <div className="project-edit-grid">
+                <label>项目名称<input value={projectForm.project_name} onChange={(e) => setProjectForm({ ...projectForm, project_name: e.target.value })} /></label>
+                <label>测试对象<input value={projectForm.test_object} onChange={(e) => setProjectForm({ ...projectForm, test_object: e.target.value })} /></label>
+                <label>试验类型<input value={projectForm.test_type} onChange={(e) => setProjectForm({ ...projectForm, test_type: e.target.value })} /></label>
+                <label>部门<input value={projectForm.department} onChange={(e) => setProjectForm({ ...projectForm, department: e.target.value })} /></label>
+                <label>产品/车型<input value={projectForm.vehicle_or_product} onChange={(e) => setProjectForm({ ...projectForm, vehicle_or_product: e.target.value })} /></label>
+                <label>试验阶段<input value={projectForm.test_stage} onChange={(e) => setProjectForm({ ...projectForm, test_stage: e.target.value })} /></label>
+                <label className="wide">说明<textarea rows={3} value={projectForm.description} onChange={(e) => setProjectForm({ ...projectForm, description: e.target.value })} /></label>
+              </div>
+            </div>
+          )}
           <div className="risk-summary">
             <span className="risk-badge normal">正常 {riskCounts.normal}</span>
             <span className="risk-badge warn">预警 {riskCounts.warn}</span>
@@ -81,7 +232,14 @@ export function ProjectRowsPage() {
         </>
       )}
 
-      {active && <PointRiskModal row={active} onClose={() => setActive(null)} />}
+      {active && (
+        <PointRiskModal
+          row={active}
+          editMode={editMode}
+          onClose={() => setActive(null)}
+          onChanged={loadRows}
+        />
+      )}
     </section>
   );
 }
@@ -121,32 +279,275 @@ function PointRiskRow({ row, onOpen }: { row: PointRow; onOpen: () => void }) {
   );
 }
 
-function PointRiskModal({ row, onClose }: { row: PointRow; onClose: () => void }) {
+function PointRiskModal({
+  row,
+  editMode,
+  onClose,
+  onChanged,
+}: {
+  row: PointRow;
+  editMode: boolean;
+  onClose: () => void;
+  onChanged: () => Promise<void>;
+}) {
   const { riskSettings } = useAppContext();
-  const initial = firstStress(row.trend);
+  const [point, setPoint] = useState<Point>(row.point);
+  const [trend, setTrend] = useState<TrendItem[]>(row.trend);
+  const [form, setForm] = useState<PointForm>(toPointForm(row.point));
+  const [measurements, setMeasurements] = useState<EditableMeasurementRow[]>([]);
+  const [deletedMeasurementIds, setDeletedMeasurementIds] = useState<number[]>([]);
   const [previewUrl, setPreviewUrl] = useState('');
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+  const initial = firstStress(trend);
+
+  useEffect(() => {
+    setPoint(row.point);
+    setTrend(row.trend);
+    setForm(toPointForm(row.point));
+    loadMeasurementRows(row.point.id);
+  }, [row.point.id]);
+
+  useEffect(() => {
+    if (!editMode) return undefined;
+    function handlePaste(event: ClipboardEvent) {
+      const items = Array.from(event.clipboardData?.items ?? []);
+      const imageItem = items.find((item) => item.type.startsWith('image/'));
+      const file = imageItem?.getAsFile();
+      if (!file) return;
+      event.preventDefault();
+      uploadImage(file);
+    }
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [editMode, point.id]);
+
+  async function refreshPoint() {
+    const [nextPoint, nextTrend] = await Promise.all([
+      api.get<Point>(`/api/points/${point.id}`),
+      api.get<TrendItem[]>(`/api/points/${point.id}/trend`),
+    ]);
+    setPoint(nextPoint);
+    setTrend(nextTrend);
+    setForm(toPointForm(nextPoint));
+    await loadMeasurementRows(point.id);
+    await onChanged();
+  }
+
+  async function loadMeasurementRows(pointId: number) {
+    const data = await api.get<PointMeasurementRow[]>(`/api/points/${pointId}/measurement-rows`);
+    setMeasurements(toEditableRows(data));
+    setDeletedMeasurementIds([]);
+  }
+
+  function updateMeasurement(localKey: string, patch: Partial<EditableMeasurementRow>) {
+    setMeasurements((current) => current.map((item) => (item.localKey === localKey ? { ...item, ...patch } : item)));
+  }
+
+  function addMeasurement() {
+    setMeasurements((current) => [
+      ...current,
+      {
+        localKey: `new-${Date.now()}`,
+        run_name: '',
+        cycle_count: '',
+        max_strain_ue: '',
+        min_strain_ue: '',
+        is_abnormal: false,
+        abnormal_reason: '',
+        remark: '',
+      },
+    ]);
+  }
+
+  function removeMeasurement(rowItem: EditableMeasurementRow) {
+    if (rowItem.id) setDeletedMeasurementIds((current) => [...current, rowItem.id as number]);
+    setMeasurements((current) => current.filter((item) => item.localKey !== rowItem.localKey));
+  }
+
+  async function uploadImage(file?: File | null) {
+    if (!file) return;
+    setBusy(true);
+    setMessage('');
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      await api.post(`/api/points/${point.id}/media`, formData);
+      await refreshPoint();
+      setMessage('图片已上传。');
+    } catch (err) {
+      setMessage(`上传失败：${(err as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteImage(mediaId: number) {
+    setBusy(true);
+    setMessage('');
+    try {
+      await api.delete(`/api/points/${point.id}/media/${mediaId}`);
+      await refreshPoint();
+      setMessage('图片已删除。');
+    } catch (err) {
+      setMessage(`删除失败：${(err as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function savePoint() {
+    const invalidRow = measurements.find((item) => !item.cycle_count.trim());
+    if (invalidRow) {
+      setMessage('保存失败：循环次数不能为空。');
+      return;
+    }
+    setBusy(true);
+    setMessage('');
+    try {
+      await api.put<Point>(`/api/points/${point.id}`, {
+        ...form,
+        resistance_ohm: numberOrNull(form.resistance_ohm),
+      });
+      for (const measurementId of deletedMeasurementIds) {
+        await api.delete(`/api/measurements/${measurementId}`);
+      }
+      for (const measurement of measurements) {
+        const payload = {
+          run_name: measurement.run_name || undefined,
+          cycle_count: Number(measurement.cycle_count),
+          max_strain_ue: numberOrNull(measurement.max_strain_ue),
+          min_strain_ue: numberOrNull(measurement.min_strain_ue),
+          is_abnormal: measurement.is_abnormal,
+          abnormal_reason: measurement.abnormal_reason || null,
+          remark: measurement.remark || null,
+        };
+        if (measurement.id) {
+          await api.put<PointMeasurementRow>(`/api/points/${point.id}/measurement-rows/${measurement.id}`, payload);
+        } else {
+          await api.post<PointMeasurementRow>(`/api/points/${point.id}/measurement-rows`, payload);
+        }
+      }
+      await refreshPoint();
+      setMessage('点位信息已保存。');
+    } catch (err) {
+      setMessage(`保存失败：${(err as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal point-modal" onClick={(event) => event.stopPropagation()}>
         <div className="section-head">
           <div>
-            <h2>{row.point.point_id} · {row.point.point_name}</h2>
-            <p>{row.point.component || '-'} · {row.point.position_description || '未填写位置描述'}</p>
+            <h2>{point.point_id} · {point.point_name}</h2>
+            <p>{point.component || '-'} · {point.position_description || '未填写位置描述'}</p>
           </div>
-          <button className="button" onClick={onClose}>关闭</button>
+          <div className="actions">
+            {editMode && <button className="button primary" disabled={busy} onClick={savePoint}><Save size={18} />保存点位</button>}
+            <button className="button" onClick={onClose}>关闭</button>
+          </div>
         </div>
+        {message && <div className={message.includes('失败') ? 'alert danger' : 'alert ok'}>{message}</div>}
+        {editMode && (
+          <div className="panel">
+            <h2>点位信息</h2>
+            <div className="point-edit-grid">
+              <label>点位编号<input value={form.point_id} onChange={(event) => setForm({ ...form, point_id: event.target.value })} /></label>
+              <label>点位名称<input value={form.point_name} onChange={(event) => setForm({ ...form, point_name: event.target.value })} /></label>
+              <label>点位类型
+                <select value={form.point_type} onChange={(event) => setForm({ ...form, point_type: event.target.value })}>
+                  <option value="strain">应变</option>
+                  <option value="temperature">温度</option>
+                  <option value="displacement">位移</option>
+                  <option value="pressure">压力</option>
+                  <option value="other">其他</option>
+                </select>
+              </label>
+              <label>部件<input value={form.component} onChange={(event) => setForm({ ...form, component: event.target.value })} /></label>
+              <label>方位
+                <select value={form.side} onChange={(event) => setForm({ ...form, side: event.target.value })}>
+                  <option value="">未填写</option>
+                  <option value="left">left</option>
+                  <option value="right">right</option>
+                  <option value="front">front</option>
+                  <option value="rear">rear</option>
+                  <option value="center">center</option>
+                </select>
+              </label>
+              <label>方向
+                <select value={form.direction} onChange={(event) => setForm({ ...form, direction: event.target.value })}>
+                  <option value="">未填写</option>
+                  <option value="X">X</option>
+                  <option value="Y">Y</option>
+                  <option value="Z">Z</option>
+                  <option value="45">45</option>
+                  <option value="-45">-45</option>
+                </select>
+              </label>
+              <label>桥路类型
+                <select value={form.bridge_type} onChange={(event) => setForm({ ...form, bridge_type: event.target.value })}>
+                  <option value="">未填写</option>
+                  <option value="quarter">quarter</option>
+                  <option value="half">half</option>
+                  <option value="full">full</option>
+                  <option value="other">other</option>
+                </select>
+              </label>
+              <label>电阻<input type="number" value={form.resistance_ohm} onChange={(event) => setForm({ ...form, resistance_ohm: event.target.value })} /></label>
+              <label>安装状态
+                <select value={form.install_status} onChange={(event) => setForm({ ...form, install_status: event.target.value })}>
+                  <option value="planned">planned</option>
+                  <option value="installed">installed</option>
+                  <option value="removed">removed</option>
+                  <option value="damaged">damaged</option>
+                  <option value="abandoned">abandoned</option>
+                </select>
+              </label>
+              <label>检查状态
+                <select value={form.check_status} onChange={(event) => setForm({ ...form, check_status: event.target.value })}>
+                  <option value="">未填写</option>
+                  <option value="unchecked">unchecked</option>
+                  <option value="ok">ok</option>
+                  <option value="warning">warning</option>
+                  <option value="failed">failed</option>
+                </select>
+              </label>
+              <label className="wide">位置描述<textarea rows={3} value={form.position_description} onChange={(event) => setForm({ ...form, position_description: event.target.value })} /></label>
+              <label className="wide">备注<textarea rows={3} value={form.remark} onChange={(event) => setForm({ ...form, remark: event.target.value })} /></label>
+            </div>
+          </div>
+        )}
         <div className="detail-grid">
-          <div className="photo-grid">
-            {row.point.media_files.map((media) => (
-              <button className="photo-button" onClick={() => setPreviewUrl(mediaUrl(media.id))} key={media.id}>
-                <img src={mediaUrl(media.id)} alt={media.filename} />
-                <span>{media.type} · {media.filename}</span>
-              </button>
-            ))}
+          <div>
+            <div className="section-head">
+              <h2>照片</h2>
+              {editMode && (
+                <label className="button file-button">
+                  <Upload size={18} />
+                  上传图片
+                  <input type="file" accept="image/*" disabled={busy} onChange={(event) => uploadImage(event.target.files?.[0])} />
+                </label>
+              )}
+            </div>
+            {editMode && <div className="template-note"><ImagePlus size={18} />可选择图片文件，也可以直接粘贴剪贴板中的图片。</div>}
+            <div className="photo-grid">
+              {point.media_files.map((media) => (
+                <div className="photo-item" key={media.id}>
+                  <button className="photo-button" onClick={() => setPreviewUrl(mediaUrl(media.id))}>
+                    <img src={mediaUrl(media.id)} alt={media.filename} />
+                    <span>{media.type} · {media.filename}</span>
+                  </button>
+                  {editMode && <button className="icon-button danger-text photo-delete" disabled={busy} onClick={() => deleteImage(media.id)} title="删除图片"><Trash2 size={16} /></button>}
+                </div>
+              ))}
+              {!point.media_files.length && <div className="empty">暂无图片</div>}
+            </div>
           </div>
           <div>
-            <TrendChart data={row.trend} metric="stress_amplitude_mpa" />
+            <TrendChart data={trend} metric="stress_amplitude_mpa" />
           </div>
         </div>
         <div className="table-wrap">
@@ -161,10 +562,32 @@ function PointRiskModal({ row, onClose }: { row: PointRow; onClose: () => void }
                 <th>应力幅</th>
                 <th>相对初始</th>
                 <th>异常原因</th>
+                {editMode && <th>操作</th>}
               </tr>
             </thead>
             <tbody>
-              {row.trend.map((item) => {
+              {(editMode ? measurements : trend).map((item) => {
+                if ('localKey' in item) {
+                  const max = numberOrNull(item.max_strain_ue);
+                  const min = numberOrNull(item.min_strain_ue);
+                  const amplitude = max == null || min == null ? null : (max - min) / 2;
+                  const stress = amplitude == null ? null : amplitude * 0.206;
+                  const percent = growthPercent(stress, initial);
+                  const level = riskLevel(percent, riskSettings);
+                  return (
+                    <tr key={item.localKey}>
+                      <td><input value={item.run_name} onChange={(event) => updateMeasurement(item.localKey, { run_name: event.target.value })} /></td>
+                      <td><input type="number" value={item.cycle_count} onChange={(event) => updateMeasurement(item.localKey, { cycle_count: event.target.value })} /></td>
+                      <td><input type="number" value={item.max_strain_ue} onChange={(event) => updateMeasurement(item.localKey, { max_strain_ue: event.target.value })} /></td>
+                      <td><input type="number" value={item.min_strain_ue} onChange={(event) => updateMeasurement(item.localKey, { min_strain_ue: event.target.value })} /></td>
+                      <td>{amplitude == null ? '-' : amplitude.toFixed(1)}</td>
+                      <td>{stress == null ? '-' : stress.toFixed(2)}</td>
+                      <td><span className={`risk-badge ${level}`}>{riskPercentText(percent)}</span></td>
+                      <td><input value={item.abnormal_reason} onChange={(event) => updateMeasurement(item.localKey, { abnormal_reason: event.target.value })} /></td>
+                      <td><button className="icon-button danger-text" onClick={() => removeMeasurement(item)} title="删除循环"><Trash2 size={16} /></button></td>
+                    </tr>
+                  );
+                }
                 const percent = growthPercent(item.stress_amplitude_mpa, initial);
                 const level = riskLevel(percent, riskSettings);
                 return (
@@ -180,7 +603,8 @@ function PointRiskModal({ row, onClose }: { row: PointRow; onClose: () => void }
                   </tr>
                 );
               })}
-              {!row.trend.length && <tr><td colSpan={8} className="empty">暂无测试记录</td></tr>}
+              {editMode && <tr><td colSpan={9}><button className="button" onClick={addMeasurement}><Plus size={18} />新增循环</button></td></tr>}
+              {!(editMode ? measurements.length : trend.length) && <tr><td colSpan={editMode ? 9 : 8} className="empty">暂无测试记录</td></tr>}
             </tbody>
           </table>
         </div>
