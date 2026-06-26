@@ -1,84 +1,60 @@
 import {
-  BarChart3,
   BookOpen,
   Camera,
-  FilePlus2,
+  ClipboardPlus,
+  DatabaseZap,
+  FileSpreadsheet,
   FileUp,
-  FolderCog,
   LayoutDashboard,
-  LineChart,
   ListChecks,
-  Settings,
 } from 'lucide-react';
 
-const workflowSteps = [
-  {
-    title: '选择或准备项目',
-    text: '进入系统后先在页面右上角选择当前项目。没有项目时，可以通过“导入项目”导入 zip，也可以通过“创建项目”手动创建。',
-  },
-  {
-    title: '维护点位信息',
-    text: '在“项目详情”中浏览点位列表，进入点位详情后可以查看点位元数据、照片、通道、CAE 映射和测量记录。',
-  },
-  {
-    title: '录入测试数据',
-    text: '在“项目概览”中点击“录入测试数据”，选择项目轮次并录入各点位应变数据。系统会自动计算应变幅和应力幅。',
-  },
-  {
-    title: '记录裂纹',
-    text: '在“裂纹记录”中点击“记录裂纹”，选择点位和循环次数，上传或粘贴裂纹图片并填写备注。',
-  },
-  {
-    title: '查看趋势和风险',
-    text: '回到“项目概览”查看统计指标、全点位应力幅趋势和风险点位。已记录裂纹的点位循环会在折线图上显示红圈。',
-  },
-];
-
-const features = [
+const guideSections = [
   {
     icon: LayoutDashboard,
     title: '项目概览',
-    text: '汇总当前项目的点位数量、测试轮次、测量记录、异常点位、最新循环次数和应力幅趋势。',
+    intro: '项目概览是进入项目后的总览窗口，用来快速判断当前项目做到哪一步、哪些点位值得重点关注。',
+    usage:
+      '在这里可以看到项目名称、测试对象、当前阶段、点位数量、测试轮次、测量记录、异常点位、最新循环次数和当前最大应力幅等信息。全点位应力幅趋势图会展示每个点位随循环次数变化的情况，单击图表可以放大查看；放大后可在右侧筛选单个点位。已经记录裂纹的点位会以红圈标注在对应点位和时间点上，点击红圈即可查看裂纹详情。页面右上角可以切换或管理项目，也可以从“录入测试数据”进入点位记录导入。',
   },
   {
     icon: ListChecks,
     title: '项目详情',
-    text: '以点位为核心浏览项目数据，支持按点位进入详情，查看照片、通道、CAE 信息和历史测量。',
+    intro: '项目详情以点位为核心，把每个测点的图片、贴片信息和循环数据放在同一处管理。',
+    usage:
+      '进入页面后，每一行代表一个点位，可以查看点位编号、名称、照片缩略图、部件位置、方向、桥路类型以及历次应力幅变化。单击点位可打开详情，查看整体照片、局部照片、贴片信息和各循环次数下的最大应变、最小应变、应变幅、应力幅。右上角开启“编辑模式”后，可以新增点位、修改项目基础信息，也可以进入点位详情编辑主信息、可选信息、照片和循环数据。',
   },
   {
     icon: Camera,
     title: '裂纹记录',
-    text: '按点位和循环次数保存裂纹图片、备注和记录时间，并在列表中集中浏览。',
-  },
-  {
-    icon: FilePlus2,
-    title: '创建项目',
-    text: '手动创建新的实验项目，适合尚未形成导入包但需要先建立点位数据的场景。',
+    intro: '裂纹记录用于集中保存和回看各点位在指定循环次数下出现的裂纹情况。',
+    usage:
+      '页面会汇总裂纹记录数量、涉及点位数量和点位-循环组合数量，并以图片卡片展示裂纹照片、点位、循环次数、轮次和备注。点击卡片可查看大图和详细信息。右上角开启编辑模式后，可以新增、删除或修改裂纹情况；新增时选择点位和循环次数，上传或直接粘贴裂纹图片，再填写裂纹位置、长度、观察条件等备注即可保存。保存后的裂纹会同步出现在项目概览趋势图的红圈标注中。',
   },
   {
     icon: FileUp,
     title: '导入项目',
-    text: '导入符合规范的项目 zip 包，系统会预览点位、照片和清单校验结果，再确认写入。',
+    intro: '导入项目用于接收外部项目包，让 Android App 现场记录的数据或其他主机导出的项目进入当前系统。',
+    usage:
+      '支持上传 Android App 导出的 zip 数据包，也支持选择已经手动解压的项目文件夹。系统会先进行导入预览，检查 manifest、点位数量、照片数量、重复点位编号、重复通道名、缺失文件、警告和错误；确认可以导入后，再点击“确认导入”写入数据库。如果公司内网文档加密导致 zip 不可读取，可以先手动打开或解压为明文文件夹，再使用“选择解压文件夹”导入。',
+  },
+];
+
+const pointRecordImports = [
+  {
+    icon: ClipboardPlus,
+    title: '手动填写',
+    text: '适合少量数据或临时补录。进入“项目概览 -> 录入测试数据”，选择“手动录入”，填写轮次名称、循环次数、测试时间和备注；再按点位输入最大应变、最小应变，必要时勾选异常并补充备注。保存后系统会自动计算应变幅和应力幅。',
   },
   {
-    icon: LineChart,
-    title: '趋势图',
-    text: '展示全点位应力幅随循环次数变化的趋势，支持放大查看和突出单条点位曲线。',
+    icon: FileSpreadsheet,
+    title: 'XLSX 模板导入',
+    text: '适合一次导入多个点位、多个循环次数的数据。选择“XLSX 模板导入”，先输入已测试记录次数并下载模板；模板中保留点位编号和点位名称，按实际情况填写 cycle_count、max_strain_ue、min_strain_ue 和 remark 后上传。系统会按点位编号匹配并批量生成测试轮次和测量记录。',
   },
   {
-    icon: BarChart3,
-    title: '分析与异常',
-    text: '基于测量记录计算应力幅排名和增长速度，辅助定位重点关注点位。',
-  },
-  {
-    icon: FolderCog,
-    title: '项目管理',
-    text: '通过项目选择器旁的项目管理入口维护项目列表，切换当前工作项目。',
-  },
-  {
-    icon: Settings,
-    title: '系统设置',
-    text: '左下角设置按钮用于配置风险阈值、概览折线图高度和 Debug 工具显示状态。',
+    icon: DatabaseZap,
+    title: 'Dewesoft 数据导入',
+    text: '适合从采集设备原始数据或导出文件中提取点位记录。选择“Dewesoft 数据”，先填写本次循环次数，可选填写轮次名称，再上传 .dxd、.dxz、.d7d、.d7z 原始文件，或 Dewesoft 导出的 .csv、.txt 文件。系统会读取总时长中间 1/10 的稳定段，按通道名匹配点位编号，并计算最大/最小应变；CSV/TXT 可直接解析，原始文件需要后端环境能加载 Dewesoft 官方 DWDataReaderLib。',
   },
 ];
 
@@ -88,39 +64,43 @@ export function UsageGuidePage() {
       <div className="page-head">
         <div>
           <h1>使用说明</h1>
-          <p>按项目、点位、测试轮次和裂纹记录组织实验数据，并在概览中完成趋势分析和风险查看。</p>
+          <p>按页面入口介绍功能和用法，帮助你从项目导入、点位维护、数据录入一路走到趋势分析和裂纹追踪。</p>
         </div>
       </div>
 
       <div className="guide-hero panel">
         <BookOpen size={34} />
         <div>
-          <h2>推荐使用流程</h2>
-          <p>先准备项目，再维护点位和测试数据，最后在概览中查看趋势、异常和裂纹标记。</p>
+          <h2>怎么读这份教程</h2>
+          <p>每一部分先说明页面能做什么，再说明实际怎么操作；最后单独展开点位记录导入这件最常用也最容易出错的事。</p>
         </div>
       </div>
 
       <div className="guide-steps">
-        {workflowSteps.map((step, index) => (
-          <div key={step.title} className="guide-step">
-            <span>{index + 1}</span>
-            <div>
-              <h2>{step.title}</h2>
-              <p>{step.text}</p>
+        {guideSections.map((section, index) => {
+          const Icon = section.icon;
+          return (
+            <div key={section.title} className="guide-step">
+              <span>{index + 1}</span>
+              <div>
+                <h2><Icon size={20} /> {section.title}</h2>
+                <p><strong>功能介绍：</strong>{section.intro}</p>
+                <p><strong>使用方法：</strong>{section.usage}</p>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="panel">
         <div className="section-head">
           <div>
-            <h2>功能说明</h2>
-            <p>左侧导航中的主要入口和相关功能如下。</p>
+            <h2>重点功能：点位记录导入</h2>
+            <p>点位记录从“项目概览”的“录入测试数据”进入，支持手动填写、XLSX 导入和 Dewesoft 数据导入三种方式。</p>
           </div>
         </div>
         <div className="guide-feature-grid">
-          {features.map((feature) => {
+          {pointRecordImports.map((feature) => {
             const Icon = feature.icon;
             return (
               <div key={feature.title} className="guide-feature">
@@ -132,7 +112,6 @@ export function UsageGuidePage() {
           })}
         </div>
       </div>
-
     </section>
   );
 }
