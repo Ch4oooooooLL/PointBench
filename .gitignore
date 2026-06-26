@@ -31,5 +31,6 @@ offline-install/node-modules.tar.gz
 test-point-web-code.zip
 
 # IDE / other
+AGENTS.md
 .codex_spreadsheet_work/
 offline-install.zip
