@@ -1,10 +1,29 @@
 import { ActivitySquare, BookOpen, Camera, FilePlus2, FileUp, LayoutDashboard, ListChecks, Settings } from 'lucide-react';
-import { useState } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAppContext } from '../context/AppContext';
+
+const FIRST_USE_COOKIE = 'pointbench_first_use_notice_seen';
+const FIRST_USE_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 
 export function Layout() {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [firstUseNoticeOpen, setFirstUseNoticeOpen] = useState(false);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    setFirstUseNoticeOpen(!hasCookie(FIRST_USE_COOKIE));
+  }, []);
+
+  function closeFirstUseNotice() {
+    setCookie(FIRST_USE_COOKIE, 'true', FIRST_USE_COOKIE_MAX_AGE_SECONDS);
+    setFirstUseNoticeOpen(false);
+  }
+
+  function openUsageGuide() {
+    closeFirstUseNotice();
+    navigate('/help');
+  }
 
   return (
     <div className="app-shell">
@@ -52,7 +71,29 @@ export function Layout() {
       <main className="content">
         <Outlet />
       </main>
+      {firstUseNoticeOpen && <FirstUseNoticeModal onOpenGuide={openUsageGuide} onSkip={closeFirstUseNotice} />}
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+    </div>
+  );
+}
+
+function FirstUseNoticeModal({ onOpenGuide, onSkip }: { onOpenGuide: () => void; onSkip: () => void }) {
+  return (
+    <div className="modal-backdrop">
+      <div className="modal first-use-modal" role="dialog" aria-modal="true" aria-labelledby="first-use-title">
+        <div className="first-use-icon">
+          <BookOpen size={28} />
+        </div>
+        <h2 id="first-use-title">首次使用前请阅读使用说明</h2>
+        <p>
+          为了确保项目导入、点位维护、测试数据录入和裂纹记录流程准确，请先仔细阅读使用说明。
+          后续也可以随时从左侧导航栏的“使用说明”再次查看。
+        </p>
+        <div className="modal-actions first-use-actions">
+          <button className="button" onClick={onSkip}>跳过</button>
+          <button className="button primary" onClick={onOpenGuide}>跳转到使用说明</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -133,4 +174,12 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
 function clampNumber(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
   return Math.min(Math.max(value, min), max);
+}
+
+function hasCookie(name: string): boolean {
+  return document.cookie.split(';').some((item) => item.trim().startsWith(`${name}=`));
+}
+
+function setCookie(name: string, value: string, maxAgeSeconds: number) {
+  document.cookie = `${name}=${encodeURIComponent(value)}; max-age=${maxAgeSeconds}; path=/; SameSite=Lax`;
 }

@@ -847,6 +847,32 @@ label {
   width: min(520px, 94vw);
 }
 
+.first-use-modal {
+  width: min(460px, 94vw);
+  text-align: center;
+}
+
+.first-use-modal p {
+  line-height: 1.7;
+  margin-bottom: 0;
+  text-align: left;
+}
+
+.first-use-icon {
+  width: 54px;
+  height: 54px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 14px;
+  background: #e6f4f1;
+  color: #0f766e;
+}
+
+.modal-actions.first-use-actions {
+  justify-content: center;
+}
+
 .crack-modal {
   width: min(920px, 96vw);
 }
