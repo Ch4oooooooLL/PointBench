@@ -1,5 +1,4 @@
 import {
-  BookOpen,
   Camera,
   ClipboardPlus,
   DatabaseZap,
@@ -64,15 +63,6 @@ export function UsageGuidePage() {
       <div className="page-head">
         <div>
           <h1>使用说明</h1>
-          <p>按页面入口介绍功能和用法，帮助你从项目导入、点位维护、数据录入一路走到趋势分析和裂纹追踪。</p>
-        </div>
-      </div>
-
-      <div className="guide-hero panel">
-        <BookOpen size={34} />
-        <div>
-          <h2>怎么读这份教程</h2>
-          <p>每一部分先说明页面能做什么，再说明实际怎么操作；最后单独展开点位记录导入这件最常用也最容易出错的事。</p>
         </div>
       </div>
 
