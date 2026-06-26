@@ -299,6 +299,25 @@ def _split_name_unit(header: str) -> tuple[str, str | None]:
     return value, None
 
 
+def _point_number_key(value: str | None) -> str | None:
+    if not value:
+        return None
+    match = re.match(r"^\s*(\d{2})", value)
+    return match.group(1) if match else None
+
+
+def _split_dewesoft_point_name(value: str | None) -> tuple[str, str] | None:
+    if not value:
+        return None
+    match = re.match(r"^\s*(\d{2})-(?P<name>.+?)\s*$", value)
+    if not match:
+        return None
+    point_name = match.group("name").strip()
+    if not point_name:
+        return None
+    return match.group(1), point_name
+
+
 def _to_float(value: Any) -> float | None:
     if value is None:
         return None
@@ -394,19 +413,47 @@ def import_dewesoft_file(db: Session, project_id: int, cycle_count: int, run_nam
         db.flush()
         import_job.test_run_id = test_run.id
 
-        point_map = {
-            point.point_id: point
-            for point in db.execute(select(models.TestPoint).where(models.TestPoint.project_db_id == project_id)).scalars()
-        }
+        project_points = db.execute(select(models.TestPoint).where(models.TestPoint.project_db_id == project_id)).scalars().all()
+        point_map: dict[str, models.TestPoint] = {}
+        for point in project_points:
+            match_key = _point_number_key(point.point_id)
+            if match_key and match_key not in point_map:
+                point_map[match_key] = point
 
         matched = 0
         unmatched = 0
+        created_points: list[models.TestPoint] = []
         for channel in channels:
             window_values = _window_values(channel, stable_start, stable_end)
             min_value = min(window_values) if window_values else None
             max_value = max(window_values) if window_values else None
             mean_value = sum(window_values) / len(window_values) if window_values else None
-            point = point_map.get(channel.name)
+            channel_match = _split_dewesoft_point_name(channel.name)
+            channel_key = channel_match[0] if channel_match else _point_number_key(channel.name)
+            point = point_map.get(channel_key)
+            if point is None and channel_match:
+                point = models.TestPoint(
+                    project_db_id=project_id,
+                    point_id=channel_match[0],
+                    point_name=channel_match[1],
+                    point_type="strain",
+                    install_status="planned",
+                    remark="由 Dewesoft 通道自动创建，请补充点位信息。",
+                    raw_json=json.dumps({"source": "dewesoft", "channel_name": channel.name}, ensure_ascii=False),
+                )
+                db.add(point)
+                db.flush()
+                db.add(
+                    models.SensorChannel(
+                        point_db_id=point.id,
+                        device="Dewesoft",
+                        channel_name=channel.name,
+                        unit=channel.unit,
+                    )
+                )
+                point_map[channel_match[0]] = point
+                project_points.append(point)
+                created_points.append(point)
             measurement_id: int | None = None
             if point and min_value is not None and max_value is not None:
                 record = models.MeasurementRecord(
@@ -442,9 +489,13 @@ def import_dewesoft_file(db: Session, project_id: int, cycle_count: int, run_nam
         import_job.matched_channel_count = matched
         import_job.unmatched_channel_count = unmatched
         import_job.status = "imported"
-        import_job.message = f"已导入 {matched} 个匹配点位通道，保留 {unmatched} 个未匹配通道"
+        message = f"已导入 {matched} 个匹配点位通道，保留 {unmatched} 个未匹配通道"
+        if created_points:
+            created_summary = "、".join(f"{point.point_id}-{point.point_name}" for point in created_points)
+            message += f"；已自动新增 {len(created_points)} 个点位：{created_summary}。请补充对应点位信息"
+        import_job.message = message
         db.flush()
-        for point in point_map.values():
+        for point in project_points:
             refresh_point_abnormal_flags(db, point.id)
         db.commit()
     except Exception as exc:

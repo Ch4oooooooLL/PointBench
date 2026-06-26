@@ -35,12 +35,20 @@ export function TestRunNewPage() {
   const [dewesoftBusy, setDewesoftBusy] = useState(false);
   const [lastDewesoftImport, setLastDewesoftImport] = useState<DewesoftImport | null>(null);
 
+  async function loadPoints() {
+    if (!projectId) return;
+    const data = await api.get<Point[]>(`/api/projects/${projectId}/points`);
+    setPoints(data);
+    setRows(Object.fromEntries(data.map((point) => [point.id, { max_strain_ue: '', min_strain_ue: '', is_abnormal: false, remark: '' }])));
+  }
+
   useEffect(() => {
-    api.get<Point[]>(`/api/projects/${projectId}/points`).then((data) => {
-      setPoints(data);
-      setRows(Object.fromEntries(data.map((point) => [point.id, { max_strain_ue: '', min_strain_ue: '', is_abnormal: false, remark: '' }])));
-    });
+    loadPoints();
   }, [projectId]);
+
+  async function refreshPointsAfterDewesoftImport() {
+    await loadPoints();
+  }
 
   const pointMap = useMemo(() => new Map(points.map((point) => [point.point_id, point])), [points]);
 
@@ -155,7 +163,12 @@ export function TestRunNewPage() {
       const result = await api.post<DewesoftImport>(`/api/dewesoft/projects/${projectId}/imports`, form);
       setLastDewesoftImport(result);
       if (result.status === 'imported') {
-        setDewesoftMessage(`导入完成：匹配 ${result.matched_channel_count} 个点位通道，未匹配 ${result.unmatched_channel_count} 个通道。`);
+        const message = result.message || `导入完成：匹配 ${result.matched_channel_count} 个点位通道，未匹配 ${result.unmatched_channel_count} 个通道。`;
+        setDewesoftMessage(message);
+        if (message.includes('已自动新增')) {
+          await refreshPointsAfterDewesoftImport();
+          window.alert(`${message}。请到点位详情中补充对应信息。`);
+        }
       } else {
         setDewesoftMessage(`导入未完成：${result.message || '请查看导入记录'}`);
       }
@@ -238,7 +251,7 @@ export function TestRunNewPage() {
           <div className="section-head">
             <div>
               <h2>Dewesoft 数据导入</h2>
-              <p>上传 .dxd/.dxz 原始记录文件，或 Dewesoft 导出的 .csv/.txt，系统读取总时长中间 1/10 稳定段，按通道名匹配点位编号并计算最大/最小应变。</p>
+              <p>上传 .dxd/.dxz 原始记录文件，或 Dewesoft 导出的 .csv/.txt，系统读取总时长中间 1/10 稳定段，按 01-点位名称 通道名匹配点位编号并计算最大/最小应变。</p>
             </div>
           </div>
           <div className="form-row dewesoft-form">

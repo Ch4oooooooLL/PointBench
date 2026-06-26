@@ -166,9 +166,9 @@ def _next_point_id(db: Session, project_id: int) -> str:
     used = set(
         db.execute(select(models.TestPoint.point_id).where(models.TestPoint.project_db_id == project_id)).scalars().all()
     )
-    index = len(used) + 1
+    index = 1
     while True:
-        candidate = f"P{index:03d}"
+        candidate = f"{index:02d}"
         if candidate not in used:
             return candidate
         index += 1
