@@ -114,6 +114,8 @@ export function PointDetailPage() {
   useEffect(() => {
     if (!editMode) return undefined;
     function handlePaste(event: ClipboardEvent) {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
       const items = Array.from(event.clipboardData?.items ?? []);
       const imageItem = items.find((item) => item.type.startsWith('image/'));
       const file = imageItem?.getAsFile();

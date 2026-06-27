@@ -329,7 +329,7 @@ function PointRiskModal({
   }, [row.point.id]);
 
   useEffect(() => {
-    if (!editMode) return undefined;
+    if (!editMode || activeTab !== 'photos') return undefined;
     function handlePaste(event: ClipboardEvent) {
       const items = Array.from(event.clipboardData?.items ?? []);
       const imageItem = items.find((item) => item.type.startsWith('image/'));
@@ -340,7 +340,7 @@ function PointRiskModal({
     }
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
-  }, [editMode, point.id, pasteMediaType]);
+  }, [editMode, activeTab, point.id, pasteMediaType]);
 
   async function refreshPoint() {
     const [nextPoint, nextTrend] = await Promise.all([
