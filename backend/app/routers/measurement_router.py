@@ -233,8 +233,8 @@ async def import_project_measurements_xlsx(
     project = db.get(models.Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
-    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xlsm", ".xls")):
-        raise HTTPException(status_code=400, detail="请上传 xlsx 文件")
+    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xlsm")):
+        raise HTTPException(status_code=400, detail="请上传 XLSX/XLSM 文件，旧版 .xls 格式暂不支持")
 
     rows = _parse_xlsx_rows(await file.read())
     points = db.execute(select(models.TestPoint).where(models.TestPoint.project_db_id == project_id)).scalars().all()

@@ -89,7 +89,11 @@ export function TestRunNewPage() {
   }
 
   async function downloadTemplate() {
-    const runTotal = Math.max(1, Number(templateRunCount) || 1);
+    const runTotal = Number(templateRunCount);
+    if (!Number.isInteger(runTotal) || runTotal < 1) {
+      setImportMessage('下载失败：已测试记录次数必须填写为大于 0 的整数。');
+      return;
+    }
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('measurements');
     sheet.columns = [

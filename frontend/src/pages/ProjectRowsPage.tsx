@@ -101,6 +101,12 @@ function numberOrNull(value: string): number | null {
   return Number.isFinite(number) ? number : null;
 }
 
+function integerOrNull(value: string): number | null {
+  if (value.trim() === '') return null;
+  const number = Number(value);
+  return Number.isInteger(number) ? number : null;
+}
+
 function mediaTypeLabel(type: string): string {
   if (type === 'overall') return '整体';
   if (type === 'local') return '局部';
@@ -415,9 +421,9 @@ function PointRiskModal({
       setActiveTab('main');
       return;
     }
-    const invalidRow = measurements.find((item) => !item.cycle_count.trim());
+    const invalidRow = measurements.find((item) => integerOrNull(item.cycle_count) == null);
     if (invalidRow) {
-      setMessage('保存失败：循环次数不能为空。');
+      setMessage('保存失败：循环次数必须填写为整数。');
       return;
     }
     setBusy(true);
@@ -433,7 +439,7 @@ function PointRiskModal({
       for (const measurement of measurements) {
         const payload = {
           run_name: measurement.run_name || undefined,
-          cycle_count: Number(measurement.cycle_count),
+          cycle_count: integerOrNull(measurement.cycle_count) as number,
           max_strain_ue: numberOrNull(measurement.max_strain_ue),
           min_strain_ue: numberOrNull(measurement.min_strain_ue),
           is_abnormal: measurement.is_abnormal,

@@ -72,6 +72,12 @@ function numberOrNull(value: string): number | null {
   return Number.isFinite(number) ? number : null;
 }
 
+function integerOrNull(value: string): number | null {
+  if (value.trim() === '') return null;
+  const number = Number(value);
+  return Number.isInteger(number) ? number : null;
+}
+
 export function PointDetailPage() {
   const { pointId } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -184,9 +190,9 @@ export function PointDetailPage() {
 
   async function saveAll() {
     if (!pointId) return;
-    const invalidRow = rows.find((row) => !row.cycle_count.trim());
+    const invalidRow = rows.find((row) => integerOrNull(row.cycle_count) == null);
     if (invalidRow) {
-      setMessage('保存失败：循环次数不能为空。');
+      setMessage('保存失败：循环次数必须填写为整数。');
       return;
     }
     setBusy(true);
@@ -202,7 +208,7 @@ export function PointDetailPage() {
       for (const row of rows) {
         const payload = {
           run_name: row.run_name || undefined,
-          cycle_count: Number(row.cycle_count),
+          cycle_count: integerOrNull(row.cycle_count) as number,
           max_strain_ue: numberOrNull(row.max_strain_ue),
           min_strain_ue: numberOrNull(row.min_strain_ue),
           is_abnormal: row.is_abnormal,
