@@ -186,7 +186,7 @@ def _build_preview_from_extract(
         zip_stored_path=_relative_to_project(stored_path),
         temp_dir=_relative_to_project(temp_dir),
         status="previewed" if not errors else "preview_failed",
-        message="; ".join(errors or warnings),
+        message="; ".join(errors + warnings),
     )
     db.add(job)
     db.commit()
