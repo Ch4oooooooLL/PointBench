@@ -7,7 +7,6 @@ const FIRST_USE_COOKIE = 'pointbench_first_use_notice_seen';
 const FIRST_USE_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 
 export function Layout() {
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [firstUseNoticeOpen, setFirstUseNoticeOpen] = useState(() => !hasCookie(FIRST_USE_COOKIE));
   const { projectsError, isLoadingProjects, refreshProjects } = useAppContext();
   const navigate = useNavigate();
@@ -60,10 +59,10 @@ export function Layout() {
             </NavLink>
           </nav>
         </div>
-        <button className="settings-button" onClick={() => setSettingsOpen(true)} title="设置">
+        <NavLink className="settings-button" to="/settings" title="设置">
           <Settings size={18} />
           设置
-        </button>
+        </NavLink>
       </aside>
       <main className="content">
         {projectsError && (
@@ -77,7 +76,6 @@ export function Layout() {
         <Outlet />
       </main>
       {firstUseNoticeOpen && <FirstUseNoticeModal onOpenGuide={openUsageGuide} onSkip={closeFirstUseNotice} />}
-      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }
@@ -101,84 +99,6 @@ function FirstUseNoticeModal({ onOpenGuide, onSkip }: { onOpenGuide: () => void;
       </div>
     </div>
   );
-}
-
-function SettingsModal({ onClose }: { onClose: () => void }) {
-  const { riskSettings, setRiskSettings, chartSettings, setChartSettings, debugMode, setDebugMode } = useAppContext();
-  const [warnPercent, setWarnPercent] = useState(String(riskSettings.warnPercent));
-  const [dangerPercent, setDangerPercent] = useState(String(riskSettings.dangerPercent));
-  const [criticalPercent, setCriticalPercent] = useState(String(riskSettings.criticalPercent));
-  const [overviewHeight, setOverviewHeight] = useState(String(chartSettings.overviewHeight));
-  const [overviewExpandedHeight, setOverviewExpandedHeight] = useState(String(chartSettings.overviewExpandedHeight));
-  const [debugEnabled, setDebugEnabled] = useState(debugMode);
-
-  function save() {
-    setRiskSettings({
-      warnPercent: Number(warnPercent),
-      dangerPercent: Number(dangerPercent),
-      criticalPercent: Number(criticalPercent),
-    });
-    setChartSettings({
-      overviewHeight: clampNumber(Number(overviewHeight), 360, 760),
-      overviewExpandedHeight: clampNumber(Number(overviewExpandedHeight), 480, 860),
-    });
-    setDebugMode(debugEnabled);
-    onClose();
-  }
-
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal settings-modal" onClick={(event) => event.stopPropagation()}>
-        <div className="section-head">
-          <div>
-            <h2>设置</h2>
-            <p>配置风险标识阈值，并控制调试工具是否显示。</p>
-          </div>
-          <button className="button" onClick={onClose}>关闭</button>
-        </div>
-
-        <div className="settings-section">
-          <h3>风险标识</h3>
-          <p>按当前值相对初始应力幅的增长百分比着色。</p>
-          <div className="settings-grid">
-            <label>预警阈值 %<input type="number" value={warnPercent} onChange={(event) => setWarnPercent(event.target.value)} /></label>
-            <label>危险阈值 %<input type="number" value={dangerPercent} onChange={(event) => setDangerPercent(event.target.value)} /></label>
-            <label>严重阈值 %<input type="number" value={criticalPercent} onChange={(event) => setCriticalPercent(event.target.value)} /></label>
-          </div>
-          <div className="risk-preview">
-            <span className="risk-badge normal">正常</span>
-            <span className="risk-badge warn">预警</span>
-            <span className="risk-badge danger">危险</span>
-            <span className="risk-badge critical">严重</span>
-          </div>
-        </div>
-
-        <div className="settings-section">
-          <h3>概览折线图</h3>
-          <p>调整项目概览中全点位应力幅趋势图的高度。</p>
-          <div className="settings-grid">
-            <label>普通视图高度 px<input type="number" min="360" max="760" value={overviewHeight} onChange={(event) => setOverviewHeight(event.target.value)} /></label>
-            <label>放大视图高度 px<input type="number" min="480" max="860" value={overviewExpandedHeight} onChange={(event) => setOverviewExpandedHeight(event.target.value)} /></label>
-          </div>
-        </div>
-
-        <div className="settings-section">
-          <h3>Debug 模式</h3>
-          <label className="toggle-row">
-            <input type="checkbox" checked={debugEnabled} onChange={(event) => setDebugEnabled(event.target.checked)} />
-            显示 CSV 测试数据导入工具
-          </label>
-        </div>
-
-        <button className="button primary" onClick={save}>保存设置</button>
-      </div>
-    </div>
-  );
-}
-
-function clampNumber(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return min;
-  return Math.min(Math.max(value, min), max);
 }
 
 function hasCookie(name: string): boolean {

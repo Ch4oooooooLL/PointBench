@@ -863,10 +863,6 @@ label {
   width: min(1280px, 98vw);
 }
 
-.settings-modal {
-  width: min(520px, 94vw);
-}
-
 .first-use-modal {
   width: min(460px, 94vw);
   text-align: center;
@@ -1151,25 +1147,60 @@ label {
 
 .settings-grid {
   display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
   margin-bottom: 16px;
 }
 
+.settings-page-panel {
+  max-width: 920px;
+}
+
+.settings-type-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  margin-bottom: 18px;
+  padding: 4px;
+  border-radius: 8px;
+  background: #dfe8eb;
+  overflow-x: auto;
+}
+
+.settings-type-tabs button {
+  border: 0;
+  min-height: 38px;
+  border-radius: 6px;
+  background: transparent;
+  color: #44545b;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.settings-type-tabs button.active {
+  background: #ffffff;
+  color: #0f766e;
+  box-shadow: 0 1px 4px rgba(15, 23, 27, 0.12);
+}
+
 .settings-section {
-  border-top: 1px solid #e4ebee;
-  padding-top: 14px;
-  margin-top: 14px;
+  display: grid;
+  gap: 10px;
 }
 
-.settings-section:first-of-type {
-  border-top: 0;
-  margin-top: 0;
-  padding-top: 0;
+.settings-section h2 {
+  font-size: 18px;
+  margin: 0;
 }
 
-.settings-section h3 {
-  margin: 0 0 6px;
-  font-size: 15px;
+.settings-section p {
+  margin: 0 0 4px;
 }
 
 .toggle-row {
