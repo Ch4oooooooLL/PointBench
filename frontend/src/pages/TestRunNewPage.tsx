@@ -32,6 +32,7 @@ export function TestRunNewPage() {
   const [dewesoftCycleCount, setDewesoftCycleCount] = useState('');
   const [dewesoftRunName, setDewesoftRunName] = useState('');
   const [dewesoftMessage, setDewesoftMessage] = useState('');
+  const [dewesoftAlertTone, setDewesoftAlertTone] = useState<'ok' | 'danger'>('danger');
   const [dewesoftBusy, setDewesoftBusy] = useState(false);
   const [lastDewesoftImport, setLastDewesoftImport] = useState<DewesoftImport | null>(null);
 
@@ -148,8 +149,11 @@ export function TestRunNewPage() {
 
   async function importDewesoft(file?: File) {
     if (!file) return;
-    if (!dewesoftCycleCount || !Number.isFinite(Number(dewesoftCycleCount))) {
-      setDewesoftMessage('请先填写本次导入对应的循环次数。');
+    const cycleCountText = dewesoftCycleCount.trim();
+    const cycleCountValue = Number(cycleCountText);
+    if (!cycleCountText || !Number.isFinite(cycleCountValue) || !Number.isInteger(cycleCountValue)) {
+      setDewesoftAlertTone('danger');
+      setDewesoftMessage('请先填写本次导入对应的整数循环次数。');
       return;
     }
     setDewesoftBusy(true);
@@ -157,22 +161,25 @@ export function TestRunNewPage() {
     setLastDewesoftImport(null);
     try {
       const form = new FormData();
-      form.append('cycle_count', dewesoftCycleCount);
-      if (dewesoftRunName) form.append('run_name', dewesoftRunName);
+      form.append('cycle_count', String(cycleCountValue));
+      if (dewesoftRunName.trim()) form.append('run_name', dewesoftRunName.trim());
       form.append('file', file);
       const result = await api.post<DewesoftImport>(`/api/dewesoft/projects/${projectId}/imports`, form);
       setLastDewesoftImport(result);
       if (result.status === 'imported') {
         const message = result.message || `导入完成：匹配 ${result.matched_channel_count} 个点位通道，未匹配 ${result.unmatched_channel_count} 个通道。`;
+        setDewesoftAlertTone('ok');
         setDewesoftMessage(message);
         if (message.includes('已自动新增')) {
           await refreshPointsAfterDewesoftImport();
           window.alert(`${message}。请到点位详情中补充对应信息。`);
         }
       } else {
+        setDewesoftAlertTone('danger');
         setDewesoftMessage(`导入未完成：${result.message || '请查看导入记录'}`);
       }
     } catch (err) {
+      setDewesoftAlertTone('danger');
       setDewesoftMessage(`导入失败：${(err as Error).message}`);
     } finally {
       setDewesoftBusy(false);
@@ -270,7 +277,7 @@ export function TestRunNewPage() {
             <DatabaseZap size={18} />
             CSV/TXT 导出文件可直接解析；原始 .dxd/.dxz 文件需要本机后端环境可加载 Dewesoft 官方 DWDataReaderLib。
           </div>
-          {dewesoftMessage && <div className={dewesoftMessage.includes('完成') ? 'alert ok' : 'alert danger'}>{dewesoftMessage}</div>}
+          {dewesoftMessage && <div className={`alert ${dewesoftAlertTone}`}>{dewesoftMessage}</div>}
           {lastDewesoftImport && <Link className="button" to={`/projects/${projectId}/dewesoft-imports`}>打开本次导入详情</Link>}
         </div>
       )}
