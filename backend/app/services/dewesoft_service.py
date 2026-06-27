@@ -308,23 +308,32 @@ def _split_name_unit(header: str) -> tuple[str, str | None]:
     return value, None
 
 
-def _point_number_key(value: str | None) -> str | None:
+POINT_KEY_PATTERN = re.compile(r"^\s*([A-Za-z]{0,3}\d+[A-Za-z]{0,3})\b")
+
+
+def _point_match_keys(value: str | None) -> list[str]:
     if not value:
-        return None
-    match = re.match(r"^\s*(\d{2})", value)
-    return match.group(1) if match else None
+        return []
+    match = POINT_KEY_PATTERN.match(value)
+    if not match:
+        return []
+    token = match.group(1).upper()
+    keys = [token]
+    if token.isdigit():
+        keys.append(token.lstrip("0") or "0")
+    return list(dict.fromkeys(keys))
 
 
 def _split_dewesoft_point_name(value: str | None) -> tuple[str, str] | None:
     if not value:
         return None
-    match = re.match(r"^\s*(\d{2})-(?P<name>.+?)\s*$", value)
+    match = re.match(r"^\s*([A-Za-z]{0,3}\d+[A-Za-z]{0,3})\s*[-_ ]+(?P<name>.+?)\s*$", value)
     if not match:
         return None
     point_name = match.group("name").strip()
     if not point_name:
         return None
-    return match.group(1), point_name
+    return match.group(1).upper(), point_name
 
 
 def _to_float(value: Any) -> float | None:
@@ -433,9 +442,9 @@ def import_dewesoft_file(db: Session, project_id: int, cycle_count: int, run_nam
         project_points = db.execute(select(models.TestPoint).where(models.TestPoint.project_db_id == project_id)).scalars().all()
         point_map: dict[str, models.TestPoint] = {}
         for point in project_points:
-            match_key = _point_number_key(point.point_id)
-            if match_key and match_key not in point_map:
-                point_map[match_key] = point
+            for match_key in _point_match_keys(point.point_id):
+                if match_key not in point_map:
+                    point_map[match_key] = point
 
         matched = 0
         unmatched = 0
@@ -446,8 +455,8 @@ def import_dewesoft_file(db: Session, project_id: int, cycle_count: int, run_nam
             max_value = max(window_values) if window_values else None
             mean_value = sum(window_values) / len(window_values) if window_values else None
             channel_match = _split_dewesoft_point_name(channel.name)
-            channel_key = channel_match[0] if channel_match else _point_number_key(channel.name)
-            point = point_map.get(channel_key)
+            channel_keys = [channel_match[0]] if channel_match else _point_match_keys(channel.name)
+            point = next((point_map[key] for key in channel_keys if key in point_map), None)
             if point is None and channel_match:
                 point = models.TestPoint(
                     project_db_id=project_id,
@@ -468,7 +477,8 @@ def import_dewesoft_file(db: Session, project_id: int, cycle_count: int, run_nam
                         unit=channel.unit,
                     )
                 )
-                point_map[channel_match[0]] = point
+                for match_key in _point_match_keys(point.point_id):
+                    point_map[match_key] = point
                 project_points.append(point)
                 created_points.append(point)
             measurement_id: int | None = None
