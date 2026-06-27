@@ -16,9 +16,10 @@ const labels: Record<Props['metric'], string> = {
 
 export function TrendChart({ data, metric }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
+  const hasData = data.some((item) => item[metric] != null);
 
   useEffect(() => {
-    if (!ref.current) return;
+    if (!ref.current || !hasData) return;
     const chart = echarts.init(ref.current);
     chart.setOption({
       tooltip: { trigger: 'axis' },
@@ -33,8 +34,9 @@ export function TrendChart({ data, metric }: Props) {
           data: data.map((item) => item[metric] ?? null),
           markPoint: {
             data: data
-              .filter((item) => item.is_abnormal)
-              .map((item) => ({ name: '异常', coord: [item.cycle_count, item[metric] ?? 0], value: '异常' })),
+              .map((item, index) => ({ item, index }))
+              .filter(({ item }) => item.is_abnormal && item[metric] != null)
+              .map(({ item, index }) => ({ name: '异常', coord: [index, item[metric] ?? 0], value: '异常' })),
           },
         },
       ],
@@ -45,7 +47,8 @@ export function TrendChart({ data, metric }: Props) {
       window.removeEventListener('resize', resize);
       chart.dispose();
     };
-  }, [data, metric]);
+  }, [data, metric, hasData]);
 
+  if (!hasData) return <div className="empty chart-empty">暂无趋势数据</div>;
   return <div className="chart" ref={ref} />;
 }

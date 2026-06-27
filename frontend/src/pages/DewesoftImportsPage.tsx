@@ -64,8 +64,9 @@ export function DewesoftImportsPage() {
 }
 
 function DewesoftImportDetail({ item }: { item: DewesoftImport }) {
-  const unmatched = item.channels.filter((channel) => !channel.matched_point_db_id);
-  const matched = item.channels.filter((channel) => channel.matched_point_db_id);
+  const channels = item.channels ?? [];
+  const unmatched = channels.filter((channel) => !channel.matched_point_db_id);
+  const matched = channels.filter((channel) => channel.matched_point_db_id);
 
   return (
     <div className="project-manager-main">

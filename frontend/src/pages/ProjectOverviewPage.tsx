@@ -74,12 +74,15 @@ export function ProjectOverviewPage() {
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
+    let cancelled = false;
     if (!selectedProjectId) {
       setPoints([]);
       setSummary(null);
       setTrends([]);
       setCrackRecords([]);
-      return;
+      return () => {
+        cancelled = true;
+      };
     }
     setPoints([]);
     setSummary(null);
@@ -92,6 +95,7 @@ export function ProjectOverviewPage() {
       api.get<CrackRecord[]>(`/api/projects/${selectedProjectId}/crack-records`),
     ])
       .then(async ([pointData, summaryData, crackData]) => {
+        if (cancelled) return;
         setPoints(pointData);
         setSummary(summaryData);
         setCrackRecords(crackData);
@@ -101,9 +105,15 @@ export function ProjectOverviewPage() {
             trend: await api.get<TrendItem[]>(`/api/points/${point.id}/trend`),
           })),
         );
+        if (cancelled) return;
         setTrends(trendData);
       })
-      .catch((err) => setError(err.message));
+      .catch((err) => {
+        if (!cancelled) setError(err.message);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [selectedProjectId, reloadKey]);
 
   const latestCycle = useMemo(() => {
@@ -209,6 +219,8 @@ export function ProjectOverviewPage() {
 }
 
 function CrackOverviewModal({ record, onClose }: { record: CrackRecord; onClose: () => void }) {
+  const [imageFailed, setImageFailed] = useState(false);
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal crack-detail-modal" onClick={(event) => event.stopPropagation()}>
@@ -219,7 +231,11 @@ function CrackOverviewModal({ record, onClose }: { record: CrackRecord; onClose:
           </div>
           <button className="button" onClick={onClose}>关闭</button>
         </div>
-        <img src={crackImageUrl(record.id)} alt={`${record.point_id} 裂纹详情`} />
+        {imageFailed ? (
+          <div className="thumb-empty crack-image-fallback">图片加载失败</div>
+        ) : (
+          <img src={crackImageUrl(record.id)} alt={`${record.point_id} 裂纹详情`} onError={() => setImageFailed(true)} />
+        )}
         <div className="kv-grid compact">
           <div><span>点位</span><strong>{record.point_id}</strong></div>
           <div><span>点位名称</span><strong>{record.point_name}</strong></div>

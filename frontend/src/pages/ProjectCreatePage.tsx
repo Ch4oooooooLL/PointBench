@@ -1,4 +1,4 @@
-import { Save } from 'lucide-react';
+import { Save, X } from 'lucide-react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
@@ -33,6 +33,7 @@ export function ProjectCreatePage() {
   const [form, setForm] = useState<ProjectForm>(emptyForm);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [messageTone, setMessageTone] = useState<'ok' | 'danger'>('danger');
 
   async function save() {
     setBusy(true);
@@ -41,8 +42,10 @@ export function ProjectCreatePage() {
       const project = await api.post<Project>('/api/projects', form);
       await refreshProjects();
       setSelectedProjectId(project.id);
+      setMessageTone('ok');
       navigate('/project-detail');
     } catch (err) {
+      setMessageTone('danger');
       setMessage(`创建失败：${(err as Error).message}`);
     } finally {
       setBusy(false);
@@ -56,13 +59,19 @@ export function ProjectCreatePage() {
           <h1>创建新项目</h1>
           <p>填写项目基础信息；点位信息在项目详情的编辑模式中维护。</p>
         </div>
-        <button className="button primary" disabled={busy || !form.project_id || !form.project_name} onClick={save}>
-          <Save size={18} />
-          保存项目
-        </button>
+        <div className="actions">
+          <button className="button" type="button" onClick={() => navigate(-1)}>
+            <X size={18} />
+            取消
+          </button>
+          <button className="button primary" disabled={busy || !form.project_id || !form.project_name} onClick={save}>
+            <Save size={18} />
+            保存项目
+          </button>
+        </div>
       </div>
 
-      {message && <div className="alert danger">{message}</div>}
+      {message && <div className={`alert ${messageTone}`}>{message}</div>}
 
       <div className="panel">
         <div className="project-edit-grid">

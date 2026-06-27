@@ -232,12 +232,14 @@ export function ProjectRowsPage() {
               </div>
             </div>
           )}
-          <div className="risk-summary">
-            <span className="risk-badge normal">正常 {riskCounts.normal}</span>
-            <span className="risk-badge warn">预警 {riskCounts.warn}</span>
-            <span className="risk-badge danger">危险 {riskCounts.danger}</span>
-            <span className="risk-badge critical">严重 {riskCounts.critical}</span>
-          </div>
+          {!!rows.length && (
+            <div className="risk-summary">
+              <span className="risk-badge normal">正常 {riskCounts.normal}</span>
+              <span className="risk-badge warn">预警 {riskCounts.warn}</span>
+              <span className="risk-badge danger">危险 {riskCounts.danger}</span>
+              <span className="risk-badge critical">严重 {riskCounts.critical}</span>
+            </div>
+          )}
           <div className="point-row-list">
             {rows.map((row) => (
               <PointRiskRow key={row.point.id} row={row} onOpen={() => setActive(row)} />

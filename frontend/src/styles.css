@@ -1062,6 +1062,13 @@ label {
   margin-bottom: 16px;
 }
 
+.crack-image-fallback {
+  width: 100%;
+  min-height: 260px;
+  margin-bottom: 16px;
+  border-radius: 8px;
+}
+
 .crack-remark {
   border: 1px solid #e4ebee;
   border-radius: 8px;
