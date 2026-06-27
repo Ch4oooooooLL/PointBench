@@ -2,6 +2,7 @@ import csv
 import json
 import re
 import shutil
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -33,6 +34,14 @@ def _safe_filename(filename: str) -> str:
     return Path(filename).name.replace("\\", "_").replace("/", "_")
 
 
+def _unique_upload_path(target_dir: Path, filename: str) -> Path:
+    target = target_dir / filename
+    if not target.exists():
+        return target
+    path = Path(filename)
+    return target_dir / f"{path.stem}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}{path.suffix}"
+
+
 async def save_dewesoft_upload(project: models.Project, upload: UploadFile) -> Path:
     if not upload.filename:
         raise HTTPException(status_code=400, detail="请上传 Dewesoft 数据文件")
@@ -41,7 +50,7 @@ async def save_dewesoft_upload(project: models.Project, upload: UploadFile) -> P
         raise HTTPException(status_code=400, detail="支持 Dewesoft .dxd/.dxz/.d7d/.d7z 原始文件，以及 .csv/.txt 导出文件")
     target_dir = STORAGE_DIR / "dewesoft" / project.project_id
     target_dir.mkdir(parents=True, exist_ok=True)
-    target = target_dir / _safe_filename(upload.filename)
+    target = _unique_upload_path(target_dir, _safe_filename(upload.filename))
     with target.open("wb") as output:
         while chunk := await upload.read(1024 * 1024):
             output.write(chunk)
@@ -403,14 +412,22 @@ def import_dewesoft_file(db: Session, project_id: int, cycle_count: int, run_nam
         import_job.stable_end_seconds = stable_end
         import_job.raw_metadata_json = json.dumps(metadata, ensure_ascii=False)
 
-        test_run = models.TestRun(
-            project_db_id=project_id,
-            run_name=run_name_value,
-            cycle_count=cycle_count,
-            remark=f"Dewesoft import: {upload_path.name}",
+        test_run = db.scalar(
+            select(models.TestRun).where(
+                models.TestRun.project_db_id == project_id,
+                models.TestRun.run_name == run_name_value,
+                models.TestRun.cycle_count == cycle_count,
+            )
         )
-        db.add(test_run)
-        db.flush()
+        if not test_run:
+            test_run = models.TestRun(
+                project_db_id=project_id,
+                run_name=run_name_value,
+                cycle_count=cycle_count,
+                remark=f"Dewesoft import: {upload_path.name}",
+            )
+            db.add(test_run)
+            db.flush()
         import_job.test_run_id = test_run.id
 
         project_points = db.execute(select(models.TestPoint).where(models.TestPoint.project_db_id == project_id)).scalars().all()
@@ -456,13 +473,17 @@ def import_dewesoft_file(db: Session, project_id: int, cycle_count: int, run_nam
                 created_points.append(point)
             measurement_id: int | None = None
             if point and min_value is not None and max_value is not None:
-                record = models.MeasurementRecord(
-                    run_id=test_run.id,
-                    point_db_id=point.id,
-                    max_strain_ue=max_value,
-                    min_strain_ue=min_value,
-                    remark=f"Dewesoft channel {channel.name}",
+                record = db.scalar(
+                    select(models.MeasurementRecord).where(
+                        models.MeasurementRecord.run_id == test_run.id,
+                        models.MeasurementRecord.point_db_id == point.id,
+                    )
                 )
+                if not record:
+                    record = models.MeasurementRecord(run_id=test_run.id, point_db_id=point.id)
+                record.max_strain_ue = max_value
+                record.min_strain_ue = min_value
+                record.remark = f"Dewesoft channel {channel.name}"
                 compute_measurement_fields(record)
                 db.add(record)
                 db.flush()
