@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 from app import models
 from app.database import STORAGE_DIR, get_db
 from app.schemas import MediaFileOut, PointOut, PointUpdate
+from app.services.file_service import resolve_stored_path
 from app.utils.hash_utils import file_sha256
 
 
@@ -128,9 +129,9 @@ def delete_point_media(point_id: int, media_id: int, db: Session = Depends(get_d
     media = db.get(models.MediaFile, media_id)
     if not media or media.point_db_id != point_id:
         raise HTTPException(status_code=404, detail="媒体记录不存在")
-    stored = BACKEND_ROOT / media.stored_path
+    stored = resolve_stored_path(media.stored_path)
     db.delete(media)
     db.commit()
-    if stored.exists() and STORAGE_DIR.resolve() in stored.resolve().parents:
+    if stored.exists():
         stored.unlink()
     return {"ok": True}
