@@ -9,6 +9,10 @@ from app import models
 
 ELASTIC_MODULUS_MPA = 206000
 STRAIN_TO_STRESS = ELASTIC_MODULUS_MPA * 1e-6
+AUTO_ABNORMAL_REASONS = (
+    "应变幅相对上一轮增长超过 20%",
+    "连续 3 次应变幅上升",
+)
 
 
 def _format_custom_fields(value: Any) -> str | None:
@@ -84,7 +88,9 @@ def compute_measurement_fields(record: models.MeasurementRecord) -> None:
 
 
 def is_manual_abnormal(record: models.MeasurementRecord) -> bool:
-    return bool(record.is_abnormal and record.abnormal_reason and "人工标记异常" in record.abnormal_reason)
+    if not record.is_abnormal or not record.abnormal_reason:
+        return False
+    return not any(reason in record.abnormal_reason for reason in AUTO_ABNORMAL_REASONS)
 
 
 def refresh_point_abnormal_flags(db: Session, point_db_id: int) -> None:
