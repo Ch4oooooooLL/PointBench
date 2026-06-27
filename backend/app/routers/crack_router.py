@@ -132,6 +132,62 @@ async def create_project_crack_record(
     return _record_out(record)
 
 
+@router.put("/crack-records/{record_id}", response_model=CrackRecordOut)
+async def update_crack_record(
+    record_id: int,
+    point_db_id: int = Form(...),
+    test_run_id: int | None = Form(None),
+    cycle_count: int | None = Form(None),
+    remark: str | None = Form(None),
+    file: UploadFile | None = File(None),
+    db: Session = Depends(get_db),
+) -> CrackRecordOut:
+    record = _load_project_record(record_id, db)
+    point = db.get(models.TestPoint, point_db_id)
+    if not point or point.project_db_id != record.project_db_id:
+        raise HTTPException(status_code=400, detail="点位不属于当前项目")
+
+    run = None
+    if test_run_id is not None:
+        run = db.get(models.TestRun, test_run_id)
+        if not run or run.project_db_id != record.project_db_id:
+            raise HTTPException(status_code=400, detail="测试轮次不属于当前项目")
+        if cycle_count is not None and cycle_count != run.cycle_count:
+            raise HTTPException(status_code=400, detail="填写的循环次数与所选测试轮次不一致")
+        cycle_count = run.cycle_count
+    if cycle_count is None:
+        raise HTTPException(status_code=400, detail="请选择或填写循环次数")
+    if cycle_count < 0:
+        raise HTTPException(status_code=400, detail="循环次数不能为负数")
+    if file and file.content_type and not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="只支持上传图片文件")
+
+    old_stored_path = resolve_stored_path(record.stored_path)
+    if file and file.filename:
+        safe_name = _safe_filename(file.filename)
+        project = db.get(models.Project, record.project_db_id)
+        target_dir = STORAGE_DIR / "projects" / project.project_id / "cracks" / str(point.id)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / f"{uuid.uuid4().hex[:10]}_{safe_name}"
+        with target.open("wb") as output:
+            while chunk := await file.read(1024 * 1024):
+                output.write(chunk)
+        record.stored_path = _relative_to_backend(target)
+        record.filename = safe_name
+        record.content_type = file.content_type
+        record.sha256 = file_sha256(target)
+
+    record.point_db_id = point.id
+    record.test_run_id = run.id if run else None
+    record.cycle_count = cycle_count
+    record.remark = remark.strip() if remark else None
+    db.commit()
+    if file and file.filename and old_stored_path.exists() and old_stored_path != resolve_stored_path(record.stored_path):
+        old_stored_path.unlink()
+    record = _load_project_record(record.id, db)
+    return _record_out(record)
+
+
 @router.get("/crack-records/{record_id}/image")
 def get_crack_record_image(record_id: int, db: Session = Depends(get_db)) -> FileResponse:
     record = db.get(models.CrackRecord, record_id)
