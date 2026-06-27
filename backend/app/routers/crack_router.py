@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 from app import models
 from app.database import STORAGE_DIR, get_db
 from app.schemas import CrackRecordOut
+from app.services.file_service import resolve_stored_path
 from app.utils.hash_utils import file_sha256
 
 
@@ -140,3 +141,16 @@ def get_crack_record_image(record_id: int, db: Session = Depends(get_db)) -> Fil
     if not path.exists():
         raise HTTPException(status_code=404, detail="裂纹图片不存在")
     return FileResponse(path, filename=record.filename, media_type=record.content_type or "application/octet-stream")
+
+
+@router.delete("/crack-records/{record_id}")
+def delete_crack_record(record_id: int, db: Session = Depends(get_db)) -> dict:
+    record = db.get(models.CrackRecord, record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="裂纹记录不存在")
+    stored = resolve_stored_path(record.stored_path)
+    db.delete(record)
+    db.commit()
+    if stored.exists():
+        stored.unlink()
+    return {"ok": True}

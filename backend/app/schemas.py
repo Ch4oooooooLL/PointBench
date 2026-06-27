@@ -252,6 +252,13 @@ class TestRunCreate(BaseModel):
     remark: str | None = None
 
 
+class TestRunUpdate(BaseModel):
+    run_name: str | None = None
+    cycle_count: int | None = None
+    test_time: str | None = None
+    remark: str | None = None
+
+
 class TestRunOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

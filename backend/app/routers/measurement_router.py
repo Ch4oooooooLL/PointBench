@@ -18,6 +18,7 @@ from app.schemas import (
     PointMeasurementRowOut,
     PointMeasurementRowUpdate,
     TestRunOut,
+    TestRunUpdate,
 )
 from app.services.analysis_service import compute_measurement_fields, refresh_point_abnormal_flags
 
@@ -178,6 +179,28 @@ def get_test_run(run_id: int, db: Session = Depends(get_db)) -> TestRunOut:
     run = db.get(models.TestRun, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="测试轮次不存在")
+    return TestRunOut.model_validate(run)
+
+
+@router.put("/api/test-runs/{run_id}", response_model=TestRunOut)
+def update_test_run(run_id: int, payload: TestRunUpdate, db: Session = Depends(get_db)) -> TestRunOut:
+    run = db.get(models.TestRun, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="测试轮次不存在")
+    data = payload.model_dump(exclude_unset=True)
+    if "run_name" in data:
+        run_name = (data["run_name"] or "").strip()
+        if not run_name:
+            raise HTTPException(status_code=400, detail="测试轮次名称不能为空")
+        run.run_name = run_name
+    if "cycle_count" in data and data["cycle_count"] is not None:
+        run.cycle_count = data["cycle_count"]
+    if "test_time" in data:
+        run.test_time = data["test_time"]
+    if "remark" in data:
+        run.remark = data["remark"]
+    db.commit()
+    db.refresh(run)
     return TestRunOut.model_validate(run)
 
 
@@ -414,6 +437,18 @@ def update_point_measurement_row(
     db.commit()
     db.refresh(record)
     return _measurement_row_out(record)
+
+
+@router.delete("/api/points/{point_id}/measurement-rows/{measurement_id}")
+def delete_point_measurement_row(point_id: int, measurement_id: int, db: Session = Depends(get_db)) -> dict:
+    record = db.get(models.MeasurementRecord, measurement_id)
+    if not record or record.point_db_id != point_id:
+        raise HTTPException(status_code=404, detail="测量记录不存在")
+    db.delete(record)
+    db.flush()
+    refresh_point_abnormal_flags(db, point_id)
+    db.commit()
+    return {"ok": True}
 
 
 @router.put("/api/measurements/{measurement_id}", response_model=MeasurementOut)

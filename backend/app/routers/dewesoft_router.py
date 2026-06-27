@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session, selectinload
 from app import models
 from app.database import get_db
 from app.schemas import DewesoftImportOut
+from app.services.file_service import resolve_stored_path
 from app.services.dewesoft_service import import_dewesoft_file, save_dewesoft_upload
 
 
@@ -50,3 +51,16 @@ def get_dewesoft_import(import_id: int, db: Session = Depends(get_db)) -> Deweso
     if not import_job:
         raise HTTPException(status_code=404, detail="Dewesoft 导入记录不存在")
     return DewesoftImportOut.model_validate(import_job)
+
+
+@router.delete("/imports/{import_id}")
+def delete_dewesoft_import(import_id: int, db: Session = Depends(get_db)) -> dict:
+    import_job = db.get(models.DewesoftImport, import_id)
+    if not import_job:
+        raise HTTPException(status_code=404, detail="Dewesoft 导入记录不存在")
+    stored = resolve_stored_path(import_job.stored_path)
+    db.delete(import_job)
+    db.commit()
+    if stored.exists():
+        stored.unlink()
+    return {"ok": True}
