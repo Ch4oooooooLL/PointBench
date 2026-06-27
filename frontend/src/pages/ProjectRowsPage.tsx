@@ -113,6 +113,10 @@ function mediaTypeLabel(type: string): string {
   return '未分类';
 }
 
+function isSameValue(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 export function ProjectRowsPage() {
   const { selectedProject, selectedProjectId, riskSettings, refreshProjects } = useAppContext();
   const [rows, setRows] = useState<PointRow[]>([]);
@@ -312,6 +316,7 @@ function PointRiskModal({
   const [trend, setTrend] = useState<TrendItem[]>(row.trend);
   const [form, setForm] = useState<PointForm>(toPointForm(row.point));
   const [measurements, setMeasurements] = useState<EditableMeasurementRow[]>([]);
+  const [measurementSnapshot, setMeasurementSnapshot] = useState<EditableMeasurementRow[]>([]);
   const [deletedMeasurementIds, setDeletedMeasurementIds] = useState<number[]>([]);
   const [previewUrl, setPreviewUrl] = useState('');
   const [message, setMessage] = useState('');
@@ -319,6 +324,15 @@ function PointRiskModal({
   const [activeTab, setActiveTab] = useState<PointEditTab>('main');
   const [pasteMediaType, setPasteMediaType] = useState<MediaType>('overall');
   const initial = firstStress(trend);
+  const hasUnsavedChanges = editMode && (
+    !isSameValue(form, toPointForm(point)) ||
+    !isSameValue(measurements, measurementSnapshot) ||
+    deletedMeasurementIds.length > 0
+  );
+
+  function closeWithConfirm() {
+    if (!hasUnsavedChanges || window.confirm('当前点位有未保存修改，确认放弃这些修改？')) onClose();
+  }
 
   useEffect(() => {
     setPoint(row.point);
@@ -356,7 +370,9 @@ function PointRiskModal({
 
   async function loadMeasurementRows(pointId: number) {
     const data = await api.get<PointMeasurementRow[]>(`/api/points/${pointId}/measurement-rows`);
-    setMeasurements(toEditableRows(data));
+    const editableRows = toEditableRows(data);
+    setMeasurements(editableRows);
+    setMeasurementSnapshot(editableRows);
     setDeletedMeasurementIds([]);
   }
 
@@ -458,7 +474,7 @@ function PointRiskModal({
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" onClick={closeWithConfirm}>
       <div className="modal point-modal" onClick={(event) => event.stopPropagation()}>
         <div className="section-head">
           <div>
@@ -467,7 +483,7 @@ function PointRiskModal({
           </div>
           <div className="actions">
             {editMode && <button className="button primary" disabled={busy} onClick={savePoint}><Save size={18} />保存点位</button>}
-            <button className="button" onClick={onClose}>关闭</button>
+            <button className="button" onClick={closeWithConfirm}>关闭</button>
           </div>
         </div>
         {message && <div className={message.includes('失败') ? 'alert danger' : 'alert ok'}>{message}</div>}

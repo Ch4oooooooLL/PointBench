@@ -28,6 +28,10 @@ function toProjectForm(project: Project | null): ProjectForm {
   };
 }
 
+function isSameProjectForm(left: ProjectForm, right: ProjectForm): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 export function ProjectDetailPage() {
   const { projectId } = useParams();
   const navigate = useNavigate();
@@ -65,12 +69,21 @@ export function ProjectDetailPage() {
 
   if (!project) return <div className="empty">加载中...</div>;
 
+  const hasUnsavedProjectChanges = !isSameProjectForm(projectForm, toProjectForm(project));
+
+  function toggleEditMode() {
+    if (editMode && hasUnsavedProjectChanges && !window.confirm('项目信息有未保存修改，确认退出编辑模式？')) return;
+    setEditMode(!editMode);
+    if (editMode) setProjectForm(toProjectForm(project));
+  }
+
   async function saveProject() {
     if (!project) return;
     setMessage('');
     try {
       const data = await api.put<Project>(`/api/projects/${project.id}`, projectForm);
       setProject(data);
+      setProjectForm(toProjectForm(data));
       await refreshProjects();
       setMessage('项目基础信息已保存。');
     } catch (err) {
@@ -100,7 +113,7 @@ export function ProjectDetailPage() {
         <div className="actions">
           {editMode && <button className="button" onClick={addPoint}><Plus size={18} />新增点位</button>}
           {editMode && <button className="button primary" onClick={saveProject}><Save size={18} />保存</button>}
-          <button className="button" onClick={() => setEditMode(!editMode)}>
+          <button className="button" onClick={toggleEditMode}>
             {editMode ? <X size={18} /> : <Pencil size={18} />}
             {editMode ? '退出编辑' : '编辑模式'}
           </button>

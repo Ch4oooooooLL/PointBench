@@ -78,12 +78,17 @@ function integerOrNull(value: string): number | null {
   return Number.isInteger(number) ? number : null;
 }
 
+function isSameValue(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 export function PointDetailPage() {
   const { pointId } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const [point, setPoint] = useState<Point | null>(null);
   const [form, setForm] = useState<PointForm>(toPointForm(null));
   const [rows, setRows] = useState<EditableMeasurementRow[]>([]);
+  const [rowSnapshot, setRowSnapshot] = useState<EditableMeasurementRow[]>([]);
   const [deletedMeasurementIds, setDeletedMeasurementIds] = useState<number[]>([]);
   const [trend, setTrend] = useState<TrendItem[]>([]);
   const [metric, setMetric] = useState<Metric>('amplitude_strain_ue');
@@ -98,7 +103,9 @@ export function PointDetailPage() {
       setForm(toPointForm(data));
     });
     api.get<PointMeasurementRow[]>(`/api/points/${pointId}/measurement-rows`).then((data) => {
-      setRows(toEditableRows(data));
+      const editableRows = toEditableRows(data);
+      setRows(editableRows);
+      setRowSnapshot(editableRows);
       setDeletedMeasurementIds([]);
     });
     api.get<TrendItem[]>(`/api/points/${pointId}/trend`).then(setTrend);
@@ -128,6 +135,17 @@ export function PointDetailPage() {
   }, [editMode, pointId]);
 
   function toggleEditMode() {
+    if (editMode && point) {
+      const hasUnsavedChanges = (
+        !isSameValue(form, toPointForm(point)) ||
+        !isSameValue(rows, rowSnapshot) ||
+        deletedMeasurementIds.length > 0
+      );
+      if (hasUnsavedChanges && !window.confirm('当前点位有未保存修改，确认退出编辑模式？')) return;
+      setForm(toPointForm(point));
+      setRows(rowSnapshot);
+      setDeletedMeasurementIds([]);
+    }
     const next = !editMode;
     setEditMode(next);
     setSearchParams(next ? { edit: '1' } : {});

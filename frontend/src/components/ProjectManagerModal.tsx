@@ -31,6 +31,10 @@ function toForm(project: Project | null): ProjectForm {
   };
 }
 
+function isSameForm(left: ProjectForm, right: ProjectForm): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 export function ProjectManagerModal({ onClose }: Props) {
   const { projects, selectedProjectId, selectedProject, setSelectedProjectId, refreshProjects } = useAppContext();
   const [form, setForm] = useState<ProjectForm>(toForm(selectedProject));
@@ -42,6 +46,21 @@ export function ProjectManagerModal({ onClose }: Props) {
     setMessage('');
   }, [selectedProject]);
 
+  const hasUnsavedChanges = selectedProject ? !isSameForm(form, toForm(selectedProject)) : false;
+
+  function confirmDiscardChanges(): boolean {
+    return !hasUnsavedChanges || window.confirm('当前项目信息有未保存修改，确认放弃这些修改？');
+  }
+
+  function closeWithConfirm() {
+    if (confirmDiscardChanges()) onClose();
+  }
+
+  function selectProject(projectId: number) {
+    if (!confirmDiscardChanges()) return;
+    setSelectedProjectId(projectId);
+  }
+
   async function save() {
     if (!selectedProjectId) return;
     setBusy(true);
@@ -50,6 +69,7 @@ export function ProjectManagerModal({ onClose }: Props) {
       await api.put<Project>(`/api/projects/${selectedProjectId}`, form);
       await refreshProjects();
       setSelectedProjectId(selectedProjectId);
+      setForm(form);
       setMessage('项目信息已保存。');
     } catch (err) {
       setMessage(`保存失败：${(err as Error).message}`);
@@ -75,17 +95,20 @@ export function ProjectManagerModal({ onClose }: Props) {
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" onClick={closeWithConfirm}>
       <div className="modal project-manager-modal" onClick={(event) => event.stopPropagation()}>
         <div className="section-head">
           <div>
             <h2>项目管理</h2>
             <p>选择当前项目，编辑项目基础信息，或导出、删除项目。</p>
           </div>
-          <button className="button" onClick={onClose}>关闭</button>
+          <button className="button" onClick={closeWithConfirm}>关闭</button>
         </div>
         <div className="manager-actions top-actions">
-          <Link className="button primary" to="/projects/new" onClick={onClose}>创建新项目</Link>
+          <Link className="button primary" to="/projects/new" onClick={(event) => {
+            if (!confirmDiscardChanges()) event.preventDefault();
+            else onClose();
+          }}>创建新项目</Link>
         </div>
 
         <div className="manager-layout">
@@ -94,7 +117,7 @@ export function ProjectManagerModal({ onClose }: Props) {
               <button
                 key={project.id}
                 className={project.id === selectedProjectId ? 'manager-project active' : 'manager-project'}
-                onClick={() => setSelectedProjectId(project.id)}
+                onClick={() => selectProject(project.id)}
               >
                 <strong>{project.project_name}</strong>
                 <span>{project.project_id}</span>
