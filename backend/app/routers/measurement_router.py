@@ -16,6 +16,8 @@ from app.schemas import (
     MeasurementUpdate,
     PointMeasurementRowCreate,
     PointMeasurementRowOut,
+    PointMeasurementRowsSave,
+    PointMeasurementRowSave,
     PointMeasurementRowUpdate,
     TestRunOut,
     TestRunUpdate,
@@ -136,7 +138,7 @@ def _measurement_row_out(record: models.MeasurementRecord) -> PointMeasurementRo
     return PointMeasurementRowOut.model_validate(data)
 
 
-def _measurement_payload_from_row(payload: PointMeasurementRowCreate | PointMeasurementRowUpdate) -> MeasurementUpdate:
+def _measurement_payload_from_row(payload: PointMeasurementRowCreate | PointMeasurementRowUpdate | PointMeasurementRowSave) -> MeasurementUpdate:
     data = payload.model_dump(exclude_unset=True)
     return MeasurementUpdate(
         **{
@@ -145,6 +147,82 @@ def _measurement_payload_from_row(payload: PointMeasurementRowCreate | PointMeas
             if key in data
         }
     )
+
+
+def _upsert_point_measurement_row(
+    db: Session,
+    point: models.TestPoint,
+    payload: PointMeasurementRowCreate | PointMeasurementRowUpdate | PointMeasurementRowSave,
+    measurement_id: int | None = None,
+) -> models.MeasurementRecord:
+    data = payload.model_dump(exclude_unset=True)
+    if measurement_id is None:
+        if data.get("cycle_count") is None:
+            raise HTTPException(status_code=400, detail="循环次数不能为空")
+        cycle_count = data["cycle_count"]
+        run = _find_run_by_cycle(db, point.project_db_id, cycle_count)
+        if not run:
+            run = models.TestRun(
+                project_db_id=point.project_db_id,
+                run_name=(data.get("run_name") or f"R{cycle_count}").strip() or f"R{cycle_count}",
+                cycle_count=cycle_count,
+            )
+            db.add(run)
+            db.flush()
+        elif data.get("run_name") and _run_measurement_count(db, run.id) == 0:
+            run.run_name = data["run_name"].strip() or run.run_name
+
+        record = db.scalar(
+            select(models.MeasurementRecord).where(
+                models.MeasurementRecord.run_id == run.id,
+                models.MeasurementRecord.point_db_id == point.id,
+            )
+        )
+        if not record:
+            record = models.MeasurementRecord(run_id=run.id, point_db_id=point.id)
+        apply_measurement_payload(record, _measurement_payload_from_row(payload))
+        db.add(record)
+        db.flush()
+        return record
+
+    record = db.get(models.MeasurementRecord, measurement_id)
+    if not record or record.point_db_id != point.id:
+        raise HTTPException(status_code=404, detail="测量记录不存在")
+
+    next_cycle_count = data["cycle_count"] if data.get("cycle_count") is not None else record.run.cycle_count
+    next_run_name = data["run_name"].strip() if data.get("run_name") is not None else record.run.run_name
+    next_run_name = next_run_name or record.run.run_name or f"R{next_cycle_count}"
+    run_changed = next_cycle_count != record.run.cycle_count or next_run_name != record.run.run_name
+
+    if run_changed:
+        if next_cycle_count == record.run.cycle_count and _run_measurement_count(db, record.run_id, measurement_id) == 0:
+            record.run.run_name = next_run_name
+        else:
+            target_run = _find_named_run(db, point.project_db_id, next_cycle_count, next_run_name)
+            if not target_run and "run_name" not in data:
+                target_run = _find_run_by_cycle(db, point.project_db_id, next_cycle_count)
+            if not target_run:
+                target_run = models.TestRun(
+                    project_db_id=point.project_db_id,
+                    run_name=next_run_name,
+                    cycle_count=next_cycle_count,
+                )
+                db.add(target_run)
+                db.flush()
+
+            existing = db.scalar(
+                select(models.MeasurementRecord).where(
+                    models.MeasurementRecord.run_id == target_run.id,
+                    models.MeasurementRecord.point_db_id == record.point_db_id,
+                    models.MeasurementRecord.id != record.id,
+                )
+            )
+            if existing:
+                raise HTTPException(status_code=400, detail="目标循环次数下已存在该点位的测量记录，请先编辑或删除已有记录")
+            record.run = target_run
+    apply_measurement_payload(record, _measurement_payload_from_row(payload))
+    db.flush()
+    return record
 
 
 def _run_measurement_count(db: Session, run_id: int, exclude_measurement_id: int | None = None) -> int:
@@ -356,32 +434,7 @@ def create_point_measurement_row(
     point = db.get(models.TestPoint, point_id)
     if not point:
         raise HTTPException(status_code=404, detail="点位不存在")
-    run = db.scalar(
-        select(models.TestRun).where(
-            models.TestRun.project_db_id == point.project_db_id,
-            models.TestRun.cycle_count == payload.cycle_count,
-        )
-    )
-    if not run:
-        run = models.TestRun(
-            project_db_id=point.project_db_id,
-            run_name=(payload.run_name or f"R{payload.cycle_count}").strip() or f"R{payload.cycle_count}",
-            cycle_count=payload.cycle_count,
-        )
-        db.add(run)
-        db.flush()
-    elif payload.run_name and _run_measurement_count(db, run.id) == 0:
-        run.run_name = payload.run_name.strip() or run.run_name
-    record = db.scalar(
-        select(models.MeasurementRecord).where(
-            models.MeasurementRecord.run_id == run.id,
-            models.MeasurementRecord.point_db_id == point.id,
-        )
-    )
-    if not record:
-        record = models.MeasurementRecord(run_id=run.id, point_db_id=point.id)
-    apply_measurement_payload(record, _measurement_payload_from_row(payload))
-    db.add(record)
+    record = _upsert_point_measurement_row(db, point, payload)
     db.flush()
     refresh_point_abnormal_flags(db, point.id)
     db.commit()
@@ -399,44 +452,43 @@ def update_point_measurement_row(
     record = db.get(models.MeasurementRecord, measurement_id)
     if not record or record.point_db_id != point_id:
         raise HTTPException(status_code=404, detail="测量记录不存在")
-    data = payload.model_dump(exclude_unset=True)
-    next_cycle_count = data["cycle_count"] if data.get("cycle_count") is not None else record.run.cycle_count
-    next_run_name = data["run_name"].strip() if data.get("run_name") is not None else record.run.run_name
-    next_run_name = next_run_name or record.run.run_name or f"R{next_cycle_count}"
-    run_changed = next_cycle_count != record.run.cycle_count or next_run_name != record.run.run_name
-
-    if run_changed:
-        if next_cycle_count == record.run.cycle_count and _run_measurement_count(db, record.run_id, measurement_id) == 0:
-            record.run.run_name = next_run_name
-        else:
-            target_run = _find_named_run(db, record.point.project_db_id, next_cycle_count, next_run_name)
-            if not target_run and "run_name" not in data:
-                target_run = _find_run_by_cycle(db, record.point.project_db_id, next_cycle_count)
-            if not target_run:
-                target_run = models.TestRun(
-                    project_db_id=record.point.project_db_id,
-                    run_name=next_run_name,
-                    cycle_count=next_cycle_count,
-                )
-                db.add(target_run)
-                db.flush()
-
-            existing = db.scalar(
-                select(models.MeasurementRecord).where(
-                    models.MeasurementRecord.run_id == target_run.id,
-                    models.MeasurementRecord.point_db_id == record.point_db_id,
-                    models.MeasurementRecord.id != record.id,
-                )
-            )
-            if existing:
-                raise HTTPException(status_code=400, detail="目标循环次数下已存在该点位的测量记录，请先编辑或删除已有记录")
-            record.run = target_run
-    apply_measurement_payload(record, _measurement_payload_from_row(payload))
+    record = _upsert_point_measurement_row(db, record.point, payload, measurement_id)
     db.flush()
     refresh_point_abnormal_flags(db, record.point_db_id)
     db.commit()
     db.refresh(record)
     return _measurement_row_out(record)
+
+
+@router.put("/api/points/{point_id}/measurement-rows", response_model=list[PointMeasurementRowOut])
+def save_point_measurement_rows(
+    point_id: int,
+    payload: PointMeasurementRowsSave,
+    db: Session = Depends(get_db),
+) -> list[PointMeasurementRowOut]:
+    point = db.get(models.TestPoint, point_id)
+    if not point:
+        raise HTTPException(status_code=404, detail="点位不存在")
+    deleted_ids = set(payload.deleted_measurement_ids)
+    for measurement_id in deleted_ids:
+        record = db.get(models.MeasurementRecord, measurement_id)
+        if not record or record.point_db_id != point_id:
+            raise HTTPException(status_code=404, detail=f"测量记录不存在: {measurement_id}")
+        db.delete(record)
+    db.flush()
+
+    saved: list[models.MeasurementRecord] = []
+    for row in payload.measurements:
+        if row.id in deleted_ids:
+            raise HTTPException(status_code=400, detail=f"测量记录不能同时删除和保存: {row.id}")
+        saved.append(_upsert_point_measurement_row(db, point, row, row.id))
+
+    db.flush()
+    refresh_point_abnormal_flags(db, point_id)
+    db.commit()
+    for record in saved:
+        db.refresh(record)
+    return [_measurement_row_out(record) for record in saved]
 
 
 @router.delete("/api/points/{point_id}/measurement-rows/{measurement_id}")

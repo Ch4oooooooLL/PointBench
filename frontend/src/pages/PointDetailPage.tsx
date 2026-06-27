@@ -204,11 +204,10 @@ export function PointDetailPage() {
         ...form,
         resistance_ohm: numberOrNull(form.resistance_ohm),
       });
-      for (const measurementId of deletedMeasurementIds) {
-        await api.delete(`/api/measurements/${measurementId}`);
-      }
-      for (const row of rows) {
-        const payload = {
+      await api.put<PointMeasurementRow[]>(`/api/points/${pointId}/measurement-rows`, {
+        deleted_measurement_ids: deletedMeasurementIds,
+        measurements: rows.map((row) => ({
+          id: row.id,
           run_name: row.run_name || undefined,
           cycle_count: integerOrNull(row.cycle_count) as number,
           max_strain_ue: numberOrNull(row.max_strain_ue),
@@ -216,13 +215,8 @@ export function PointDetailPage() {
           is_abnormal: row.is_abnormal,
           abnormal_reason: row.abnormal_reason || null,
           remark: row.remark || null,
-        };
-        if (row.id) {
-          await api.put<PointMeasurementRow>(`/api/points/${pointId}/measurement-rows/${row.id}`, payload);
-        } else {
-          await api.post<PointMeasurementRow>(`/api/points/${pointId}/measurement-rows`, payload);
-        }
-      }
+        })),
+      });
       load();
       setMessage('点位信息已保存。');
     } catch (err) {

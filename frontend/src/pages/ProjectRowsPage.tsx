@@ -435,11 +435,10 @@ function PointRiskModal({
         ...form,
         resistance_ohm: numberOrNull(form.resistance_ohm),
       });
-      for (const measurementId of deletedMeasurementIds) {
-        await api.delete(`/api/measurements/${measurementId}`);
-      }
-      for (const measurement of measurements) {
-        const payload = {
+      await api.put<PointMeasurementRow[]>(`/api/points/${point.id}/measurement-rows`, {
+        deleted_measurement_ids: deletedMeasurementIds,
+        measurements: measurements.map((measurement) => ({
+          id: measurement.id,
           run_name: measurement.run_name || undefined,
           cycle_count: integerOrNull(measurement.cycle_count) as number,
           max_strain_ue: numberOrNull(measurement.max_strain_ue),
@@ -447,13 +446,8 @@ function PointRiskModal({
           is_abnormal: measurement.is_abnormal,
           abnormal_reason: measurement.abnormal_reason || null,
           remark: measurement.remark || null,
-        };
-        if (measurement.id) {
-          await api.put<PointMeasurementRow>(`/api/points/${point.id}/measurement-rows/${measurement.id}`, payload);
-        } else {
-          await api.post<PointMeasurementRow>(`/api/points/${point.id}/measurement-rows`, payload);
-        }
-      }
+        })),
+      });
       await refreshPoint();
       setMessage('点位信息已保存。');
     } catch (err) {

@@ -335,6 +335,22 @@ class PointMeasurementRowUpdate(BaseModel):
     remark: str | None = None
 
 
+class PointMeasurementRowSave(BaseModel):
+    id: int | None = None
+    run_name: str | None = None
+    cycle_count: int
+    max_strain_ue: float | None = None
+    min_strain_ue: float | None = None
+    is_abnormal: bool | None = None
+    abnormal_reason: str | None = None
+    remark: str | None = None
+
+
+class PointMeasurementRowsSave(BaseModel):
+    deleted_measurement_ids: list[int] = []
+    measurements: list[PointMeasurementRowSave] = []
+
+
 class PointMeasurementRowOut(MeasurementOut):
     run_name: str
     cycle_count: int
