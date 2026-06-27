@@ -93,6 +93,8 @@ async def create_project_crack_record(
         run = db.get(models.TestRun, test_run_id)
         if not run or run.project_db_id != project_id:
             raise HTTPException(status_code=400, detail="测试轮次不属于当前项目")
+        if cycle_count is not None and cycle_count != run.cycle_count:
+            raise HTTPException(status_code=400, detail="填写的循环次数与所选测试轮次不一致")
         cycle_count = run.cycle_count
     if cycle_count is None:
         raise HTTPException(status_code=400, detail="请选择或填写循环次数")
