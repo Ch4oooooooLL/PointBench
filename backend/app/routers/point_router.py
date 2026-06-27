@@ -78,6 +78,29 @@ def update_point(point_id: int, payload: PointUpdate, db: Session = Depends(get_
     return PointOut.model_validate(point)
 
 
+@router.delete("/{point_id}")
+def delete_point(point_id: int, db: Session = Depends(get_db)) -> dict:
+    point = db.execute(
+        select(models.TestPoint)
+        .options(selectinload(models.TestPoint.media_files), selectinload(models.TestPoint.crack_records))
+        .where(models.TestPoint.id == point_id)
+    ).scalar_one_or_none()
+    if not point:
+        raise HTTPException(status_code=404, detail="点位不存在")
+
+    stored_files = [
+        resolve_stored_path(item.stored_path)
+        for item in [*point.media_files, *point.crack_records]
+        if item.stored_path
+    ]
+    db.delete(point)
+    db.commit()
+    for stored in stored_files:
+        if stored.exists():
+            stored.unlink()
+    return {"ok": True}
+
+
 @router.post("/{point_id}/media", response_model=MediaFileOut)
 async def upload_point_media(
     point_id: int,

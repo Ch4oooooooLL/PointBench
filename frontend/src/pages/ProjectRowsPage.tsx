@@ -7,7 +7,7 @@ import { useAppContext, type RiskSettings } from '../context/AppContext';
 import { Point, PointMeasurementRow, Project, TrendItem } from '../types';
 import { growthPercent, riskLabel, riskLevel, riskPercentText } from '../utils/risk';
 
-interface PointRow {
+export interface PointRow {
   point: Point;
   trend: TrendItem[];
 }
@@ -300,16 +300,20 @@ function PointRiskRow({ row, onOpen }: { row: PointRow; onOpen: () => void }) {
   );
 }
 
-function PointRiskModal({
+export function PointRiskModal({
   row,
   editMode,
+  deletingPoint = false,
   onClose,
   onChanged,
+  onDeletePoint,
 }: {
   row: PointRow;
   editMode: boolean;
+  deletingPoint?: boolean;
   onClose: () => void;
   onChanged: () => Promise<void>;
+  onDeletePoint?: () => void;
 }) {
   const { riskSettings } = useAppContext();
   const [point, setPoint] = useState<Point>(row.point);
@@ -482,6 +486,12 @@ function PointRiskModal({
             <p>{point.component || '-'} · {point.position_description || '未填写位置描述'}</p>
           </div>
           <div className="actions">
+            {editMode && onDeletePoint && (
+              <button className="button danger-text" disabled={busy || deletingPoint} onClick={onDeletePoint}>
+                <Trash2 size={18} />
+                {deletingPoint ? '删除中...' : '删除点位'}
+              </button>
+            )}
             {editMode && <button className="button primary" disabled={busy} onClick={savePoint}><Save size={18} />保存点位</button>}
             <button className="button" onClick={closeWithConfirm}>关闭</button>
           </div>

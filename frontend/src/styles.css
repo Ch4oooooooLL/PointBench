@@ -973,6 +973,91 @@ label {
   font-size: 13px;
 }
 
+.crack-point-editor {
+  margin-bottom: 18px;
+}
+
+.crack-point-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.crack-point-card {
+  position: relative;
+  border: 1px solid #d7e0e3;
+  border-radius: 8px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.crack-point-open {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr);
+  gap: 12px;
+  padding: 10px 46px 10px 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.crack-point-open:hover {
+  background: #f5f9fa;
+}
+
+.crack-point-thumb {
+  width: 82px;
+  height: 62px;
+  border-radius: 8px;
+  background: #dce7ea;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  color: #6b7d84;
+}
+
+.crack-point-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.crack-point-body {
+  min-width: 0;
+  display: grid;
+  align-content: center;
+  gap: 5px;
+}
+
+.crack-point-body strong,
+.crack-point-body small,
+.crack-point-body em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crack-point-body small {
+  color: #52666d;
+}
+
+.crack-point-body em {
+  color: #6b7d84;
+  font-style: normal;
+  font-size: 12px;
+}
+
+.crack-point-delete {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  height: 34px;
+  width: 34px;
+  min-height: 34px;
+}
+
 .crack-record-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));

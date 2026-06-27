@@ -1,9 +1,10 @@
-import { Camera, Clipboard, ImagePlus, Plus, RefreshCw, Trash2 } from 'lucide-react';
-import { ClipboardEvent, useEffect, useMemo, useState } from 'react';
-import { api, crackImageUrl } from '../api/client';
+import { Camera, Clipboard, ImageOff, ImagePlus, Pencil, Plus, RefreshCw, Trash2, X } from 'lucide-react';
+import { ClipboardEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { api, crackImageUrl, mediaUrl } from '../api/client';
 import { ProjectSelector } from '../components/ProjectSelector';
 import { useAppContext } from '../context/AppContext';
 import { CrackRecord, Point, TestRun } from '../types';
+import { PointRiskModal, type PointRow } from './ProjectRowsPage';
 
 export function CrackRecordsPage() {
   const { selectedProject, selectedProjectId } = useAppContext();
@@ -12,11 +13,16 @@ export function CrackRecordsPage() {
   const [records, setRecords] = useState<CrackRecord[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [previewRecord, setPreviewRecord] = useState<CrackRecord | null>(null);
+  const [activePoint, setActivePoint] = useState<PointRow | null>(null);
+  const [editMode, setEditMode] = useState(false);
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [deletingPointId, setDeletingPointId] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
+  const loadProjectData = useCallback(async () => {
     if (!selectedProjectId) {
       setPoints([]);
       setTestRuns([]);
@@ -24,18 +30,30 @@ export function CrackRecordsPage() {
       return;
     }
     setError('');
-    Promise.all([
-      api.get<Point[]>(`/api/projects/${selectedProjectId}/points`),
-      api.get<TestRun[]>(`/api/projects/${selectedProjectId}/test-runs`),
-      api.get<CrackRecord[]>(`/api/projects/${selectedProjectId}/crack-records`),
-    ])
-      .then(([pointData, runData, recordData]) => {
-        setPoints(pointData);
-        setTestRuns(runData);
-        setRecords(recordData);
-      })
-      .catch((err) => setError(err.message));
-  }, [selectedProjectId, reloadKey]);
+    try {
+      const [pointData, runData, recordData] = await Promise.all([
+        api.get<Point[]>(`/api/projects/${selectedProjectId}/points`),
+        api.get<TestRun[]>(`/api/projects/${selectedProjectId}/test-runs`),
+        api.get<CrackRecord[]>(`/api/projects/${selectedProjectId}/crack-records`),
+      ]);
+      setPoints(pointData);
+      setTestRuns(runData);
+      setRecords(recordData);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }, [selectedProjectId]);
+
+  useEffect(() => {
+    loadProjectData();
+  }, [loadProjectData, reloadKey]);
+
+  useEffect(() => {
+    setActivePoint(null);
+    setPreviewRecord(null);
+    setEditMode(false);
+    setMessage('');
+  }, [selectedProjectId]);
 
   const groupedStats = useMemo(() => {
     const pointCount = new Set(records.map((record) => record.point_db_id)).size;
@@ -45,6 +63,51 @@ export function CrackRecordsPage() {
 
   function refresh() {
     setReloadKey((key) => key + 1);
+  }
+
+  async function addPoint() {
+    if (!selectedProjectId) return;
+    setBusy(true);
+    setMessage('');
+    setError('');
+    try {
+      const point = await api.post<Point>(`/api/projects/${selectedProjectId}/points`);
+      setActivePoint({ point, trend: [] });
+      await loadProjectData();
+      setMessage('点位已新增，可在弹窗中继续完善详情。');
+    } catch (err) {
+      setMessage(`新增点位失败：${(err as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openPointEditor(point: Point) {
+    setError('');
+    try {
+      const trend = await api.get<PointRow['trend']>(`/api/points/${point.id}/trend`);
+      setActivePoint({ point, trend });
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function deletePoint(point: Point) {
+    if (!window.confirm(`确认删除点位 ${point.point_id}？该点位的照片、循环数据和裂纹记录也会一并删除。`)) return;
+    setDeletingPointId(point.id);
+    setMessage('');
+    setError('');
+    try {
+      await api.delete(`/api/points/${point.id}`);
+      setActivePoint(null);
+      setPreviewRecord(null);
+      await loadProjectData();
+      setMessage('点位已删除。');
+    } catch (err) {
+      setMessage(`删除点位失败：${(err as Error).message}`);
+    } finally {
+      setDeletingPointId(null);
+    }
   }
 
   async function deleteRecord(record: CrackRecord) {
@@ -75,9 +138,19 @@ export function CrackRecordsPage() {
             <RefreshCw size={18} />
             刷新
           </button>
+          {editMode && (
+            <button className="button" onClick={addPoint} disabled={!selectedProjectId || busy}>
+              <Plus size={18} />
+              新增点位
+            </button>
+          )}
           <button className="button primary" onClick={() => setModalOpen(true)} disabled={!selectedProjectId || !points.length}>
             <Plus size={18} />
             记录裂纹
+          </button>
+          <button className="button" onClick={() => setEditMode((value) => !value)} disabled={!selectedProjectId}>
+            {editMode ? <X size={18} /> : <Pencil size={18} />}
+            {editMode ? '退出编辑' : '编辑模式'}
           </button>
         </div>
       </div>
@@ -85,6 +158,7 @@ export function CrackRecordsPage() {
       {!selectedProject && <div className="empty panel">暂无可用项目，请先导入项目 zip。</div>}
       {selectedProject && !points.length && <div className="empty panel">当前项目暂无点位，无法记录裂纹。</div>}
       {error && <div className="alert danger">{error}</div>}
+      {message && <div className={message.includes('失败') ? 'alert danger' : 'alert ok'}>{message}</div>}
 
       {selectedProject && (
         <>
@@ -94,6 +168,47 @@ export function CrackRecordsPage() {
             <div><span>点位-循环组合</span><strong>{groupedStats.cycleCount}</strong></div>
             <div><span>当前项目</span><strong>{selectedProject.project_name}</strong></div>
           </div>
+
+          {editMode && (
+            <div className="panel crack-point-editor">
+              <div className="section-head">
+                <div>
+                  <h2>点位管理</h2>
+                  <p>点击点位进入详情编辑，可维护主信息、照片和循环数据。</p>
+                </div>
+                <button className="button" onClick={addPoint} disabled={busy}>
+                  <Plus size={18} />
+                  新增点位
+                </button>
+              </div>
+              <div className="crack-point-grid">
+                {points.map((point) => (
+                  <div key={point.id} className="crack-point-card">
+                    <button className="crack-point-open" type="button" onClick={() => openPointEditor(point)}>
+                      <span className="crack-point-thumb">
+                        {point.media_files[0] ? <img src={mediaUrl(point.media_files[0].id)} alt={point.point_name} /> : <ImageOff size={24} />}
+                      </span>
+                      <span className="crack-point-body">
+                        <strong>{point.point_id} · {point.point_name}</strong>
+                        <small>{point.component || '-'} · {point.direction || '-'} · {point.bridge_type || '-'}</small>
+                        <em>{records.filter((record) => record.point_db_id === point.id).length} 条裂纹记录</em>
+                      </span>
+                    </button>
+                    <button
+                      className="icon-button danger-text crack-point-delete"
+                      type="button"
+                      title="删除点位"
+                      disabled={deletingPointId === point.id}
+                      onClick={() => deletePoint(point)}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ))}
+                {!points.length && <div className="empty">当前项目暂无点位</div>}
+              </div>
+            </div>
+          )}
 
           <div className="crack-record-grid">
             {records.map((record) => (
@@ -134,6 +249,17 @@ export function CrackRecordsPage() {
           deleting={deletingId === previewRecord.id}
           onClose={() => setPreviewRecord(null)}
           onDelete={() => deleteRecord(previewRecord)}
+        />
+      )}
+
+      {activePoint && (
+        <PointRiskModal
+          row={activePoint}
+          editMode={editMode}
+          deletingPoint={deletingPointId === activePoint.point.id}
+          onClose={() => setActivePoint(null)}
+          onChanged={loadProjectData}
+          onDeletePoint={() => deletePoint(activePoint.point)}
         />
       )}
     </section>
