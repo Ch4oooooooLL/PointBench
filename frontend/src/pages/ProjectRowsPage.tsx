@@ -769,9 +769,16 @@ function ReadOnlyTrendTable({ trend, initial, riskSettings }: { trend: TrendItem
 }
 
 function firstStress(trend: TrendItem[]): number | null {
-  return trend.find((item) => item.stress_amplitude_mpa != null)?.stress_amplitude_mpa ?? null;
+  return sortedStressItems(trend)[0]?.stress_amplitude_mpa ?? null;
 }
 
 function latestStress(trend: TrendItem[]): number | null {
-  return [...trend].reverse().find((item) => item.stress_amplitude_mpa != null)?.stress_amplitude_mpa ?? null;
+  const items = sortedStressItems(trend);
+  return items[items.length - 1]?.stress_amplitude_mpa ?? null;
+}
+
+function sortedStressItems(trend: TrendItem[]): TrendItem[] {
+  return [...trend]
+    .filter((item) => item.stress_amplitude_mpa != null)
+    .sort((a, b) => a.cycle_count - b.cycle_count || a.run_id - b.run_id);
 }
