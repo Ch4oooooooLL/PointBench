@@ -1,4 +1,4 @@
-import { Camera, Clipboard, ImagePlus, Plus, RefreshCw } from 'lucide-react';
+import { Camera, Clipboard, ImagePlus, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { ClipboardEvent, useEffect, useMemo, useState } from 'react';
 import { api, crackImageUrl } from '../api/client';
 import { ProjectSelector } from '../components/ProjectSelector';
@@ -14,6 +14,7 @@ export function CrackRecordsPage() {
   const [previewRecord, setPreviewRecord] = useState<CrackRecord | null>(null);
   const [error, setError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   useEffect(() => {
     if (!selectedProjectId) {
@@ -44,6 +45,21 @@ export function CrackRecordsPage() {
 
   function refresh() {
     setReloadKey((key) => key + 1);
+  }
+
+  async function deleteRecord(record: CrackRecord) {
+    if (!window.confirm(`确认删除 ${record.point_id} 在 ${record.cycle_count} 次的裂纹记录？`)) return;
+    setDeletingId(record.id);
+    setError('');
+    try {
+      await api.delete(`/api/crack-records/${record.id}`);
+      setPreviewRecord(null);
+      refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   return (
@@ -113,7 +129,12 @@ export function CrackRecordsPage() {
       )}
 
       {previewRecord && (
-        <CrackDetailModal record={previewRecord} onClose={() => setPreviewRecord(null)} />
+        <CrackDetailModal
+          record={previewRecord}
+          deleting={deletingId === previewRecord.id}
+          onClose={() => setPreviewRecord(null)}
+          onDelete={() => deleteRecord(previewRecord)}
+        />
       )}
     </section>
   );
@@ -276,7 +297,17 @@ function CrackRecordModal({
   );
 }
 
-function CrackDetailModal({ record, onClose }: { record: CrackRecord; onClose: () => void }) {
+function CrackDetailModal({
+  record,
+  deleting,
+  onClose,
+  onDelete,
+}: {
+  record: CrackRecord;
+  deleting: boolean;
+  onClose: () => void;
+  onDelete: () => void;
+}) {
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal crack-detail-modal" onClick={(event) => event.stopPropagation()}>
@@ -285,7 +316,13 @@ function CrackDetailModal({ record, onClose }: { record: CrackRecord; onClose: (
             <h2>{record.point_id} 裂纹详情</h2>
             <p>{record.point_name} · {record.cycle_count} 次</p>
           </div>
-          <button className="button" onClick={onClose}>关闭</button>
+          <div className="actions">
+            <button className="button danger-text" disabled={deleting} onClick={onDelete}>
+              <Trash2 size={18} />
+              {deleting ? '删除中...' : '删除'}
+            </button>
+            <button className="button" onClick={onClose}>关闭</button>
+          </div>
         </div>
         <img src={crackImageUrl(record.id)} alt={`${record.point_id} 裂纹详情`} />
         <div className="kv-grid compact">

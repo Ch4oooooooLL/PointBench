@@ -1,4 +1,4 @@
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../api/client';
@@ -9,6 +9,7 @@ export function DewesoftImportsPage() {
   const [imports, setImports] = useState<DewesoftImport[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [error, setError] = useState('');
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const active = imports.find((item) => item.id === activeId) ?? imports[0] ?? null;
 
@@ -24,6 +25,21 @@ export function DewesoftImportsPage() {
   }
 
   useEffect(load, [projectId]);
+
+  async function deleteImport(item: DewesoftImport) {
+    if (!window.confirm(`确认删除 Dewesoft 导入记录 ${item.run_name}？`)) return;
+    setDeletingId(item.id);
+    setError('');
+    try {
+      await api.delete(`/api/dewesoft/imports/${item.id}`);
+      setActiveId((current) => (current === item.id ? null : current));
+      load();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   return (
     <section>
@@ -56,14 +72,14 @@ export function DewesoftImportsPage() {
               </button>
             ))}
           </aside>
-          {active && <DewesoftImportDetail item={active} />}
+          {active && <DewesoftImportDetail item={active} deleting={deletingId === active.id} onDelete={() => deleteImport(active)} />}
         </div>
       )}
     </section>
   );
 }
 
-function DewesoftImportDetail({ item }: { item: DewesoftImport }) {
+function DewesoftImportDetail({ item, deleting, onDelete }: { item: DewesoftImport; deleting: boolean; onDelete: () => void }) {
   const channels = item.channels ?? [];
   const unmatched = channels.filter((channel) => !channel.matched_point_db_id);
   const matched = channels.filter((channel) => channel.matched_point_db_id);
@@ -76,7 +92,13 @@ function DewesoftImportDetail({ item }: { item: DewesoftImport }) {
             <h2>{item.run_name}</h2>
             <p>{item.message || '-'}</p>
           </div>
-          <span className={item.status === 'imported' ? 'pill ok' : 'pill danger'}>{item.status}</span>
+          <div className="actions">
+            <span className={item.status === 'imported' ? 'pill ok' : 'pill danger'}>{item.status}</span>
+            <button className="button danger-text" disabled={deleting} onClick={onDelete}>
+              <Trash2 size={18} />
+              {deleting ? '删除中...' : '删除'}
+            </button>
+          </div>
         </div>
         <div className="kv-grid compact">
           <div><span>文件</span><strong>{item.filename}</strong></div>
