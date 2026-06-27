@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Layout } from './components/Layout';
 import { AppProvider } from './context/AppContext';
 import { AnalysisPage } from './pages/AnalysisPage';
@@ -37,34 +38,41 @@ const router = createBrowserRouter([
 function shouldBlockMobileAccess(): boolean {
   const mobileAgent = /Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(navigator.userAgent);
   const coarsePointer = window.matchMedia('(pointer: coarse)').matches;
-  const narrowViewport = window.matchMedia('(max-width: 900px)').matches;
-  return mobileAgent || coarsePointer || narrowViewport;
+  const narrowViewport = window.matchMedia('(max-width: 768px)').matches;
+  return mobileAgent || (coarsePointer && narrowViewport);
 }
 
 export function App() {
   const [mobileBlocked, setMobileBlocked] = useState(shouldBlockMobileAccess);
+  const [allowMobileAccess, setAllowMobileAccess] = useState(false);
 
   useEffect(() => {
+    if (allowMobileAccess) return undefined;
     const syncMobileBlock = () => setMobileBlocked(shouldBlockMobileAccess());
     syncMobileBlock();
     window.addEventListener('resize', syncMobileBlock);
     return () => window.removeEventListener('resize', syncMobileBlock);
-  }, []);
+  }, [allowMobileAccess]);
 
-  if (mobileBlocked) {
+  if (mobileBlocked && !allowMobileAccess) {
     return (
       <div className="mobile-block">
         <div>
           <h1>请使用 PC 访问</h1>
           <p>当前系统面向桌面端数据录入和分析工作流，移动端暂不支持。</p>
+          <button className="button primary" type="button" onClick={() => setAllowMobileAccess(true)}>
+            仍要访问
+          </button>
         </div>
       </div>
     );
   }
 
   return (
-    <AppProvider>
-      <RouterProvider router={router} />
-    </AppProvider>
+    <ErrorBoundary>
+      <AppProvider>
+        <RouterProvider router={router} />
+      </AppProvider>
+    </ErrorBoundary>
   );
 }

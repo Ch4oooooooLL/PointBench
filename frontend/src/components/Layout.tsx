@@ -1,5 +1,5 @@
 import { ActivitySquare, BookOpen, Camera, FilePlus2, FileUp, LayoutDashboard, ListChecks, Settings } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAppContext } from '../context/AppContext';
 
@@ -8,12 +8,9 @@ const FIRST_USE_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 
 export function Layout() {
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [firstUseNoticeOpen, setFirstUseNoticeOpen] = useState(false);
+  const [firstUseNoticeOpen, setFirstUseNoticeOpen] = useState(() => !hasCookie(FIRST_USE_COOKIE));
+  const { projectsError, isLoadingProjects, refreshProjects } = useAppContext();
   const navigate = useNavigate();
-
-  useEffect(() => {
-    setFirstUseNoticeOpen(!hasCookie(FIRST_USE_COOKIE));
-  }, []);
 
   function closeFirstUseNotice() {
     setCookie(FIRST_USE_COOKIE, 'true', FIRST_USE_COOKIE_MAX_AGE_SECONDS);
@@ -69,6 +66,14 @@ export function Layout() {
         </button>
       </aside>
       <main className="content">
+        {projectsError && (
+          <div className="alert danger global-alert">
+            项目列表加载失败：{projectsError}
+            <button className="button" type="button" disabled={isLoadingProjects} onClick={() => refreshProjects().catch(() => undefined)}>
+              重试
+            </button>
+          </div>
+        )}
         <Outlet />
       </main>
       {firstUseNoticeOpen && <FirstUseNoticeModal onOpenGuide={openUsageGuide} onSkip={closeFirstUseNotice} />}

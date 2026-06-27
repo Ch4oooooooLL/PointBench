@@ -15,6 +15,8 @@ export interface ChartSettings {
 
 interface AppContextValue {
   projects: Project[];
+  isLoadingProjects: boolean;
+  projectsError: string;
   selectedProjectId: number | null;
   selectedProject: Project | null;
   setSelectedProjectId: (id: number | null) => void;
@@ -77,20 +79,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [riskSettings, setRiskSettingsState] = useState<RiskSettings>(loadRiskSettings);
   const [chartSettings, setChartSettingsState] = useState<ChartSettings>(loadChartSettings);
   const [debugMode, setDebugModeState] = useState<boolean>(loadDebugMode);
+  const [isLoadingProjects, setIsLoadingProjects] = useState(false);
+  const [projectsError, setProjectsError] = useState('');
 
   const refreshProjects = async () => {
-    const data = await api.get<Project[]>('/api/projects');
-    setProjects(data);
-    setSelectedProjectIdState((current) => {
-      if (current && data.some((project) => project.id === current)) return current;
-      const next = data[0]?.id ?? null;
-      if (next) localStorage.setItem('selectedProjectId', String(next));
-      return next;
-    });
+    setIsLoadingProjects(true);
+    setProjectsError('');
+    try {
+      const data = await api.get<Project[]>('/api/projects');
+      setProjects(data);
+      setSelectedProjectIdState((current) => {
+        if (current && data.some((project) => project.id === current)) return current;
+        const next = data[0]?.id ?? null;
+        if (next) localStorage.setItem('selectedProjectId', String(next));
+        else localStorage.removeItem('selectedProjectId');
+        return next;
+      });
+    } catch (err) {
+      const message = (err as Error).message || '项目列表加载失败';
+      setProjectsError(message);
+      throw err;
+    } finally {
+      setIsLoadingProjects(false);
+    }
   };
 
   useEffect(() => {
-    refreshProjects();
+    refreshProjects().catch(() => undefined);
   }, []);
 
   const setSelectedProjectId = (id: number | null) => {
@@ -123,6 +138,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     <AppContext.Provider
       value={{
         projects,
+        isLoadingProjects,
+        projectsError,
         selectedProjectId,
         selectedProject,
         setSelectedProjectId,

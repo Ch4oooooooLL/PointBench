@@ -103,6 +103,18 @@ textarea {
   min-width: 0;
 }
 
+.app-fallback {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #eef3f5;
+}
+
+.app-fallback .panel {
+  max-width: 560px;
+}
+
 .mobile-block {
   min-height: 100vh;
   display: grid;
@@ -123,7 +135,7 @@ textarea {
 }
 
 .mobile-block p {
-  margin-bottom: 0;
+  margin-bottom: 16px;
 }
 
 .page-head,
@@ -318,6 +330,14 @@ th {
   background: #e6f4ea;
   border: 1px solid #8fd2aa;
   color: #17633a;
+}
+
+.global-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .kv-grid,
