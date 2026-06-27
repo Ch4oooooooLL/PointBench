@@ -5,6 +5,7 @@ import shutil
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app import models
@@ -180,34 +181,47 @@ def create_project_point(project_id: int, payload: PointCreate | None = None, db
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
     data = payload.model_dump(exclude_unset=True) if payload else {}
-    point_id = (data.get("point_id") or _next_point_id(db, project_id)).strip()
-    if not point_id:
+    requested_point_id = (data.get("point_id") or "").strip()
+    if data.get("point_id") is not None and not requested_point_id:
         raise HTTPException(status_code=400, detail="点位编号不能为空")
-    exists = db.scalar(
-        select(models.TestPoint).where(models.TestPoint.project_db_id == project_id, models.TestPoint.point_id == point_id)
-    )
-    if exists:
-        raise HTTPException(status_code=400, detail="点位编号已存在")
-    point = models.TestPoint(
-        project_db_id=project_id,
-        point_id=point_id,
-        point_name=(data.get("point_name") or "未命名点位").strip() or "未命名点位",
-        point_type=(data.get("point_type") or "strain").strip() or "strain",
-        component=data.get("component"),
-        side=data.get("side"),
-        position_description=data.get("position_description"),
-        direction=data.get("direction"),
-        bridge_type=data.get("bridge_type"),
-        resistance_ohm=data.get("resistance_ohm"),
-        install_status=(data.get("install_status") or "planned").strip() or "planned",
-        check_status=data.get("check_status"),
-        remark=data.get("remark"),
-        raw_json=json.dumps({"source": "manual"}, ensure_ascii=False),
-    )
-    db.add(point)
-    db.commit()
-    db.refresh(point)
-    return PointOut.model_validate(point)
+
+    for _ in range(3):
+        point_id = requested_point_id or _next_point_id(db, project_id)
+        exists = db.scalar(
+            select(models.TestPoint).where(models.TestPoint.project_db_id == project_id, models.TestPoint.point_id == point_id)
+        )
+        if exists:
+            if requested_point_id:
+                raise HTTPException(status_code=400, detail="点位编号已存在")
+            continue
+        point = models.TestPoint(
+            project_db_id=project_id,
+            point_id=point_id,
+            point_name=(data.get("point_name") or "未命名点位").strip() or "未命名点位",
+            point_type=(data.get("point_type") or "strain").strip() or "strain",
+            component=data.get("component"),
+            side=data.get("side"),
+            position_description=data.get("position_description"),
+            direction=data.get("direction"),
+            bridge_type=data.get("bridge_type"),
+            resistance_ohm=data.get("resistance_ohm"),
+            install_status=(data.get("install_status") or "planned").strip() or "planned",
+            check_status=data.get("check_status"),
+            remark=data.get("remark"),
+            raw_json=json.dumps({"source": "manual"}, ensure_ascii=False),
+        )
+        db.add(point)
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            if requested_point_id:
+                raise HTTPException(status_code=400, detail="点位编号已存在") from exc
+            continue
+        db.refresh(point)
+        return PointOut.model_validate(point)
+
+    raise HTTPException(status_code=409, detail="点位编号生成冲突，请重试")
 
 
 @router.post("/{project_id}/test-runs", response_model=TestRunOut)
