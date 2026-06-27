@@ -66,6 +66,7 @@ export function ProjectDetailPage() {
   if (!project) return <div className="empty">加载中...</div>;
 
   async function saveProject() {
+    if (!project) return;
     setMessage('');
     try {
       const data = await api.put<Project>(`/api/projects/${project.id}`, projectForm);
@@ -78,6 +79,7 @@ export function ProjectDetailPage() {
   }
 
   async function addPoint() {
+    if (!project) return;
     setMessage('');
     try {
       const point = await api.post<Point>(`/api/projects/${project.id}/points`);

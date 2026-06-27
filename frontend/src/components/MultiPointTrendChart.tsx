@@ -58,7 +58,7 @@ function buildCrackData(trends: PointTrend[], crackRecords: CrackRecord[]): Crac
       if (!trend || trend.stress_amplitude_mpa == null) return null;
       return {
         name: `${record.point_id} 裂纹`,
-        value: [record.cycle_count, trend.stress_amplitude_mpa],
+        value: [record.cycle_count, trend.stress_amplitude_mpa] as [number, number],
         crackRecordId: record.id,
       };
     })
