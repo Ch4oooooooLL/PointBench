@@ -39,6 +39,8 @@ class Project(Base, SoftDeleteMixin):
     tensile_strength_mpa: Mapped[float | None] = mapped_column(Float, nullable=True)
     strain_unit: Mapped[str | None] = mapped_column(String(64), nullable=True, default="με")
     stress_unit: Mapped[str | None] = mapped_column(String(64), nullable=True, default="MPa")
+    # 异常识别规则（项目级可配置，JSON 格式存储便于扩展）
+    anomaly_rules_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
 
@@ -246,3 +248,21 @@ class DewesoftChannel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
     import_job: Mapped[DewesoftImport] = relationship(back_populates="channels")
+
+
+class AuditLog(Base):
+    """操作审计日志 —— 记录所有写操作的追溯信息。"""
+    __tablename__ = "audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True, default=None)
+    action: Mapped[str] = mapped_column(String(64), index=True)
+    object_type: Mapped[str] = mapped_column(String(64), index=True)
+    object_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    project_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    before_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
+    after_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now, index=True)

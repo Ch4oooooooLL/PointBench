@@ -16,6 +16,7 @@ from app.database import STORAGE_DIR, get_db
 from app.schemas import PointCreate, PointOut, ProjectCreate, ProjectOut, ProjectUpdate, TestRunCreate, TestRunOut
 from app.services.dewesoft_service import delete_dewesoft_project_files
 from app.services.project_export_service import build_project_export_zip
+from app.utils.audit_utils import log_action
 from app.utils.path_utils import safe_project_dir
 
 
@@ -61,6 +62,7 @@ def create_project(payload: ProjectCreate, db: Session = Depends(get_db)) -> Pro
     db.commit()
     db.refresh(project)
     safe_project_dir(project.project_id).mkdir(parents=True, exist_ok=True)
+    log_action(db, "create", "project", project.project_id, project.project_id, f"创建项目 {project.project_name}")
     return project_out(db, project)
 
 
@@ -100,6 +102,7 @@ def delete_project(project_id: int, permanent: bool = False, db: Session = Depen
             shutil.rmtree(project_storage)
         delete_dewesoft_project_files(project.project_id)
         db.delete(project)
+        log_action(db, "delete_permanent", "project", project.project_id, project.project_id, f"永久删除项目 {project.project_name}")
         db.commit()
         return {"ok": True, "action": "permanently_deleted"}
 
@@ -119,6 +122,7 @@ def delete_project(project_id: int, permanent: bool = False, db: Session = Depen
         media.deleted_at = datetime.utcnow()
     for crack in project.crack_records:
         crack.deleted_at = datetime.utcnow()
+    log_action(db, "delete_soft", "project", project.project_id, project.project_id, f"软删除项目 {project.project_name}")
     db.commit()
     return {"ok": True, "action": "soft_deleted", "message": "项目已移至回收站，可联系管理员恢复"}
 
