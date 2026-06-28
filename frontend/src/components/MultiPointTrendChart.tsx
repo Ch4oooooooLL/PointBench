@@ -44,6 +44,14 @@ interface CrackPointData {
   crackRecordId: number;
 }
 
+interface ChartClickEvent {
+  target?: unknown;
+  offsetX?: number;
+  offsetY?: number;
+  zrX?: number;
+  zrY?: number;
+}
+
 function colorForIndex(index: number): string {
   return palette[index % palette.length];
 }
@@ -139,6 +147,64 @@ function buildCrackTooltip(record: CrackRecord): string {
       <img class="crack-tooltip-image" src="${crackImageUrl(record.id)}" alt="${escapeHtml(record.point_id)} 裂纹图片" />
     </div>
   `;
+}
+
+function distanceBetween(left: [number, number], right: [number, number]): number {
+  return Math.hypot(left[0] - right[0], left[1] - right[1]);
+}
+
+function distanceToSegment(point: [number, number], start: [number, number], end: [number, number]): number {
+  const dx = end[0] - start[0];
+  const dy = end[1] - start[1];
+  const lengthSquared = dx * dx + dy * dy;
+  if (lengthSquared === 0) return distanceBetween(point, start);
+  const t = Math.max(0, Math.min(1, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / lengthSquared));
+  return distanceBetween(point, [start[0] + t * dx, start[1] + t * dy]);
+}
+
+function valueToPixel(chart: echarts.ECharts, value: [number, number]): [number, number] | null {
+  const pixel = chart.convertToPixel({ xAxisIndex: 0, yAxisIndex: 0 }, value) as number[] | undefined;
+  if (!pixel || pixel.length < 2 || !Number.isFinite(pixel[0]) || !Number.isFinite(pixel[1])) return null;
+  return [pixel[0], pixel[1]];
+}
+
+function findClickedCrack(
+  chart: echarts.ECharts,
+  trends: PointTrend[],
+  crackRecords: CrackRecord[],
+  clickPixel: [number, number],
+): CrackRecord | null {
+  let best: { record: CrackRecord; distance: number } | null = null;
+  for (const crack of buildCrackData(trends, crackRecords)) {
+    const pixel = valueToPixel(chart, crack.value);
+    if (!pixel) continue;
+    const distance = distanceBetween(clickPixel, pixel);
+    const record = crackRecords.find((item) => item.id === crack.crackRecordId);
+    if (record && distance <= 18 && (!best || distance < best.distance)) {
+      best = { record, distance };
+    }
+  }
+  return best?.record ?? null;
+}
+
+function findClickedLinePointId(chart: echarts.ECharts, trends: PointTrend[], clickPixel: [number, number]): number | null {
+  let best: { pointId: number; distance: number } | null = null;
+  for (const { point, trend } of trends) {
+    const pixels = trend
+      .filter((item) => item.stress_amplitude_mpa != null)
+      .map((item) => valueToPixel(chart, [item.cycle_count, item.stress_amplitude_mpa as number]))
+      .filter((pixel): pixel is [number, number] => pixel !== null);
+    if (!pixels.length) continue;
+
+    let distance = pixels.length === 1 ? distanceBetween(clickPixel, pixels[0]) : Number.POSITIVE_INFINITY;
+    for (let index = 1; index < pixels.length; index += 1) {
+      distance = Math.min(distance, distanceToSegment(clickPixel, pixels[index - 1], pixels[index]));
+    }
+    if (distance <= 12 && (!best || distance < best.distance)) {
+      best = { pointId: point.id, distance };
+    }
+  }
+  return best?.pointId ?? null;
 }
 
 function buildOption(
@@ -288,30 +354,30 @@ function ChartCanvas({
     const chart = echarts.init(chartDom);
     chart.setOption(buildOption(trends, focusPointId, crackRecords), true);
 
-    // 点击事件：区分折线数据点、裂纹散点、空白区域
+    // 点击事件：红圈优先，其次折线，最后才是空白区域。
     chart.off('click');
-    chart.on('click', (params) => {
-      if (!params || !('seriesIndex' in params)) return;
-      const seriesIndex = params.seriesIndex as number;
-      const data = params.data as { crackRecordId?: number; pointDbId?: number } | undefined;
-      const crackRecord = crackRecords.find((record) => record.id === data?.crackRecordId);
+    chart.getZr().off('click');
+    chart.getZr().on('click', (event: ChartClickEvent) => {
+      const x = event.offsetX ?? event.zrX;
+      const y = event.offsetY ?? event.zrY;
+      if (x == null || y == null || !Number.isFinite(x) || !Number.isFinite(y)) {
+        if (!event.target) onChartClick?.();
+        return;
+      }
+
+      const clickPixel: [number, number] = [x, y];
+      const crackRecord = findClickedCrack(chart, trends, crackRecords, clickPixel);
       if (crackRecord) {
         onCrackSelect?.(crackRecord);
         return;
       }
-      // 裂纹散点系列排在最后
-      if (seriesIndex === trends.length) {
+
+      const pointId = findClickedLinePointId(chart, trends, clickPixel);
+      if (pointId) {
+        onPointClick?.(pointId);
         return;
       }
-      // 折线数据点 → 跳转点位详情
-      if (seriesIndex < trends.length) {
-        onPointClick?.(data?.pointDbId ?? trends[seriesIndex].point.id);
-      }
-    });
 
-    // 空白区域点击 → 展开模态框
-    chart.getZr().off('click');
-    chart.getZr().on('click', (event: { target?: unknown }) => {
       if (!event.target) onChartClick?.();
     });
 
