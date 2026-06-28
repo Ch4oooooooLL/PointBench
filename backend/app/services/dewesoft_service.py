@@ -496,6 +496,9 @@ def import_dewesoft_file(db: Session, project_id: int, cycle_count: int, run_nam
                 record.max_strain_ue = max_value
                 record.min_strain_ue = min_value
                 record.remark = f"Dewesoft channel {channel.name}"
+                # 校验数值一致性（来自统计窗口的 min/max 理应 min <= max）
+                if record.max_strain_ue is not None and record.min_strain_ue is not None and record.max_strain_ue < record.min_strain_ue:
+                    record.max_strain_ue, record.min_strain_ue = record.min_strain_ue, record.max_strain_ue
                 compute_measurement_fields(record)
                 db.add(record)
                 db.flush()

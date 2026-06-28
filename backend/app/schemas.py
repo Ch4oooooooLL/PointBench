@@ -1,7 +1,8 @@
+import math
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.utils.path_utils import PROJECT_ID_PATTERN
 
@@ -249,7 +250,7 @@ class PointCreate(BaseModel):
 
 class TestRunCreate(BaseModel):
     run_name: str = Field(min_length=1)
-    cycle_count: int
+    cycle_count: int = Field(ge=0, le=10_000_000_000)
     test_time: str | None = None
     remark: str | None = None
 
@@ -273,6 +274,17 @@ class TestRunOut(BaseModel):
     created_at: datetime
 
 
+def _validate_strain_value(v: float | None) -> float | None:
+    """校验应变值：必须为有限数值且在合理范围内。"""
+    if v is None:
+        return v
+    if not math.isfinite(v):
+        raise ValueError("应变值必须为有限数值，不能为 NaN 或 Infinity")
+    if v < -1_000_000 or v > 1_000_000:
+        raise ValueError("应变值超出合理范围 (-1e6 ~ 1e6 με)")
+    return v
+
+
 class MeasurementCreate(BaseModel):
     point_db_id: int
     max_strain_ue: float | None = None
@@ -281,6 +293,11 @@ class MeasurementCreate(BaseModel):
     abnormal_reason: str | None = None
     remark: str | None = None
 
+    @field_validator("max_strain_ue", "min_strain_ue")
+    @classmethod
+    def check_strain_finite(cls, v: float | None) -> float | None:
+        return _validate_strain_value(v)
+
 
 class MeasurementUpdate(BaseModel):
     max_strain_ue: float | None = None
@@ -288,6 +305,11 @@ class MeasurementUpdate(BaseModel):
     is_abnormal: bool | None = None
     abnormal_reason: str | None = None
     remark: str | None = None
+
+    @field_validator("max_strain_ue", "min_strain_ue")
+    @classmethod
+    def check_strain_finite(cls, v: float | None) -> float | None:
+        return _validate_strain_value(v)
 
 
 class MeasurementOut(BaseModel):
@@ -319,33 +341,48 @@ class MeasurementBatchCreate(BaseModel):
 
 class PointMeasurementRowCreate(BaseModel):
     run_name: str | None = None
-    cycle_count: int
+    cycle_count: int = Field(ge=0, le=10_000_000_000)
     max_strain_ue: float | None = None
     min_strain_ue: float | None = None
     is_abnormal: bool | None = None
     abnormal_reason: str | None = None
     remark: str | None = None
+
+    @field_validator("max_strain_ue", "min_strain_ue")
+    @classmethod
+    def check_strain_finite(cls, v: float | None) -> float | None:
+        return _validate_strain_value(v)
 
 
 class PointMeasurementRowUpdate(BaseModel):
     run_name: str | None = None
-    cycle_count: int | None = None
+    cycle_count: int | None = Field(None, ge=0, le=10_000_000_000)
     max_strain_ue: float | None = None
     min_strain_ue: float | None = None
     is_abnormal: bool | None = None
     abnormal_reason: str | None = None
     remark: str | None = None
+
+    @field_validator("max_strain_ue", "min_strain_ue")
+    @classmethod
+    def check_strain_finite(cls, v: float | None) -> float | None:
+        return _validate_strain_value(v)
 
 
 class PointMeasurementRowSave(BaseModel):
     id: int | None = None
     run_name: str | None = None
-    cycle_count: int
+    cycle_count: int = Field(ge=0, le=10_000_000_000)
     max_strain_ue: float | None = None
     min_strain_ue: float | None = None
     is_abnormal: bool | None = None
     abnormal_reason: str | None = None
     remark: str | None = None
+
+    @field_validator("max_strain_ue", "min_strain_ue")
+    @classmethod
+    def check_strain_finite(cls, v: float | None) -> float | None:
+        return _validate_strain_value(v)
 
 
 class PointMeasurementRowsSave(BaseModel):

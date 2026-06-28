@@ -30,10 +30,19 @@ router = APIRouter(tags=["measurements"])
 REQUIRED_XLSX_HEADERS = ["run_name", "cycle_count", "point_id", "max_strain_ue", "min_strain_ue"]
 
 
+def _validate_strain_consistency(max_strain: float | None, min_strain: float | None) -> None:
+    """校验最大应变不小于最小应变。"""
+    if max_strain is not None and min_strain is not None:
+        if max_strain < min_strain:
+            raise HTTPException(status_code=400, detail="最大应变不能小于最小应变")
+
+
 def apply_measurement_payload(record: models.MeasurementRecord, payload: MeasurementCreate | MeasurementUpdate) -> None:
     data = payload.model_dump(exclude_unset=True)
     for field, value in data.items():
         setattr(record, field, value)
+    # 校验数值一致性
+    _validate_strain_consistency(record.max_strain_ue, record.min_strain_ue)
     compute_measurement_fields(record)
     if data.get("is_abnormal") is True:
         record.is_abnormal = True
@@ -126,6 +135,7 @@ def _create_or_update_measurement(
     record.max_strain_ue = max_strain_ue
     record.min_strain_ue = min_strain_ue
     record.remark = remark
+    _validate_strain_consistency(record.max_strain_ue, record.min_strain_ue)
     compute_measurement_fields(record)
     db.add(record)
     return record
