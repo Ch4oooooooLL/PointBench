@@ -36,7 +36,17 @@ def init_db() -> None:
     from app import models  # noqa: F401
 
     init_storage()
-    Base.metadata.create_all(bind=engine)
+    # 尝试运行 Alembic migration；如果失败则回退到 create_all（兼容新建环境）
+    try:
+        from alembic.config import Config
+        from alembic import command
+
+        alembic_cfg = Config(BASE_DIR / "alembic.ini")
+        # 将 sqlalchemy.url 指向实际数据库路径（覆盖 ini 中的相对路径）
+        alembic_cfg.set_main_option("sqlalchemy.url", DATABASE_URL)
+        command.upgrade(alembic_cfg, "head")
+    except Exception:
+        Base.metadata.create_all(bind=engine)
 
 
 def get_db() -> Generator[Session, None, None]:
