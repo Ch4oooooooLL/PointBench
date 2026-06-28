@@ -89,25 +89,24 @@ function buildOption(
   return {
     color: palette,
     tooltip: {
-      trigger: 'axis',
+      trigger: 'item',
       triggerOn: 'mousemove',
       appendToBody: true,
       confine: true,
+      hideDelay: 80,
       extraCssText: 'max-width: min(360px, 92vw); max-height: min(420px, 70vh); white-space: normal; font-size: 13px;',
       formatter: (rawParams: unknown) => {
         const params = (Array.isArray(rawParams) ? rawParams : [rawParams]) as Array<{
           seriesIndex: number;
           seriesName: string;
-          value: [number, number];
+          value?: [number, number];
           color: string;
           data?: { crackRecordId?: number; pointDbId?: number };
         }>;
         if (!params.length) return '';
 
-        // 过滤：只展示位于折线系列且在当前位置有有效值的数据项
-        const lineParams = params.filter(
-          (p) => p.seriesIndex < trends.length && p.value != null && p.value[0] != null && p.value[1] != null,
-        );
+        // 过滤：只展示当前命中的折线系列，避免按 x 轴聚合所有折线。
+        const lineParams = params.filter((p) => p.seriesIndex < trends.length);
         if (!lineParams.length) {
           // 只有裂纹散点
           const crackParam = params.find((p) => p.data?.crackRecordId);
@@ -124,8 +123,8 @@ function buildOption(
           const point = pt.point;
           const cracks = cracksByPoint[point.id] ?? [];
           const photos = point.media_files?.slice(0, 2) ?? [];
-          const cycleCount = p.value[0];
-          const stress = `${Number(p.value[1]).toFixed(2)} MPa`;
+          const cycleCount = p.value?.[0] ?? '-';
+          const stress = p.value?.[1] == null ? '-' : `${Number(p.value[1]).toFixed(2)} MPa`;
 
           let photoHtml = '';
           if (photos.length) {
@@ -149,7 +148,7 @@ function buildOption(
           const metaLine = meta.length ? `<div style="font-size:12px;color:#64748b;margin-top:2px">${meta.join(' · ')}</div>` : '';
           const posLine = point.position_description ? `<div style="font-size:12px;color:#64748b">位置: ${point.position_description}</div>` : '';
 
-          return `<div style="margin:2px 0;padding:6px 8px;border-left:3px solid ${p.color}">
+          return `<div style="margin:2px 0;padding:6px 8px;border-left:3px solid ${p.color ?? colorForIndex(p.seriesIndex)}">
             <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
               <b style="font-size:14px">${point.point_id}</b>
               <span style="color:#64748b;font-size:12px">${point.point_name}</span>
@@ -202,6 +201,7 @@ function buildOption(
           lineStyle: { color: colorForIndex(index), width: focused ? 3 : 1.5, opacity: focused ? 1 : 0.14 },
           itemStyle: { color: colorForIndex(index), opacity: focused ? 1 : 0.22 },
           emphasis: { focus: 'series' },
+          triggerLineEvent: true,
           // 在每个数据点附带 point_db_id，供点击事件使用
           data: trend
             .filter((item) => item.stress_amplitude_mpa != null)
