@@ -25,6 +25,14 @@ class Project(Base):
     source_export_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     source_export_time: Mapped[str | None] = mapped_column(String(64), nullable=True)
     raw_manifest_json: Mapped[str] = mapped_column(Text)
+    # 材料参数（项目级可配置，默认普通钢材）
+    material_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    elastic_modulus_mpa: Mapped[float | None] = mapped_column(Float, nullable=True, default=206000.0)
+    poisson_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    yield_strength_mpa: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tensile_strength_mpa: Mapped[float | None] = mapped_column(Float, nullable=True)
+    strain_unit: Mapped[str | None] = mapped_column(String(64), nullable=True, default="με")
+    stress_unit: Mapped[str | None] = mapped_column(String(64), nullable=True, default="MPa")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
 

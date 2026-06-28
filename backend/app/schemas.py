@@ -207,6 +207,13 @@ class ProjectOut(BaseModel):
     description: str | None
     source_export_id: str | None
     source_export_time: str | None
+    material_name: str | None = None
+    elastic_modulus_mpa: float | None = None
+    poisson_ratio: float | None = None
+    yield_strength_mpa: float | None = None
+    tensile_strength_mpa: float | None = None
+    strain_unit: str | None = None
+    stress_unit: str | None = None
     created_at: datetime
     updated_at: datetime
     point_count: int = 0
@@ -221,6 +228,13 @@ class ProjectCreate(BaseModel):
     vehicle_or_product: str | None = None
     test_stage: str | None = None
     description: str | None = None
+    material_name: str | None = None
+    elastic_modulus_mpa: float | None = None
+    poisson_ratio: float | None = None
+    yield_strength_mpa: float | None = None
+    tensile_strength_mpa: float | None = None
+    strain_unit: str | None = None
+    stress_unit: str | None = None
 
 
 class ProjectUpdate(BaseModel):
@@ -231,6 +245,13 @@ class ProjectUpdate(BaseModel):
     vehicle_or_product: str | None = None
     test_stage: str | None = None
     description: str | None = None
+    material_name: str | None = None
+    elastic_modulus_mpa: float | None = None
+    poisson_ratio: float | None = None
+    yield_strength_mpa: float | None = None
+    tensile_strength_mpa: float | None = None
+    strain_unit: str | None = None
+    stress_unit: str | None = None
 
 
 class PointCreate(BaseModel):

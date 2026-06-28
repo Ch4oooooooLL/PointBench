@@ -7,12 +7,19 @@ from sqlalchemy.orm import Session
 from app import models
 
 
-ELASTIC_MODULUS_MPA = 206000
-STRAIN_TO_STRESS = ELASTIC_MODULUS_MPA * 1e-6
+DEFAULT_ELASTIC_MODULUS_MPA = 206000.0
 AUTO_ABNORMAL_REASONS = (
     "应变幅相对上一轮增长超过 20%",
     "连续 3 次应变幅上升",
 )
+
+
+def _get_stress_conversion(project: models.Project | None) -> float:
+    """根据项目配置的弹性模量计算应变→应力换算系数（με → MPa）。"""
+    modulus = DEFAULT_ELASTIC_MODULUS_MPA
+    if project and project.elastic_modulus_mpa is not None:
+        modulus = project.elastic_modulus_mpa
+    return modulus * 1e-6
 
 
 def _format_custom_fields(value: Any) -> str | None:
@@ -65,7 +72,13 @@ def _point_metadata(point: models.TestPoint) -> dict[str, Any]:
     }
 
 
-def compute_measurement_fields(record: models.MeasurementRecord) -> None:
+def compute_measurement_fields(record: models.MeasurementRecord, elastic_modulus_mpa: float | None = None) -> None:
+    """计算测量记录的派生字段（应变幅、应力等）。
+
+    Args:
+        record: 测量记录
+        elastic_modulus_mpa: 弹性模量 (MPa)，默认 206000（普通钢材）
+    """
     if record.max_strain_ue is None or record.min_strain_ue is None:
         record.mean_strain_ue = None
         record.amplitude_strain_ue = None
@@ -77,14 +90,17 @@ def compute_measurement_fields(record: models.MeasurementRecord) -> None:
         record.stress_range_mpa = None
         return
 
+    modulus = elastic_modulus_mpa if elastic_modulus_mpa is not None else DEFAULT_ELASTIC_MODULUS_MPA
+    strain_to_stress = modulus * 1e-6
+
     record.mean_strain_ue = (record.max_strain_ue + record.min_strain_ue) / 2
     record.amplitude_strain_ue = (record.max_strain_ue - record.min_strain_ue) / 2
     record.range_strain_ue = record.max_strain_ue - record.min_strain_ue
-    record.stress_max_mpa = record.max_strain_ue * STRAIN_TO_STRESS
-    record.stress_min_mpa = record.min_strain_ue * STRAIN_TO_STRESS
-    record.stress_mean_mpa = record.mean_strain_ue * STRAIN_TO_STRESS
-    record.stress_amplitude_mpa = record.amplitude_strain_ue * STRAIN_TO_STRESS
-    record.stress_range_mpa = record.range_strain_ue * STRAIN_TO_STRESS
+    record.stress_max_mpa = record.max_strain_ue * strain_to_stress
+    record.stress_min_mpa = record.min_strain_ue * strain_to_stress
+    record.stress_mean_mpa = record.mean_strain_ue * strain_to_stress
+    record.stress_amplitude_mpa = record.amplitude_strain_ue * strain_to_stress
+    record.stress_range_mpa = record.range_strain_ue * strain_to_stress
 
 
 def is_manual_abnormal(record: models.MeasurementRecord) -> bool:
