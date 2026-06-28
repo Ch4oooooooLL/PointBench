@@ -375,6 +375,7 @@ export function PointDetailPage() {
       <div className="panel">
         <div className="section-head">
           <h2>趋势图</h2>
+          <p className="hint">Ctrl+滚轮横向缩放 · Shift+滚轮左右平移 · 拖拽底部滑块选取区间</p>
           <select value={metric} onChange={(e) => setMetric(e.target.value as Metric)}>
             <option value="max_strain_ue">最大应变</option>
             <option value="min_strain_ue">最小应变</option>

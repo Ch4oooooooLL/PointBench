@@ -192,7 +192,7 @@ export function ProjectOverviewPage() {
             <div className="section-head">
               <div>
                 <h2>全点位应力幅趋势</h2>
-                <p>每个点位一条折线；红圈表示该点位在对应循环次数记录了裂纹，点击红圈可查看详情。</p>
+                <p>Ctrl+滚轮横向缩放 · Shift+滚轮左右平移 · 拖拽底部滑块选取区间 · 红圈=裂纹记录</p>
               </div>
             </div>
             <MultiPointTrendChart

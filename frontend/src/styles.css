@@ -740,6 +740,22 @@ label {
   height: 360px;
 }
 
+.chart-zoom-hint {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0 2px;
+  font-size: 11px;
+  color: #64748b;
+  user-select: none;
+}
+
+.chart-zoom-hint .hint-sep {
+  color: #cbd5e1;
+  margin: 0 2px;
+}
+
 .trend-chart-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 280px;

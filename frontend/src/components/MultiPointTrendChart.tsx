@@ -72,9 +72,28 @@ function buildOption(trends: PointTrend[], focusPointId: number | null, crackRec
       trigger: 'axis',
       valueFormatter: (value: number) => `${Number(value).toFixed(2)} MPa`,
     },
-    grid: { left: 58, right: 24, top: 24, bottom: 42 },
+    grid: { left: 58, right: 24, top: 24, bottom: 62 },
     xAxis: { type: 'value', name: '循环次数' },
     yAxis: { type: 'value', name: '应力幅 MPa' },
+    dataZoom: [
+      {
+        type: 'inside',
+        xAxisIndex: 0,
+        zoomOnMouseWheel: 'ctrl',
+        moveOnMouseWheel: 'shift',
+        moveOnMouseMove: true,
+      },
+      {
+        type: 'slider',
+        xAxisIndex: 0,
+        height: 24,
+        bottom: 8,
+        borderColor: '#e2e8f0',
+        fillerColor: 'rgba(15,118,110,0.08)',
+        handleStyle: { color: '#0f766e' },
+        textStyle: { fontSize: 10 },
+      },
+    ],
     series: [
       ...trends.map(({ point, trend }, index) => {
         const focused = focusPointId == null || focusPointId === point.id;
@@ -154,7 +173,18 @@ function ChartCanvas({
     };
   }, [trends, focusPointId, crackRecords, onCrackSelect, onChartClick]);
 
-  return <div className="chart multi-chart" style={{ height }} ref={ref} />;
+  return (
+    <div>
+      <div className="chart multi-chart" style={{ height }} ref={ref} />
+      <div className="chart-zoom-hint">
+        <span>Ctrl+滚轮 横向缩放</span>
+        <span className="hint-sep">|</span>
+        <span>Shift+滚轮 左右平移</span>
+        <span className="hint-sep">|</span>
+        <span>拖拽滑块 选择区间</span>
+      </div>
+    </div>
+  );
 }
 
 function SideLegend({
@@ -245,7 +275,7 @@ export function MultiPointTrendChart({
             <div className="section-head">
               <div>
                 <h2>全项目点位应力趋势</h2>
-                <p>点击右侧标注可突出对应折线，再次点击取消突出；标注列表可上下滚动。</p>
+                <p>Ctrl+滚轮缩放 · Shift+滚轮平移 · 拖拽下方滑块选取区间 · 点击右侧标注突出折线</p>
               </div>
               <button className="button" onClick={() => setExpanded(false)}>关闭</button>
             </div>
