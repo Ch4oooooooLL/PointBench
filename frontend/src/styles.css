@@ -667,6 +667,86 @@ label {
   gap: 18px;
 }
 
+.point-detail-page {
+  display: grid;
+  gap: 16px;
+}
+
+.point-detail-page .panel {
+  margin-bottom: 0;
+}
+
+.point-detail-head {
+  align-items: center;
+  margin-bottom: 0;
+}
+
+.point-detail-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.point-detail-summary > div {
+  min-width: 0;
+  border: 1px solid #d7e0e3;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px 14px;
+}
+
+.point-detail-summary span,
+.hint,
+.point-metric-select span {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.point-detail-summary strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+
+.point-detail-top-grid {
+  grid-template-columns: minmax(360px, 0.9fr) minmax(420px, 1.1fr);
+  align-items: start;
+}
+
+.point-detail-meta-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.point-trend-head {
+  align-items: flex-start;
+  gap: 18px;
+}
+
+.point-trend-head > div {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.point-trend-head h2 {
+  white-space: nowrap;
+}
+
+.point-trend-head .hint {
+  margin: 6px 0 0;
+  line-height: 1.5;
+}
+
+.point-metric-select {
+  flex: 0 0 min(360px, 42%);
+  min-width: 240px;
+}
+
+.point-metric-select select {
+  margin-top: 6px;
+}
+
 .photo-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
@@ -1889,6 +1969,7 @@ label {
 
   .project-layout,
   .detail-grid,
+  .point-detail-summary,
   .filters,
   .form-row,
   .overview-band,
@@ -1905,6 +1986,15 @@ label {
     border-left: 0;
     border-top: 1px solid #e4ebee;
     padding: 10px 0 0;
+  }
+
+  .point-trend-head {
+    display: grid;
+  }
+
+  .point-metric-select {
+    min-width: 0;
+    width: 100%;
   }
 
   .settings-button {

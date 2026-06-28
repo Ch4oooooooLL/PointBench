@@ -246,9 +246,13 @@ export function PointDetailPage() {
 
   if (!point) return <div className="empty">加载中...</div>;
 
+  const sortedTrend = [...trend].sort((left, right) => left.cycle_count - right.cycle_count || left.run_id - right.run_id);
+  const latestTrend = sortedTrend[sortedTrend.length - 1];
+  const abnormalCount = rows.filter((row) => row.is_abnormal).length;
+
   return (
-    <section>
-      <div className="page-head">
+    <section className="point-detail-page">
+      <div className="page-head point-detail-head">
         <div>
           <h1>{point.point_id} · {point.point_name}</h1>
           <p>{point.component || '-'} · {point.direction || '-'} · {point.bridge_type || '-'}</p>
@@ -262,7 +266,14 @@ export function PointDetailPage() {
 
       {message && <div className={message.includes('失败') ? 'alert danger' : 'alert ok'}>{message}</div>}
 
-      <div className="detail-grid">
+      <div className="point-detail-summary">
+        <div><span>最新循环次数</span><strong>{latestTrend?.cycle_count ?? '-'}</strong></div>
+        <div><span>最新应力幅</span><strong>{latestTrend?.stress_amplitude_mpa?.toFixed(2) ?? '-'} MPa</strong></div>
+        <div><span>异常记录</span><strong>{abnormalCount}</strong></div>
+        <div><span>照片数量</span><strong>{point.media_files.length}</strong></div>
+      </div>
+
+      <div className="detail-grid point-detail-top-grid">
         <div className="panel">
           <h2>点位信息</h2>
           {editMode ? (
@@ -372,21 +383,26 @@ export function PointDetailPage() {
         </div>
       </div>
 
-      <div className="panel">
-        <div className="section-head">
-          <h2>趋势图</h2>
-          <p className="hint">Ctrl+滚轮横向缩放 · Shift+滚轮左右平移 · 拖拽底部滑块选取区间</p>
-          <select value={metric} onChange={(e) => setMetric(e.target.value as Metric)}>
-            <option value="max_strain_ue">最大应变</option>
-            <option value="min_strain_ue">最小应变</option>
-            <option value="amplitude_strain_ue">应变幅</option>
-            <option value="stress_amplitude_mpa">应力幅</option>
-          </select>
+      <div className="panel point-trend-panel">
+        <div className="section-head point-trend-head">
+          <div>
+            <h2>趋势图</h2>
+            <p className="hint">Ctrl+滚轮横向缩放 · Shift+滚轮左右平移 · 拖拽底部滑块选取区间</p>
+          </div>
+          <label className="point-metric-select">
+            <span>显示指标</span>
+            <select value={metric} onChange={(e) => setMetric(e.target.value as Metric)}>
+              <option value="max_strain_ue">最大应变</option>
+              <option value="min_strain_ue">最小应变</option>
+              <option value="amplitude_strain_ue">应变幅</option>
+              <option value="stress_amplitude_mpa">应力幅</option>
+            </select>
+          </label>
         </div>
         <TrendChart data={trend} metric={metric} />
       </div>
 
-      <div className="detail-grid">
+      <div className="detail-grid point-detail-meta-grid">
         <div className="panel">
           <h2>通道信息</h2>
           {point.channels.map((channel) => (
@@ -413,7 +429,7 @@ export function PointDetailPage() {
         </div>
       </div>
 
-      <div className="panel">
+      <div className="panel point-data-panel">
         <div className="section-head">
           <h2>测试数据</h2>
           {editMode && <button className="button" onClick={addRow}><Plus size={18} />新增循环</button>}
