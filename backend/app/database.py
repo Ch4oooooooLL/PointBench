@@ -42,11 +42,33 @@ def init_db() -> None:
         from alembic import command
 
         alembic_cfg = Config(BASE_DIR / "alembic.ini")
-        # 将 sqlalchemy.url 指向实际数据库路径（覆盖 ini 中的相对路径）
         alembic_cfg.set_main_option("sqlalchemy.url", DATABASE_URL)
         command.upgrade(alembic_cfg, "head")
     except Exception:
         Base.metadata.create_all(bind=engine)
+
+    # 初始化默认管理员账号（如不存在）
+    try:
+        from app.utils.auth_utils import hash_password
+        from sqlalchemy import select as sa_select
+
+        db = SessionLocal()
+        try:
+            admin = db.scalar(sa_select(models.User).where(models.User.username == "admin"))
+            if not admin:
+                db.add(
+                    models.User(
+                        username="admin",
+                        password_hash=hash_password("admin123"),
+                        role="admin",
+                        display_name="管理员",
+                    )
+                )
+                db.commit()
+        finally:
+            db.close()
+    except Exception:
+        pass  # 表可能还没创建，跳过自动初始化
 
 
 def get_db() -> Generator[Session, None, None]:

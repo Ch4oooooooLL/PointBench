@@ -3,6 +3,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from app import models
 from app.main import app
 from app.utils.path_utils import (
     PROJECT_ID_PATTERN,
@@ -93,26 +94,74 @@ class TestSafeDewesoftDir:
 client = TestClient(app)
 
 
+@pytest.fixture(scope="class")
+def admin_token() -> str:
+    """Class-scoped fixture: login once and reuse token."""
+    # First ensure admin exists via API-direct DB
+    from app.database import SessionLocal
+    from app.utils.auth_utils import hash_password
+
+    db = SessionLocal()
+    try:
+        from sqlalchemy import select as sa_select
+        admin = db.scalar(sa_select(models.User).where(models.User.username == "admin"))
+        if admin:
+            admin.password_hash = hash_password("admin123")
+        else:
+            db.add(models.User(
+                username="admin",
+                password_hash=hash_password("admin123"),
+                role="admin",
+                display_name="管理员",
+            ))
+        db.commit()
+    finally:
+        db.close()
+
+    resp = client.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
+    assert resp.status_code == 200, f"Login failed: {resp.text}"
+    return resp.json()["access_token"]
+
+
 class TestProjectIdValidationAPI:
+    @pytest.fixture(autouse=True)
+    def _setup(self, admin_token: str) -> None:
+        self.token = admin_token
+
+    def _headers(self) -> dict:
+        return {"Authorization": f"Bearer {self.token}"}
+
     def test_create_project_with_invalid_id_returns_422(self) -> None:
-        """Pydantic schema 校验应拒绝非法 project_id。"""
+        """Pydantic schema 校验应拒绝非法 project_id（即使已认证）。"""
         payload = {
             "project_id": "../malicious",
             "project_name": "Test Project",
         }
-        response = client.post("/api/projects", json=payload)
+        response = client.post("/api/projects", json=payload, headers=self._headers())
         assert response.status_code == 422, response.text
 
     def test_create_project_with_valid_id_succeeds(self) -> None:
-        """合法 project_id 可以创建项目。"""
+        """合法 project_id 可以创建项目（管理员认证）。"""
         payload = {
             "project_id": "SECURITY-TEST-001",
             "project_name": "Security Test Project",
         }
-        response = client.post("/api/projects", json=payload)
+        response = client.post("/api/projects", json=payload, headers=self._headers())
         assert response.status_code == 200, response.text
         data = response.json()
         assert data["project_id"] == "SECURITY-TEST-001"
+        # Clean up via API
+        proj_id = data["id"]
+        client.delete(f"/api/projects/{proj_id}?permanent=true", headers=self._headers())
+
+    def test_create_project_without_auth_returns_401(self) -> None:
+        """未登录用户不能创建项目。"""
+        payload = {
+            "project_id": "NO-AUTH-TEST",
+            "project_name": "No Auth",
+        }
+        response = client.post("/api/projects", json=payload)
+        assert response.status_code == 401, response.text
 
     def test_create_project_with_traversal_id_blocked(self) -> None:
         """路径穿越风格的 project_id 被拒绝。"""
@@ -120,7 +169,7 @@ class TestProjectIdValidationAPI:
             "project_id": "..\\..\\windows",
             "project_name": "Evil",
         }
-        response = client.post("/api/projects", json=payload)
+        response = client.post("/api/projects", json=payload, headers=self._headers())
         assert response.status_code == 422, response.text
 
     def test_create_project_with_slash_blocked(self) -> None:
@@ -129,14 +178,14 @@ class TestProjectIdValidationAPI:
             "project_id": "abc/def",
             "project_name": "Slash Project",
         }
-        response = client.post("/api/projects", json=payload)
+        response = client.post("/api/projects", json=payload, headers=self._headers())
         assert response.status_code == 422, response.text
 
     def test_create_project_with_special_chars_blocked(self) -> None:
         """包含特殊字符的 project_id 被拒绝。"""
         for bad_id in ["中文名", "a b", ".hidden"]:
             payload = {"project_id": bad_id, "project_name": "Bad"}
-            response = client.post("/api/projects", json=payload)
+            response = client.post("/api/projects", json=payload, headers=self._headers())
             assert response.status_code == 422, f"{bad_id} should be rejected"
 
     def test_health_check(self) -> None:
@@ -219,27 +268,3 @@ class TestZipUploadFilenameSafety:
         # zip slip 检测应触发错误
         data = response.json()
         assert not data.get("can_import", True), "包含路径穿越的 zip 不应允许导入"
-
-
-# ── 清理测试数据 ───────────────────────────────────────────────────────────
-
-@pytest.fixture(autouse=True)
-def _cleanup_test_projects() -> None:
-    """测试后清理可能创建的测试项目。"""
-    yield
-    # 通过 API 删除测试项目（如果存在）
-    from app.database import SessionLocal
-    from sqlalchemy import select, delete as sql_delete
-    from app import models
-
-    db = SessionLocal()
-    try:
-        for test_id in ["SECURITY-TEST-001", "ZIP-TEST-001"]:
-            project = db.scalar(
-                select(models.Project).where(models.Project.project_id == test_id)
-            )
-            if project:
-                db.delete(project)
-        db.commit()
-    finally:
-        db.close()

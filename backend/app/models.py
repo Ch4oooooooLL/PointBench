@@ -250,6 +250,20 @@ class DewesoftChannel(Base):
     import_job: Mapped[DewesoftImport] = relationship(back_populates="channels")
 
 
+class User(Base):
+    """系统用户 —— 支持本地账号密码认证。"""
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(String(32), default="viewer")  # viewer / editor / admin
+    display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
+
+
 class AuditLog(Base):
     """操作审计日志 —— 记录所有写操作的追溯信息。"""
     __tablename__ = "audit_logs"

@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.database import init_db
 from app.routers import (
     analysis_router,
+    auth_router,
     crack_router,
     dewesoft_router,
     import_router,
@@ -35,6 +36,7 @@ def health() -> dict:
     return {"ok": True}
 
 
+app.include_router(auth_router.router)
 app.include_router(import_router.router)
 app.include_router(project_router.router)
 app.include_router(point_router.router)
