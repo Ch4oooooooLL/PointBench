@@ -24,7 +24,7 @@ export function TrendChart({ data, metric }: Props) {
     const chart = echarts.init(chartDom);
     chart.setOption({
       tooltip: { trigger: 'axis' },
-      grid: { left: 52, right: 24, top: 32, bottom: 62 },
+      grid: { left: 52, right: 24, top: 32, bottom: 74 },
       xAxis: { type: 'category', data: data.map((item) => item.cycle_count) },
       yAxis: { type: 'value', name: labels[metric] },
       dataZoom: [
@@ -38,12 +38,35 @@ export function TrendChart({ data, metric }: Props) {
         {
           type: 'slider',
           xAxisIndex: 0,
-          height: 24,
-          bottom: 8,
-          borderColor: '#e2e8f0',
-          fillerColor: 'rgba(15,118,110,0.08)',
-          handleStyle: { color: '#0f766e' },
-          textStyle: { fontSize: 10 },
+          height: 32,
+          bottom: 12,
+          backgroundColor: '#f1f5f9',
+          borderColor: '#cbd5e1',
+          borderRadius: 8,
+          fillerColor: 'rgba(37, 99, 235, 0.18)',
+          handleIcon: 'path://M10.7,0C4.8,0,0,4.8,0,10.7s4.8,10.7,10.7,10.7s10.7-4.8,10.7-10.7S16.6,0,10.7,0z M10.7,17.9c-4,0-7.2-3.2-7.2-7.2c0-4,3.2-7.2,7.2-7.2c4,0,7.2,3.2,7.2,7.2C17.9,14.7,14.7,17.9,10.7,17.9z',
+          handleSize: '100%',
+          handleStyle: {
+            color: '#2563eb',
+            borderColor: '#ffffff',
+            borderWidth: 2,
+            shadowBlur: 6,
+            shadowColor: 'rgba(37, 99, 235, 0.35)',
+            shadowOffsetY: 2,
+          },
+          moveHandleSize: 7,
+          moveHandleStyle: {
+            color: '#3b82f6',
+          },
+          selectedDataBackground: {
+            lineStyle: { color: '#2563eb', width: 2 },
+            areaStyle: { color: 'rgba(37, 99, 235, 0.25)' },
+          },
+          dataBackground: {
+            lineStyle: { color: '#94a3b8', width: 1 },
+            areaStyle: { color: 'rgba(148, 163, 184, 0.1)' },
+          },
+          textStyle: { color: '#475569', fontSize: 11, fontWeight: 'bold' },
         },
       ],
       series: [
