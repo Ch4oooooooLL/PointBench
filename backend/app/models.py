@@ -114,6 +114,7 @@ class CaeMapping(Base):
 
 class TestRun(Base):
     __tablename__ = "test_runs"
+    __table_args__ = (UniqueConstraint("project_db_id", "cycle_count", name="uq_project_cycle"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     project_db_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)

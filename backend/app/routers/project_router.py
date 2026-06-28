@@ -230,9 +230,21 @@ def create_project_point(project_id: int, payload: PointCreate | None = None, db
 def create_test_run(project_id: int, payload: TestRunCreate, db: Session = Depends(get_db)) -> TestRunOut:
     if not db.get(models.Project, project_id):
         raise HTTPException(status_code=404, detail="项目不存在")
+    existing = db.scalar(
+        select(models.TestRun).where(
+            models.TestRun.project_db_id == project_id,
+            models.TestRun.cycle_count == payload.cycle_count,
+        )
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail=f"循环次数 {payload.cycle_count} 的测试轮次已存在，请使用不同的循环次数")
     run = models.TestRun(project_db_id=project_id, **payload.model_dump())
     db.add(run)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=f"循环次数 {payload.cycle_count} 的测试轮次已存在")
     db.refresh(run)
     return TestRunOut.model_validate(run)
 

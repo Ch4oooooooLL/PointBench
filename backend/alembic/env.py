@@ -64,9 +64,14 @@ def run_migrations_online() -> None:
     """
     from app.database import engine as app_engine
 
+    # SQLite requires batch mode for ALTER operations
+    render_as_batch = app_engine.url.get_backend_name() == "sqlite"
+
     with app_engine.connect() as connection:
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection,
+            target_metadata=target_metadata,
+            render_as_batch=render_as_batch,
         )
 
         with context.begin_transaction():
