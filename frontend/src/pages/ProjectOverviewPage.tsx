@@ -70,6 +70,7 @@ export function ProjectOverviewPage() {
   const [trends, setTrends] = useState<PointTrend[]>([]);
   const [crackRecords, setCrackRecords] = useState<CrackRecord[]>([]);
   const [selectedCrackRecord, setSelectedCrackRecord] = useState<CrackRecord | null>(null);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -89,6 +90,7 @@ export function ProjectOverviewPage() {
     setTrends([]);
     setCrackRecords([]);
     setError('');
+    setLoading(true);
     Promise.all([
       api.get<Point[]>(`/api/projects/${selectedProjectId}/points`),
       api.get<Summary>(`/api/projects/${selectedProjectId}/analysis/summary`),
@@ -107,9 +109,13 @@ export function ProjectOverviewPage() {
         );
         if (cancelled) return;
         setTrends(trendData);
+        setLoading(false);
       })
       .catch((err) => {
-        if (!cancelled) setError(err.message);
+        if (!cancelled) {
+          setError(err.message);
+          setLoading(false);
+        }
       });
     return () => {
       cancelled = true;
@@ -192,7 +198,7 @@ export function ProjectOverviewPage() {
             <div className="section-head">
               <div>
                 <h2>全点位应力幅趋势</h2>
-                <p>Ctrl+滚轮横向缩放 · Shift+滚轮左右平移 · 拖拽底部滑块选取区间 · 红圈=裂纹记录</p>
+                <p>Ctrl+滚轮缩放 · Shift+滚轮平移 · 鼠标悬停查看点位照片与裂纹 · 点击曲线跳转点位详情 · 点击空白放大图表 · 红圈=裂纹记录</p>
               </div>
             </div>
             <MultiPointTrendChart
@@ -201,6 +207,7 @@ export function ProjectOverviewPage() {
               expandedHeight={chartSettings.overviewExpandedHeight}
               crackRecords={crackRecords}
               onCrackSelect={setSelectedCrackRecord}
+              loading={loading}
             />
           </div>
 

@@ -1,5 +1,6 @@
 import * as echarts from 'echarts';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../context/AppContext';
 import { CrackRecord, Point, TrendItem } from '../types';
 
@@ -15,6 +16,7 @@ interface Props {
   expandable?: boolean;
   crackRecords?: CrackRecord[];
   onCrackSelect?: (record: CrackRecord) => void;
+  loading?: boolean;
 }
 
 const palette = [
@@ -66,12 +68,92 @@ function buildCrackData(trends: PointTrend[], crackRecords: CrackRecord[]): Crac
     .filter(isCrackPointData);
 }
 
-function buildOption(trends: PointTrend[], focusPointId: number | null, crackRecords: CrackRecord[]) {
+function buildOption(
+  trends: PointTrend[],
+  focusPointId: number | null,
+  crackRecords: CrackRecord[],
+  onPointClick?: (pointId: number) => void,
+) {
+  const cracksByPoint: Record<number, CrackRecord[]> = {};
+  for (const record of crackRecords) {
+    if (!cracksByPoint[record.point_db_id]) cracksByPoint[record.point_db_id] = [];
+    cracksByPoint[record.point_db_id].push(record);
+  }
+  // 为每条折线预留前两张照片的 media ID 列表
+  const pointMediaIds: number[] = [];
+  for (const { point } of trends) {
+    const firstTwo = point.media_files?.slice(0, 2).map((m) => m.id) ?? [];
+    pointMediaIds.push(firstTwo.length);
+  }
+
   return {
     color: palette,
     tooltip: {
       trigger: 'axis',
-      valueFormatter: (value: number) => `${Number(value).toFixed(2)} MPa`,
+      appendToBody: true,
+      confine: true,
+      extraCssText: 'max-width: 280px; white-space: normal;',
+      formatter: (rawParams: unknown) => {
+        const params = (Array.isArray(rawParams) ? rawParams : [rawParams]) as Array<{
+          seriesIndex: number;
+          seriesName: string;
+          value: [number, number];
+          color: string;
+          data?: { crackRecordId?: number };
+        }>;
+        if (!params.length) return '';
+
+        // 裂纹散点系列排在最后，跳过它（散点用自己的 tooltip）
+        const lineParams = params.filter((p) => p.seriesIndex < trends.length);
+        if (!lineParams.length) {
+          // 只有裂纹散点
+          const crackParam = params.find((p) => p.data?.crackRecordId);
+          if (crackParam?.data?.crackRecordId) {
+            const record = crackRecords.find((r) => r.id === crackParam.data!.crackRecordId);
+            if (record) return `<div style="padding:4px"><b>${record.point_id}</b> 裂纹 · ${record.cycle_count} 次<br/>${record.remark ?? ''}</div>`;
+          }
+          return '';
+        }
+
+        // 构建每条折线的 tooltip 行
+        const lines = lineParams.map((p) => {
+          const pt = trends[p.seriesIndex];
+          const point = pt?.point;
+          const cracks = point ? cracksByPoint[point.id] ?? [] : [];
+          const photos = point?.media_files?.slice(0, 2) ?? [];
+          const cycleCount = p.value?.[0] ?? '-';
+          const stress = p.value?.[1] != null ? `${Number(p.value[1]).toFixed(2)} MPa` : '-';
+
+          let photoHtml = '';
+          if (photos.length) {
+            photoHtml = `<div style="display:flex;gap:4px;margin-top:4px">${photos
+              .map((m) => `<img src="/api/media/${m.id}" style="width:56px;height:42px;object-fit:cover;border-radius:4px;border:1px solid #e2e8f0" />`)
+              .join('')}</div>`;
+          }
+
+          const crackBadge = cracks.length
+            ? `<span style="display:inline-block;background:#fef2f2;color:#dc2626;border-radius:3px;padding:0 4px;font-size:11px;margin-left:4px">裂纹×${cracks.length}</span>`
+            : '';
+
+          return `<div style="margin:2px 0;padding:4px 0;border-bottom:1px solid #f1f5f9">
+            <div style="display:flex;align-items:center;gap:4px">
+              <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.color};flex-shrink:0"></span>
+              <b>${point?.point_id ?? p.seriesName}</b>
+              <span style="color:#64748b;font-size:11px">${point?.point_name ?? ''}</span>
+              ${crackBadge}
+            </div>
+            <div style="font-size:11px;color:#475569;margin-top:2px">
+              循环: ${cycleCount} · 应力幅: ${stress}
+            </div>
+            ${photoHtml}
+          </div>`;
+        });
+
+        return `<div style="font-size:12px;line-height:1.5">
+          ${lines.join('')}
+          <div style="color:#94a3b8;font-size:10px;margin-top:4px;text-align:center">🖱 点击曲线跳转点位详情</div>
+        </div>`;
+      },
     },
     grid: { left: 58, right: 24, top: 24, bottom: 62 },
     xAxis: { type: 'value', name: '循环次数' },
@@ -107,9 +189,13 @@ function buildOption(trends: PointTrend[], focusPointId: number | null, crackRec
           lineStyle: { color: colorForIndex(index), width: focused ? 3 : 1.5, opacity: focused ? 1 : 0.14 },
           itemStyle: { color: colorForIndex(index), opacity: focused ? 1 : 0.22 },
           emphasis: { focus: 'series' },
+          // 在每个数据点附带 point_db_id，供点击事件使用
           data: trend
             .filter((item) => item.stress_amplitude_mpa != null)
-            .map((item) => [item.cycle_count, item.stress_amplitude_mpa]),
+            .map((item) => ({
+              value: [item.cycle_count, item.stress_amplitude_mpa],
+              pointDbId: point.id,
+            })),
         };
       }),
       {
@@ -143,6 +229,8 @@ function ChartCanvas({
   crackRecords,
   onCrackSelect,
   onChartClick,
+  onPointClick,
+  loading,
 }: {
   trends: PointTrend[];
   height: number;
@@ -150,29 +238,46 @@ function ChartCanvas({
   crackRecords: CrackRecord[];
   onCrackSelect?: (record: CrackRecord) => void;
   onChartClick?: () => void;
+  onPointClick?: (pointId: number) => void;
+  loading?: boolean;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (!ref.current) return;
+    if (!ref.current || loading) return;
     const chartDom = ref.current;
     const chart = echarts.init(chartDom);
     chart.setOption(buildOption(trends, focusPointId, crackRecords), true);
+
+    // 点击事件：区分折线数据点、裂纹散点、空白区域
+    chart.off('click');
     chart.on('click', (params) => {
-      const data = params.data as { crackRecordId?: number } | undefined;
-      const crackRecord = crackRecords.find((record) => record.id === data?.crackRecordId);
-      if (crackRecord) onCrackSelect?.(crackRecord);
-      else onChartClick?.();
+      if (!params || !('seriesIndex' in params)) return;
+      const seriesIndex = params.seriesIndex as number;
+      // 裂纹散点系列排在最后
+      if (seriesIndex === trends.length) {
+        const data = params.data as { crackRecordId?: number } | undefined;
+        const crackRecord = crackRecords.find((record) => record.id === data?.crackRecordId);
+        if (crackRecord) onCrackSelect?.(crackRecord);
+        return;
+      }
+      // 折线数据点 → 跳转点位详情
+      if (seriesIndex < trends.length) {
+        const data = params.data as { pointDbId?: number } | undefined;
+        if (data?.pointDbId) onPointClick?.(data.pointDbId);
+      }
     });
-    chart.getZr().on('click', (event) => {
+
+    // 空白区域点击 → 展开模态框
+    chart.getZr().off('click');
+    chart.getZr().on('click', (event: { target?: unknown }) => {
       if (!event.target) onChartClick?.();
     });
 
-    // 滚轮事件：无修饰键时不劫持滚动，浏览器正常滚动页面
-    // CTRL/SHIFT 按下时交给 ECharts dataZoom 处理缩放/平移
+    // 滚轮事件：无修饰键时不劫持滚动
     const handleWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
-        e.stopPropagation(); // 阻止 ECharts 收到事件 → 不会 preventDefault → 页面正常滚动
+        e.stopPropagation();
       }
     };
     chartDom.addEventListener('wheel', handleWheel, { passive: false, capture: true });
@@ -184,7 +289,25 @@ function ChartCanvas({
       window.removeEventListener('resize', resize);
       chart.dispose();
     };
-  }, [trends, focusPointId, crackRecords, onCrackSelect, onChartClick]);
+  }, [trends, focusPointId, crackRecords, onCrackSelect, onChartClick, onPointClick, loading]);
+
+  if (loading) {
+    return (
+      <div>
+        <div className="chart chart-loading" style={{ height }}>
+          <div className="chart-loading-spinner" />
+          <span>趋势图加载中…</span>
+        </div>
+        <div className="chart-zoom-hint">
+          <span>Ctrl+滚轮 横向缩放</span>
+          <span className="hint-sep">|</span>
+          <span>Shift+滚轮 左右平移</span>
+          <span className="hint-sep">|</span>
+          <span>拖拽滑块 选择区间</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -213,6 +336,8 @@ function SideLegend({
   maxHeight: number;
   interactive?: boolean;
 }) {
+  const navigate = useNavigate();
+
   return (
     <div className="side-legend" aria-label="点位标注" style={{ maxHeight }}>
       {trends.map(({ point, trend }, index) => {
@@ -225,9 +350,15 @@ function SideLegend({
             className={`side-legend-item ${interactive ? 'interactive' : ''} ${active ? 'active' : ''} ${dimmed ? 'dimmed' : ''}`}
             type="button"
             onClick={() => {
-              if (interactive) onFocus?.(active ? null : point.id);
+              if (interactive && !active) {
+                onFocus?.(point.id);
+              } else if (interactive && active) {
+                onFocus?.(null);
+              } else {
+                navigate(`/points/${point.id}`);
+              }
             }}
-            title={interactive ? '点击突出该点位折线' : undefined}
+            title={interactive ? '点击突出折线 · 再次点击跳转详情' : '点击跳转点位详情'}
           >
             <span className="legend-dot" style={{ background: colorForIndex(index) }} />
             <span className="legend-text">
@@ -249,11 +380,36 @@ export function MultiPointTrendChart({
   expandable = true,
   crackRecords = [],
   onCrackSelect,
+  loading = false,
 }: Props) {
   const { chartSettings } = useAppContext();
+  const navigate = useNavigate();
   const [expanded, setExpanded] = useState(false);
   const [focusPointId, setFocusPointId] = useState<number | null>(null);
   const availableTrends = useMemo(() => trends.filter((item) => item.trend.length), [trends]);
+
+  const handlePointClick = (pointId: number) => {
+    navigate(`/points/${pointId}`);
+  };
+
+  // 加载中状态
+  if (loading) {
+    return (
+      <div>
+        <div className="chart chart-loading" style={{ height }}>
+          <div className="chart-loading-spinner" />
+          <span>趋势数据加载中…</span>
+        </div>
+        <div className="chart-zoom-hint">
+          <span>Ctrl+滚轮 横向缩放</span>
+          <span className="hint-sep">|</span>
+          <span>Shift+滚轮 左右平移</span>
+          <span className="hint-sep">|</span>
+          <span>拖拽滑块 选择区间</span>
+        </div>
+      </div>
+    );
+  }
 
   if (!availableTrends.length) {
     return <div className="empty chart-empty">暂无趋势数据</div>;
@@ -269,7 +425,7 @@ export function MultiPointTrendChart({
           onKeyDown={(event) => {
             if (expandable && (event.key === 'Enter' || event.key === ' ')) setExpanded(true);
           }}
-          title={expandable ? '点击放大图表' : undefined}
+          title={expandable ? '点击空白区域放大图表 · 点击曲线跳转点位详情' : '点击曲线跳转点位详情'}
         >
           <ChartCanvas
             trends={availableTrends}
@@ -277,6 +433,7 @@ export function MultiPointTrendChart({
             focusPointId={null}
             crackRecords={crackRecords}
             onCrackSelect={onCrackSelect}
+            onPointClick={handlePointClick}
             onChartClick={expandable ? () => setExpanded(true) : undefined}
           />
         </div>
@@ -289,7 +446,7 @@ export function MultiPointTrendChart({
             <div className="section-head">
               <div>
                 <h2>全项目点位应力趋势</h2>
-                <p>Ctrl+滚轮缩放 · Shift+滚轮平移 · 拖拽下方滑块选取区间 · 点击右侧标注突出折线</p>
+                <p>Ctrl+滚轮缩放 · Shift+滚轮平移 · 拖拽下方滑块选取区间 · 点击曲线跳转点位详情 · 点击右侧标注突出折线</p>
               </div>
               <button className="button" onClick={() => setExpanded(false)}>关闭</button>
             </div>
@@ -300,6 +457,7 @@ export function MultiPointTrendChart({
                 focusPointId={focusPointId}
                 crackRecords={crackRecords}
                 onCrackSelect={onCrackSelect}
+                onPointClick={handlePointClick}
               />
               <SideLegend
                 trends={availableTrends}
