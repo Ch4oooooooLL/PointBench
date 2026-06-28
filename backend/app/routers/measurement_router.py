@@ -1,5 +1,8 @@
-from collections import defaultdict
+import json
+import uuid
+from collections import Counter, defaultdict
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -8,7 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import models
-from app.database import get_db
+from app.database import STORAGE_DIR, get_db
 from app.schemas import (
     MeasurementBatchCreate,
     MeasurementCreate,
@@ -21,6 +24,10 @@ from app.schemas import (
     PointMeasurementRowUpdate,
     TestRunOut,
     TestRunUpdate,
+    XlsxImportConfirmRequest,
+    XlsxImportPreview,
+    XlsxImportResult,
+    XlsxImportRowError,
 )
 from app.services.analysis_service import compute_measurement_fields, refresh_point_abnormal_flags
 
@@ -537,3 +544,301 @@ def delete_measurement(measurement_id: int, db: Session = Depends(get_db)) -> di
     refresh_point_abnormal_flags(db, point_id)
     db.commit()
     return {"ok": True}
+
+
+# ── XLSX 导入：预检 + 确认 两步流程 ────────────────────────────────────────
+
+XLSX_TEMP_DIR = STORAGE_DIR / "temp" / "xlsx"
+
+
+def _parse_xlsx_rows_lenient(file_bytes: bytes) -> tuple[list[dict[str, Any]], list[XlsxImportRowError]]:
+    """解析 XLSX 行，收集所有错误而非遇错即停。"""
+    errors: list[XlsxImportRowError] = []
+    try:
+        workbook = load_workbook(BytesIO(file_bytes), data_only=True)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"无法读取 XLSX 文件: {exc}") from exc
+    if not workbook.worksheets:
+        raise HTTPException(status_code=400, detail="XLSX 文件中没有工作表")
+
+    sheet = workbook["measurements"] if "measurements" in workbook.sheetnames else workbook.worksheets[0]
+    headers = [_cell_text(cell.value) for cell in sheet[1]]
+    header_index = {header: index for index, header in enumerate(headers) if header}
+    missing = [header for header in REQUIRED_XLSX_HEADERS if header not in header_index]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"模板缺少表头: {', '.join(missing)}")
+
+    rows: list[dict[str, Any]] = []
+    for row_number, cells in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
+        row = {header: cells[index] if index < len(cells) else None for header, index in header_index.items()}
+        if not any(_cell_text(row.get(field)) for field in ["max_strain_ue", "min_strain_ue", "remark"]):
+            continue
+
+        run_name = _cell_text(row.get("run_name"))
+        cycle_count_text = _cell_text(row.get("cycle_count"))
+        point_id = _cell_text(row.get("point_id"))
+
+        if not run_name:
+            errors.append(XlsxImportRowError(row=row_number, field="run_name", message="缺少测试轮次名称"))
+        if not cycle_count_text:
+            errors.append(XlsxImportRowError(row=row_number, field="cycle_count", message="缺少循环次数"))
+        if not point_id:
+            errors.append(XlsxImportRowError(row=row_number, field="point_id", message="缺少点位编号"))
+
+        cycle_count = 0
+        if cycle_count_text:
+            try:
+                cycle_count = int(float(cycle_count_text))
+                if cycle_count < 0:
+                    errors.append(XlsxImportRowError(row=row_number, field="cycle_count", message="循环次数不能为负数"))
+            except ValueError:
+                errors.append(XlsxImportRowError(row=row_number, field="cycle_count", message=f"循环次数不是数字: {cycle_count_text}"))
+
+        max_strain = _cell_number(row.get("max_strain_ue"), row_number, "max_strain_ue") if _cell_text(row.get("max_strain_ue")) else None
+        min_strain = _cell_number(row.get("min_strain_ue"), row_number, "min_strain_ue") if _cell_text(row.get("min_strain_ue")) else None
+
+        if max_strain is not None and min_strain is not None and max_strain < min_strain:
+            errors.append(XlsxImportRowError(row=row_number, field="max_strain_ue", message="最大应变小于最小应变"))
+
+        rows.append({
+            "row_number": row_number,
+            "run_name": run_name,
+            "cycle_count": cycle_count,
+            "test_time": _cell_text(row.get("test_time")) or None,
+            "point_id": point_id,
+            "max_strain_ue": max_strain,
+            "min_strain_ue": min_strain,
+            "remark": _cell_text(row.get("remark")) or None,
+        })
+
+    if not rows:
+        raise HTTPException(status_code=400, detail="没有可导入的数据，请至少填写最大应变或最小应变")
+    return rows, errors
+
+
+def _build_xlsx_preview(db: Session, project_id: int, rows: list[dict], errors: list[XlsxImportRowError]) -> XlsxImportPreview:
+    """根据解析结果构建预检报告。"""
+    points = db.execute(select(models.TestPoint).where(models.TestPoint.project_db_id == project_id)).scalars().all()
+    point_ids = {point.point_id for point in points}
+
+    invalid_row_numbers = {error.row for error in errors}
+    valid_rows_list = [row for row in rows if row["row_number"] not in invalid_row_numbers]
+
+    unmatched = sorted({
+        row["point_id"]
+        for row in valid_rows_list
+        if row["point_id"] and row["point_id"] not in point_ids
+    })
+
+    # 检测文件内重复 cycle_count
+    cycle_counts = [row["cycle_count"] for row in valid_rows_list if row["cycle_count"] > 0]
+    cycle_dupes = sorted([cc for cc, count in Counter(cycle_counts).items() if count > 1])
+
+    # 检测是否会覆盖已有数据
+    overwrite_count = 0
+    for row in valid_rows_list:
+        if row["point_id"] in point_ids and row["cycle_count"] > 0:
+            existing = db.scalar(
+                select(models.MeasurementRecord)
+                .join(models.TestRun)
+                .join(models.TestPoint)
+                .where(
+                    models.TestPoint.project_db_id == project_id,
+                    models.TestPoint.point_id == row["point_id"],
+                    models.TestRun.cycle_count == row["cycle_count"],
+                )
+            )
+            if existing:
+                overwrite_count += 1
+
+    return XlsxImportPreview(
+        temporary_import_id="",  # 由调用方填充
+        total_rows=len(rows),
+        valid_rows=len(valid_rows_list),
+        invalid_rows=len(invalid_row_numbers),
+        unmatched_points=unmatched,
+        duplicate_cycle_in_file=cycle_dupes,
+        will_overwrite=overwrite_count > 0,
+        overwrite_count=overwrite_count,
+        errors=errors,
+        can_import=len(errors) == 0 and len(unmatched) == 0,
+    )
+
+
+@router.post("/api/projects/{project_id}/measurements/import-xlsx/preview", response_model=XlsxImportPreview)
+async def preview_xlsx_import(
+    project_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> XlsxImportPreview:
+    """第一步：上传 XLSX 并返回预检报告。"""
+    project = db.get(models.Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xlsm")):
+        raise HTTPException(status_code=400, detail="请上传 XLSX/XLSM 文件")
+
+    file_bytes = await file.read()
+    rows, errors = _parse_xlsx_rows_lenient(file_bytes)
+    preview = _build_xlsx_preview(db, project_id, rows, errors)
+
+    # 暂存解析结果到临时文件
+    temporary_import_id = f"XLSX-{uuid.uuid4().hex[:12]}"
+    XLSX_TEMP_DIR.mkdir(parents=True, exist_ok=True)
+    temp_path = XLSX_TEMP_DIR / f"{temporary_import_id}.json"
+    temp_path.write_text(
+        json.dumps({"rows": rows, "project_id": project_id}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    preview.temporary_import_id = temporary_import_id
+    return preview
+
+
+@router.post("/api/projects/{project_id}/measurements/import-xlsx/confirm", response_model=XlsxImportResult)
+def confirm_xlsx_import(
+    project_id: int,
+    payload: XlsxImportConfirmRequest,
+    db: Session = Depends(get_db),
+) -> XlsxImportResult:
+    """第二步：确认导入，按策略执行。"""
+    project = db.get(models.Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    temp_path = XLSX_TEMP_DIR / f"{payload.temporary_import_id}.json"
+    if not temp_path.exists():
+        raise HTTPException(status_code=404, detail="预检数据已过期，请重新上传预览")
+
+    try:
+        data = json.loads(temp_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=400, detail=f"预检数据损坏: {exc}") from exc
+
+    stored_project_id = data.get("project_id")
+    if stored_project_id != project_id:
+        raise HTTPException(status_code=400, detail="预检数据与当前项目不匹配")
+
+    rows: list[dict] = data.get("rows", [])
+    if not rows:
+        raise HTTPException(status_code=400, detail="没有可导入的数据")
+
+    points = db.execute(select(models.TestPoint).where(models.TestPoint.project_db_id == project_id)).scalars().all()
+    point_by_id = {point.point_id: point for point in points}
+
+    strategy = payload.strategy
+
+    # 过滤无效行
+    errors_by_row: dict[int, list[str]] = {}
+    if strategy != "abort":
+        # 重新校验以获取错误行
+        _, parse_errors = _parse_xlsx_rows_lenient(
+            b""  # 我们已经有了 rows，直接校验
+        )
+        # 从暂存数据重新校验
+        for row in rows:
+            row_errors: list[str] = []
+            if not row.get("run_name"):
+                row_errors.append("缺少 run_name")
+            if row.get("cycle_count", 0) < 0:
+                row_errors.append("循环次数为负数")
+            if not row.get("point_id"):
+                row_errors.append("缺少 point_id")
+            if row.get("point_id") and row["point_id"] not in point_by_id:
+                row_errors.append(f"点位 {row['point_id']} 不存在")
+            if row_errors:
+                errors_by_row[row["row_number"]] = row_errors
+
+    if strategy == "abort":
+        invalid_row = next((row for row in rows if not row.get("point_id") or row["point_id"] not in point_by_id), None)
+        if invalid_row:
+            raise HTTPException(status_code=400, detail=f"第 {invalid_row['row_number']} 行点位不存在或格式错误，请返回预览修正后重试")
+
+    groups: dict[tuple[str, int, str | None], list[dict]] = defaultdict(list)
+    skipped_rows = 0
+    overwritten_count = 0
+
+    for row in rows:
+        if strategy == "skip_invalid" and row["row_number"] in errors_by_row:
+            skipped_rows += 1
+            continue
+        if not row.get("point_id") or row["point_id"] not in point_by_id:
+            if strategy == "skip_invalid":
+                skipped_rows += 1
+                continue
+            else:
+                raise HTTPException(status_code=400, detail=f"第 {row['row_number']} 行点位 {row.get('point_id')} 不存在")
+        groups[(row["run_name"], row["cycle_count"], row["test_time"])].append(row)
+
+    created_runs = 0
+    measurement_count = 0
+    affected_point_ids: set[int] = set()
+
+    for (run_name, cycle_count, test_time), group_rows in sorted(groups.items(), key=lambda item: item[0][1]):
+        run = db.scalar(
+            select(models.TestRun).where(
+                models.TestRun.project_db_id == project_id,
+                models.TestRun.run_name == run_name,
+                models.TestRun.cycle_count == cycle_count,
+            )
+        )
+        if not run:
+            run = models.TestRun(
+                project_db_id=project_id,
+                run_name=run_name,
+                cycle_count=cycle_count,
+                test_time=test_time,
+                remark="XLSX preview-confirm import",
+            )
+            db.add(run)
+            db.flush()
+            created_runs += 1
+        for row in group_rows:
+            point = point_by_id[row["point_id"]]
+            if strategy == "append_only":
+                existing = db.scalar(
+                    select(models.MeasurementRecord).where(
+                        models.MeasurementRecord.run_id == run.id,
+                        models.MeasurementRecord.point_db_id == point.id,
+                    )
+                )
+                if existing:
+                    skipped_rows += 1
+                    continue
+            elif strategy == "overwrite":
+                existing = db.scalar(
+                    select(models.MeasurementRecord).where(
+                        models.MeasurementRecord.run_id == run.id,
+                        models.MeasurementRecord.point_db_id == point.id,
+                    )
+                )
+                if existing:
+                    overwritten_count += 1
+
+            record = _create_or_update_measurement(
+                db, run.id, point.id,
+                row["max_strain_ue"], row["min_strain_ue"], row["remark"],
+            )
+            measurement_count += 1
+            affected_point_ids.add(record.point_db_id)
+
+    db.flush()
+    for pid in affected_point_ids:
+        refresh_point_abnormal_flags(db, pid)
+    db.commit()
+
+    # 清理临时文件
+    try:
+        temp_path.unlink()
+    except OSError:
+        pass
+
+    return XlsxImportResult(
+        ok=True,
+        strategy=strategy,
+        run_count=len(groups),
+        created_run_count=created_runs,
+        measurement_count=measurement_count,
+        skipped_rows=skipped_rows,
+        overwritten_count=overwritten_count,
+    )

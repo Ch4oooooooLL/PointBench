@@ -473,3 +473,46 @@ class DewesoftImportOut(BaseModel):
     raw_metadata_json: str | None
     created_at: datetime
     channels: list[DewesoftChannelOut] = []
+
+
+# ── XLSX 导入预览 / 确认 ──────────────────────────────────────────────────
+
+class XlsxImportRowError(BaseModel):
+    row: int
+    field: str
+    message: str
+
+
+class XlsxImportPreview(BaseModel):
+    temporary_import_id: str
+    total_rows: int
+    valid_rows: int
+    invalid_rows: int
+    unmatched_points: list[str] = []
+    duplicate_cycle_in_file: list[int] = []
+    will_overwrite: bool = False
+    overwrite_count: int = 0
+    errors: list[XlsxImportRowError] = []
+    can_import: bool = False
+
+
+class XlsxImportStrategy:
+    ABORT = "abort"
+    SKIP_INVALID = "skip_invalid"
+    OVERWRITE = "overwrite"
+    APPEND_ONLY = "append_only"
+
+
+class XlsxImportConfirmRequest(BaseModel):
+    temporary_import_id: str
+    strategy: str = Field(default="abort", pattern=r"^(abort|skip_invalid|overwrite|append_only)$")
+
+
+class XlsxImportResult(BaseModel):
+    ok: bool
+    strategy: str
+    run_count: int = 0
+    created_run_count: int = 0
+    measurement_count: int = 0
+    skipped_rows: int = 0
+    overwritten_count: int = 0
