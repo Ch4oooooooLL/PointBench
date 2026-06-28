@@ -1,6 +1,7 @@
 import * as echarts from 'echarts';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { mediaUrl } from '../api/client';
 import { useAppContext } from '../context/AppContext';
 import { CrackRecord, Point, TrendItem } from '../types';
 
@@ -16,6 +17,7 @@ interface Props {
   expandable?: boolean;
   crackRecords?: CrackRecord[];
   onCrackSelect?: (record: CrackRecord) => void;
+  onPointSelect?: (pointTrend: PointTrend) => void;
   loading?: boolean;
 }
 
@@ -68,11 +70,67 @@ function buildCrackData(trends: PointTrend[], crackRecords: CrackRecord[]): Crac
     .filter(isCrackPointData);
 }
 
+function escapeHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function formatNumber(value: number | null | undefined, digits = 1): string {
+  return value == null || Number.isNaN(Number(value)) ? '-' : Number(value).toFixed(digits);
+}
+
+function formatCycleCount(trend: TrendItem[]): string {
+  const cycles = trend.map((item) => item.cycle_count).filter((value) => Number.isFinite(value));
+  return cycles.length ? String(Math.max(...cycles)) : '-';
+}
+
+function buildPointTooltip(pointTrend: PointTrend, cracks: CrackRecord[], color: string): string {
+  const { point, trend } = pointTrend;
+  const latest = [...trend].reverse().find((item) => item.stress_amplitude_mpa != null);
+  const photos = point.media_files?.slice(0, 2) ?? [];
+  const photoHtml = photos.length
+    ? photos
+        .map(
+          (media) => `
+            <img
+              class="line-tooltip-image"
+              src="${mediaUrl(media.id)}"
+              alt="${escapeHtml(point.point_name)}"
+            />`,
+        )
+        .join('')
+    : '<div class="line-tooltip-empty">暂无图片</div>';
+
+  return `
+    <div class="line-tooltip-card" style="--line-color:${color}">
+      <div class="line-tooltip-main">
+        <div class="line-tooltip-title">
+          <span>${escapeHtml(point.point_id)}</span>
+          <strong>${escapeHtml(point.point_name)}</strong>
+        </div>
+        <div class="line-tooltip-meta">
+          <span>最新循环 ${escapeHtml(formatCycleCount(trend))} 次</span>
+          <span>测试记录 ${trend.length} 次</span>
+          <span>裂纹 ${cracks.length} 条</span>
+          <span>最新应力幅 ${formatNumber(latest?.stress_amplitude_mpa)} MPa</span>
+        </div>
+        <div class="line-tooltip-sub">
+          ${escapeHtml([point.component, point.side, point.direction, point.bridge_type].filter(Boolean).join(' / ') || '未填写部件信息')}
+        </div>
+      </div>
+      <div class="line-tooltip-images">${photoHtml}</div>
+    </div>
+  `;
+}
+
 function buildOption(
   trends: PointTrend[],
   focusPointId: number | null,
   crackRecords: CrackRecord[],
-  onPointClick?: (pointId: number) => void,
 ) {
   const cracksByPoint: Record<number, CrackRecord[]> = {};
   for (const record of crackRecords) {
@@ -94,77 +152,33 @@ function buildOption(
       appendToBody: true,
       confine: true,
       hideDelay: 80,
-      extraCssText: 'max-width: min(360px, 92vw); max-height: min(420px, 70vh); white-space: normal; font-size: 13px;',
+      extraCssText: 'padding:0;border:0;background:transparent;box-shadow:0 18px 50px rgba(15,23,27,.24);max-width:min(520px,82vw);max-height:min(520px,72vh);white-space:normal;',
       formatter: (rawParams: unknown) => {
-        const params = (Array.isArray(rawParams) ? rawParams : [rawParams]) as Array<{
-          seriesIndex: number;
-          seriesName: string;
-          value?: [number, number];
-          color: string;
-          data?: { crackRecordId?: number; pointDbId?: number };
-        }>;
-        if (!params.length) return '';
-
-        // 过滤：只展示当前命中的折线系列，避免按 x 轴聚合所有折线。
-        const lineParams = params.filter((p) => p.seriesIndex < trends.length);
-        if (!lineParams.length) {
-          // 只有裂纹散点
-          const crackParam = params.find((p) => p.data?.crackRecordId);
-          if (crackParam?.data?.crackRecordId) {
-            const record = crackRecords.find((r) => r.id === crackParam.data!.crackRecordId);
-            if (record) return `<div style="padding:6px 8px"><b>${record.point_id}</b> 裂纹 · ${record.cycle_count} 次<br/>${record.remark ?? ''}</div>`;
-          }
-          return '';
+        const activeParam = (Array.isArray(rawParams) ? rawParams[0] : rawParams) as
+          | {
+              seriesIndex?: number;
+              color?: string;
+              data?: { crackRecordId?: number };
+            }
+          | undefined;
+        if (!activeParam || typeof activeParam.seriesIndex !== 'number') return '';
+        if (activeParam.seriesIndex < trends.length) {
+          const pointTrend = trends[activeParam.seriesIndex];
+          return buildPointTooltip(
+            pointTrend,
+            cracksByPoint[pointTrend.point.id] ?? [],
+            activeParam.color ?? colorForIndex(activeParam.seriesIndex),
+          );
         }
-
-        const items = lineParams.map((p) => {
-          const pt = trends[p.seriesIndex];
-          if (!pt) return '';
-          const point = pt.point;
-          const cracks = cracksByPoint[point.id] ?? [];
-          const photos = point.media_files?.slice(0, 2) ?? [];
-          const cycleCount = p.value?.[0] ?? '-';
-          const stress = p.value?.[1] == null ? '-' : `${Number(p.value[1]).toFixed(2)} MPa`;
-
-          let photoHtml = '';
-          if (photos.length) {
-            photoHtml = `<div style="display:flex;gap:6px;margin-top:8px">${photos
-              .map((m) => `<img src="/api/media/${m.id}" style="width:min(120px,24vw);height:min(90px,18vw);object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;flex:1;min-width:0" />`)
-              .join('')}</div>`;
+        const crackRecordId = activeParam.data?.crackRecordId;
+        if (crackRecordId) {
+          const record = crackRecords.find((item) => item.id === crackRecordId);
+          if (record) {
+            return `<div class="line-tooltip-card crack-tooltip-card"><b>${escapeHtml(record.point_id)}</b><span>裂纹 · ${record.cycle_count} 次</span><p>${escapeHtml(record.remark ?? '')}</p></div>`;
           }
+        }
+        return '';
 
-          const crackBadge = cracks.length
-            ? `<span style="display:inline-block;background:#fef2f2;color:#dc2626;border-radius:3px;padding:1px 6px;font-size:12px;margin-left:6px">裂纹×${cracks.length}</span>`
-            : '';
-
-          const crackList = cracks.length
-            ? `<div style="font-size:12px;color:#dc2626;margin-top:4px">裂纹记录: ${cracks.map((c) => `${c.cycle_count}次`).join(' · ')}</div>`
-            : '';
-
-          const meta: string[] = [];
-          if (point.component) meta.push(`部件: ${point.component}`);
-          if (point.side) meta.push(point.side);
-          if (point.direction) meta.push(point.direction);
-          const metaLine = meta.length ? `<div style="font-size:12px;color:#64748b;margin-top:2px">${meta.join(' · ')}</div>` : '';
-          const posLine = point.position_description ? `<div style="font-size:12px;color:#64748b">位置: ${point.position_description}</div>` : '';
-
-          return `<div style="margin:2px 0;padding:6px 8px;border-left:3px solid ${p.color ?? colorForIndex(p.seriesIndex)}">
-            <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
-              <b style="font-size:14px">${point.point_id}</b>
-              <span style="color:#64748b;font-size:12px">${point.point_name}</span>
-              ${crackBadge}
-            </div>
-            <div style="font-size:12px;color:#475569;margin:4px 0">
-              循环次数: ${cycleCount} · 应力幅: ${stress}
-            </div>
-            ${metaLine}
-            ${posLine}
-            ${crackList}
-            ${photoHtml}
-          </div>`;
-        });
-
-        return `<div style="line-height:1.5;min-width:200px">${items.join('')}</div>`;
       },
     },
     grid: { left: 58, right: 24, top: 24, bottom: 62 },
@@ -277,7 +291,7 @@ function ChartCanvas({
       // 折线数据点 → 跳转点位详情
       if (seriesIndex < trends.length) {
         const data = params.data as { pointDbId?: number } | undefined;
-        if (data?.pointDbId) onPointClick?.(data.pointDbId);
+        onPointClick?.(data?.pointDbId ?? trends[seriesIndex].point.id);
       }
     });
 
@@ -393,6 +407,7 @@ export function MultiPointTrendChart({
   expandable = true,
   crackRecords = [],
   onCrackSelect,
+  onPointSelect,
   loading = false,
 }: Props) {
   const { chartSettings } = useAppContext();
@@ -402,6 +417,11 @@ export function MultiPointTrendChart({
   const availableTrends = useMemo(() => trends.filter((item) => item.trend.length), [trends]);
 
   const handlePointClick = (pointId: number) => {
+    const pointTrend = availableTrends.find((item) => item.point.id === pointId);
+    if (pointTrend && onPointSelect) {
+      onPointSelect(pointTrend);
+      return;
+    }
     navigate(`/points/${pointId}`);
   };
 
