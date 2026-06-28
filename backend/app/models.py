@@ -10,7 +10,13 @@ def now() -> datetime:
     return datetime.utcnow()
 
 
-class Project(Base):
+class SoftDeleteMixin:
+    """软删除 Mixin：为模型添加 deleted_at / deleted_by 字段。"""
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
+    deleted_by: Mapped[str | None] = mapped_column(String(128), nullable=True, default=None)
+
+
+class Project(Base, SoftDeleteMixin):
     __tablename__ = "projects"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -43,7 +49,7 @@ class Project(Base):
     crack_records: Mapped[list["CrackRecord"]] = relationship(back_populates="project", cascade="all, delete-orphan")
 
 
-class TestPoint(Base):
+class TestPoint(Base, SoftDeleteMixin):
     __tablename__ = "test_points"
     __table_args__ = (UniqueConstraint("project_db_id", "point_id", name="uq_project_point"),)
 
@@ -87,7 +93,7 @@ class SensorChannel(Base):
     point: Mapped[TestPoint] = relationship(back_populates="channels")
 
 
-class MediaFile(Base):
+class MediaFile(Base, SoftDeleteMixin):
     __tablename__ = "media_files"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -120,7 +126,7 @@ class CaeMapping(Base):
     point: Mapped[TestPoint] = relationship(back_populates="cae_mappings")
 
 
-class TestRun(Base):
+class TestRun(Base, SoftDeleteMixin):
     __tablename__ = "test_runs"
     __table_args__ = (UniqueConstraint("project_db_id", "cycle_count", name="uq_project_cycle"),)
 
@@ -137,7 +143,7 @@ class TestRun(Base):
     crack_records: Mapped[list["CrackRecord"]] = relationship(back_populates="run")
 
 
-class MeasurementRecord(Base):
+class MeasurementRecord(Base, SoftDeleteMixin):
     __tablename__ = "measurement_records"
     __table_args__ = (UniqueConstraint("run_id", "point_db_id", name="uq_run_point_measurement"),)
 
@@ -164,7 +170,7 @@ class MeasurementRecord(Base):
     point: Mapped[TestPoint] = relationship(back_populates="measurements")
 
 
-class CrackRecord(Base):
+class CrackRecord(Base, SoftDeleteMixin):
     __tablename__ = "crack_records"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

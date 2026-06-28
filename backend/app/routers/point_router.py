@@ -1,6 +1,7 @@
 import json
 import re
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -80,7 +81,7 @@ def update_point(point_id: int, payload: PointUpdate, db: Session = Depends(get_
 
 
 @router.delete("/{point_id}")
-def delete_point(point_id: int, db: Session = Depends(get_db)) -> dict:
+def delete_point(point_id: int, permanent: bool = False, db: Session = Depends(get_db)) -> dict:
     point = db.execute(
         select(models.TestPoint)
         .options(selectinload(models.TestPoint.media_files), selectinload(models.TestPoint.crack_records))
@@ -89,17 +90,27 @@ def delete_point(point_id: int, db: Session = Depends(get_db)) -> dict:
     if not point:
         raise HTTPException(status_code=404, detail="点位不存在")
 
-    stored_files = [
-        resolve_stored_path(item.stored_path)
-        for item in [*point.media_files, *point.crack_records]
-        if item.stored_path
-    ]
-    db.delete(point)
+    if permanent:
+        stored_files = [
+            resolve_stored_path(item.stored_path)
+            for item in [*point.media_files, *point.crack_records]
+            if item.stored_path
+        ]
+        db.delete(point)
+        db.commit()
+        for stored in stored_files:
+            if stored.exists():
+                stored.unlink()
+        return {"ok": True, "action": "permanently_deleted"}
+
+    # 软删除
+    point.deleted_at = datetime.utcnow()
+    for media in point.media_files:
+        media.deleted_at = datetime.utcnow()
+    for crack in point.crack_records:
+        crack.deleted_at = datetime.utcnow()
     db.commit()
-    for stored in stored_files:
-        if stored.exists():
-            stored.unlink()
-    return {"ok": True}
+    return {"ok": True, "action": "soft_deleted"}
 
 
 @router.post("/{point_id}/media", response_model=MediaFileOut)
@@ -149,13 +160,17 @@ async def upload_point_media(
 
 
 @router.delete("/{point_id}/media/{media_id}")
-def delete_point_media(point_id: int, media_id: int, db: Session = Depends(get_db)) -> dict:
+def delete_point_media(point_id: int, media_id: int, permanent: bool = False, db: Session = Depends(get_db)) -> dict:
     media = db.get(models.MediaFile, media_id)
     if not media or media.point_db_id != point_id:
         raise HTTPException(status_code=404, detail="媒体记录不存在")
-    stored = resolve_stored_path(media.stored_path)
-    db.delete(media)
+    if permanent:
+        stored = resolve_stored_path(media.stored_path)
+        db.delete(media)
+        db.commit()
+        if stored.exists():
+            stored.unlink()
+        return {"ok": True, "action": "permanently_deleted"}
+    media.deleted_at = datetime.utcnow()
     db.commit()
-    if stored.exists():
-        stored.unlink()
-    return {"ok": True}
+    return {"ok": True, "action": "soft_deleted"}
