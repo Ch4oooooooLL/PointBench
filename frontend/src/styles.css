@@ -1790,6 +1790,374 @@ label {
   margin-top: 10px;
 }
 
+.point-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.point-summary-strip > div,
+.point-status-card {
+  min-width: 0;
+  background: #ffffff;
+  border: 1px solid #d7e0e3;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.point-summary-strip span,
+.point-status-card span,
+.point-detail-kv span,
+.point-detail-photo span {
+  display: block;
+  color: #64757c;
+  font-size: 12px;
+  margin-bottom: 5px;
+}
+
+.point-summary-strip strong,
+.point-status-card strong {
+  display: block;
+  color: #172026;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.point-status-card-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.point-status-card strong {
+  font-size: 24px;
+}
+
+.project-detail-workspace {
+  display: grid;
+  grid-template-columns: 240px minmax(420px, 1fr) minmax(340px, 420px);
+  gap: 14px;
+  align-items: start;
+}
+
+.point-filter-sidebar,
+.point-ledger-list,
+.point-detail-panel {
+  min-width: 0;
+  background: #ffffff;
+  border: 1px solid #d7e0e3;
+  border-radius: 8px;
+}
+
+.point-filter-sidebar {
+  position: sticky;
+  top: 16px;
+  display: grid;
+  gap: 14px;
+  padding: 12px;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+}
+
+.point-ledger-search {
+  margin: 0;
+}
+
+.point-filter-section {
+  display: grid;
+  gap: 7px;
+}
+
+.point-filter-section h2 {
+  color: #44545b;
+  font-size: 13px;
+  margin: 0;
+}
+
+.point-filter-section button,
+.point-filter-buttons button {
+  width: 100%;
+  border: 1px solid #e4ebee;
+  background: #ffffff;
+  border-radius: 8px;
+  min-height: 34px;
+  padding: 7px 9px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #35454c;
+  cursor: pointer;
+}
+
+.point-filter-section button.active,
+.point-filter-section button:hover,
+.point-filter-buttons button.active,
+.point-filter-buttons button:hover {
+  border-color: #0f766e;
+  background: #ecf8f6;
+  color: #0f766e;
+}
+
+.point-filter-section button span,
+.point-filter-buttons button span {
+  color: #6d7d84;
+  font-size: 12px;
+}
+
+.point-ledger-list {
+  padding: 12px;
+}
+
+.point-ledger-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.point-ledger-list-head p {
+  margin: 4px 0 0;
+  font-size: 12px;
+}
+
+.point-ledger-rows {
+  display: grid;
+  gap: 8px;
+}
+
+.point-ledger-row {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #e0e7ea;
+  border-left: 5px solid #b7c6cb;
+  background: #ffffff;
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 10px;
+  padding: 9px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.point-ledger-row:hover,
+.point-ledger-row.selected {
+  border-color: #0f766e;
+  box-shadow: 0 4px 14px rgba(15, 23, 27, 0.08);
+}
+
+.point-ledger-row.normal {
+  border-left-color: #46b17b;
+}
+
+.point-ledger-row.review,
+.point-ledger-row.insufficient {
+  border-left-color: #d99a19;
+}
+
+.point-ledger-row.missing {
+  border-left-color: #879aa2;
+}
+
+.point-ledger-row.abnormal,
+.point-ledger-row.manual {
+  border-left-color: #d85f3f;
+}
+
+.point-ledger-row .row-thumb {
+  width: 64px;
+  height: 64px;
+}
+
+.point-ledger-row-main {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.point-ledger-row-title,
+.point-detail-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.point-ledger-row-title strong {
+  min-width: 0;
+  color: #172026;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.point-state-badge {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  min-height: 24px;
+  padding: 3px 9px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.point-state-badge.normal {
+  background: #e6f4ea;
+  color: #17633a;
+}
+
+.point-state-badge.review,
+.point-state-badge.insufficient {
+  background: #fff3cc;
+  color: #7a4a00;
+}
+
+.point-state-badge.missing {
+  background: #edf1f2;
+  color: #42525a;
+}
+
+.point-state-badge.abnormal,
+.point-state-badge.manual {
+  background: #ffe2df;
+  color: #b42318;
+}
+
+.point-ledger-meta,
+.point-ledger-data {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+  color: #44545b;
+  font-size: 12px;
+}
+
+.point-ledger-meta.secondary,
+.point-ledger-data {
+  color: #5f6f76;
+}
+
+.point-ledger-reason,
+.point-detail-reason {
+  margin: 0;
+  color: #5f6f76;
+  font-size: 12px;
+}
+
+.point-detail-panel {
+  position: sticky;
+  top: 16px;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+}
+
+.point-detail-head h2 {
+  overflow-wrap: anywhere;
+}
+
+.point-detail-head p {
+  margin: 4px 0 0;
+  font-size: 12px;
+}
+
+.point-detail-photos {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.point-detail-photo {
+  min-width: 0;
+}
+
+.point-detail-photo button,
+.point-detail-photo > div {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border: 1px solid #e4ebee;
+  border-radius: 8px;
+  background: #f7fafb;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  color: #6b7d84;
+  padding: 0;
+  cursor: pointer;
+}
+
+.point-detail-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.point-detail-section {
+  display: grid;
+  gap: 8px;
+}
+
+.point-detail-section h2 {
+  font-size: 14px;
+  color: #35454c;
+}
+
+.point-detail-kv {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.point-detail-kv > div {
+  min-width: 0;
+  border: 1px solid #e4ebee;
+  border-radius: 8px;
+  background: #f7fafb;
+  padding: 8px;
+}
+
+.point-detail-kv .wide {
+  grid-column: 1 / -1;
+}
+
+.point-detail-kv strong {
+  display: block;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.point-detail-chart .chart {
+  height: 220px;
+}
+
+.point-detail-chart .chart-zoom-hint {
+  flex-wrap: wrap;
+}
+
+.point-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.point-detail-actions .button {
+  min-height: 34px;
+}
+
+.point-detail-panel .table-wrap table {
+  min-width: 680px;
+}
+
+.empty-detail {
+  min-height: 240px;
+}
+
 .point-modal {
   width: min(1180px, 98vw);
   display: block;
@@ -1940,6 +2308,23 @@ label {
   min-height: 20px;
 }
 
+@media (max-width: 1320px) {
+  .point-summary-strip,
+  .point-status-card-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .project-detail-workspace {
+    grid-template-columns: 220px minmax(0, 1fr);
+  }
+
+  .point-detail-panel {
+    position: static;
+    grid-column: 1 / -1;
+    max-height: none;
+  }
+}
+
 @media (max-width: 900px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -1970,6 +2355,9 @@ label {
   .project-layout,
   .detail-grid,
   .point-detail-summary,
+  .point-summary-strip,
+  .point-status-card-grid,
+  .project-detail-workspace,
   .filters,
   .form-row,
   .overview-band,
@@ -2015,6 +2403,26 @@ label {
 
   .project-selector {
     display: grid;
+  }
+
+  .point-filter-sidebar,
+  .point-detail-panel {
+    position: static;
+    max-height: none;
+  }
+
+  .point-ledger-row {
+    grid-template-columns: 58px minmax(0, 1fr);
+  }
+
+  .point-ledger-row .row-thumb {
+    width: 52px;
+    height: 52px;
+  }
+
+  .point-detail-photos,
+  .point-detail-kv {
+    grid-template-columns: 1fr;
   }
 
   .project-manager-list {
