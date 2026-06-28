@@ -20,7 +20,8 @@ export function TrendChart({ data, metric }: Props) {
 
   useEffect(() => {
     if (!ref.current || !hasData) return;
-    const chart = echarts.init(ref.current);
+    const chartDom = ref.current;
+    const chart = echarts.init(chartDom);
     chart.setOption({
       tooltip: { trigger: 'axis' },
       grid: { left: 52, right: 24, top: 32, bottom: 62 },
@@ -60,9 +61,19 @@ export function TrendChart({ data, metric }: Props) {
         },
       ],
     });
+
+    // 滚轮事件：无修饰键时不劫持滚动
+    const handleWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
+        e.stopPropagation();
+      }
+    };
+    chartDom.addEventListener('wheel', handleWheel, { passive: false, capture: true });
+
     const resize = () => chart.resize();
     window.addEventListener('resize', resize);
     return () => {
+      chartDom.removeEventListener('wheel', handleWheel, { capture: true });
       window.removeEventListener('resize', resize);
       chart.dispose();
     };

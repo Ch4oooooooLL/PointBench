@@ -11,6 +11,7 @@ export interface RiskSettings {
 export interface ChartSettings {
   overviewHeight: number;
   overviewExpandedHeight: number;
+  expandedChartWidth: number;
 }
 
 interface AppContextValue {
@@ -38,6 +39,7 @@ const DEFAULT_RISK: RiskSettings = {
 const DEFAULT_CHART: ChartSettings = {
   overviewHeight: 520,
   overviewExpandedHeight: 660,
+  expandedChartWidth: 1280,
 };
 
 const AppContext = createContext<AppContextValue | null>(null);

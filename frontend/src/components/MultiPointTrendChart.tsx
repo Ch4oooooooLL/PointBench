@@ -1,5 +1,6 @@
 import * as echarts from 'echarts';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useAppContext } from '../context/AppContext';
 import { CrackRecord, Point, TrendItem } from '../types';
 
 export interface PointTrend {
@@ -154,7 +155,8 @@ function ChartCanvas({
 
   useEffect(() => {
     if (!ref.current) return;
-    const chart = echarts.init(ref.current);
+    const chartDom = ref.current;
+    const chart = echarts.init(chartDom);
     chart.setOption(buildOption(trends, focusPointId, crackRecords), true);
     chart.on('click', (params) => {
       const data = params.data as { crackRecordId?: number } | undefined;
@@ -165,9 +167,20 @@ function ChartCanvas({
     chart.getZr().on('click', (event) => {
       if (!event.target) onChartClick?.();
     });
+
+    // 滚轮事件：无修饰键时不劫持滚动，浏览器正常滚动页面
+    // CTRL/SHIFT 按下时交给 ECharts dataZoom 处理缩放/平移
+    const handleWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
+        e.stopPropagation(); // 阻止 ECharts 收到事件 → 不会 preventDefault → 页面正常滚动
+      }
+    };
+    chartDom.addEventListener('wheel', handleWheel, { passive: false, capture: true });
+
     const resize = () => chart.resize();
     window.addEventListener('resize', resize);
     return () => {
+      chartDom.removeEventListener('wheel', handleWheel, { capture: true });
       window.removeEventListener('resize', resize);
       chart.dispose();
     };
@@ -237,6 +250,7 @@ export function MultiPointTrendChart({
   crackRecords = [],
   onCrackSelect,
 }: Props) {
+  const { chartSettings } = useAppContext();
   const [expanded, setExpanded] = useState(false);
   const [focusPointId, setFocusPointId] = useState<number | null>(null);
   const availableTrends = useMemo(() => trends.filter((item) => item.trend.length), [trends]);
@@ -271,7 +285,7 @@ export function MultiPointTrendChart({
 
       {expanded && (
         <div className="modal-backdrop" onClick={() => setExpanded(false)}>
-          <div className="modal chart-modal" onClick={(event) => event.stopPropagation()}>
+          <div className="modal chart-modal" onClick={(event) => event.stopPropagation()} style={{ width: `min(${chartSettings.expandedChartWidth}px, 98vw)` }}>
             <div className="section-head">
               <div>
                 <h2>全项目点位应力趋势</h2>

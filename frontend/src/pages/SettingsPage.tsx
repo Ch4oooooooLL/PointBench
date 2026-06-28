@@ -18,6 +18,7 @@ export function SettingsPage() {
   const [criticalPercent, setCriticalPercent] = useState(String(riskSettings.criticalPercent));
   const [overviewHeight, setOverviewHeight] = useState(String(chartSettings.overviewHeight));
   const [overviewExpandedHeight, setOverviewExpandedHeight] = useState(String(chartSettings.overviewExpandedHeight));
+  const [expandedChartWidth, setExpandedChartWidth] = useState(String(chartSettings.expandedChartWidth));
   const [debugEnabled, setDebugEnabled] = useState(debugMode);
   const [message, setMessage] = useState('');
 
@@ -30,6 +31,7 @@ export function SettingsPage() {
     setChartSettings({
       overviewHeight: clampNumber(Number(overviewHeight), 360, 760),
       overviewExpandedHeight: clampNumber(Number(overviewExpandedHeight), 480, 860),
+      expandedChartWidth: clampNumber(Number(expandedChartWidth), 720, 1920),
     });
     setDebugMode(debugEnabled);
     setMessage('设置已保存。');
@@ -93,6 +95,7 @@ export function SettingsPage() {
             <div className="settings-grid">
               <label>普通视图高度 px<input type="number" min="360" max="760" value={overviewHeight} onChange={(event) => setOverviewHeight(event.target.value)} /></label>
               <label>放大视图高度 px<input type="number" min="480" max="860" value={overviewExpandedHeight} onChange={(event) => setOverviewExpandedHeight(event.target.value)} /></label>
+              <label>放大视图宽度 px<input type="number" min="720" max="1920" value={expandedChartWidth} onChange={(event) => setExpandedChartWidth(event.target.value)} /></label>
             </div>
           </div>
         )}
