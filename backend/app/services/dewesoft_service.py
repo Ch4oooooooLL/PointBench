@@ -51,7 +51,8 @@ async def save_dewesoft_upload(project: models.Project, upload: UploadFile) -> P
         raise HTTPException(status_code=400, detail="支持 Dewesoft .dxd/.dxz/.d7d/.d7z 原始文件，以及 .csv/.txt 导出文件")
     target_dir = safe_dewesoft_dir(project.project_id)
     target_dir.mkdir(parents=True, exist_ok=True)
-    target = _unique_upload_path(target_dir, _safe_filename(upload.filename))
+    safe_name = f"{uuid.uuid4().hex}{suffix}"
+    target = _unique_upload_path(target_dir, safe_name)
     with target.open("wb") as output:
         while chunk := await upload.read(1024 * 1024):
             output.write(chunk)
@@ -396,7 +397,7 @@ def _window_values(channel: ChannelExtract, stable_start: float, stable_end: flo
     return [value for value, time in zip(channel.values, channel.times) if stable_start <= time <= stable_end]
 
 
-def import_dewesoft_file(db: Session, project_id: int, cycle_count: int, run_name: str | None, upload_path: Path) -> models.DewesoftImport:
+def import_dewesoft_file(db: Session, project_id: int, cycle_count: int, run_name: str | None, upload_path: Path, original_filename: str | None = None) -> models.DewesoftImport:
     project = db.get(models.Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
@@ -406,7 +407,7 @@ def import_dewesoft_file(db: Session, project_id: int, cycle_count: int, run_nam
         project_db_id=project_id,
         cycle_count=cycle_count,
         run_name=run_name_value,
-        filename=upload_path.name,
+        filename=original_filename or upload_path.name,
         stored_path=str(upload_path.relative_to(Path(__file__).resolve().parents[2])),
         status="processing",
     )

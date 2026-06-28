@@ -313,7 +313,8 @@ async def create_preview(db: Session, upload: UploadFile) -> ImportPreview:
     temporary_import_id = _temp_id()
     temp_dir = _preview_path(temporary_import_id)
     temp_dir.mkdir(parents=True, exist_ok=True)
-    zip_path = temp_dir / upload.filename
+    source_name = upload.filename
+    zip_path = temp_dir / f"{uuid.uuid4().hex}.zip"
     await _write_upload(upload, zip_path)
 
     errors: list[str] = []
@@ -333,7 +334,7 @@ async def create_preview(db: Session, upload: UploadFile) -> ImportPreview:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    return _build_preview_from_extract(db, temporary_import_id, temp_dir, extract_dir, upload.filename, zip_path, errors=errors)
+    return _build_preview_from_extract(db, temporary_import_id, temp_dir, extract_dir, source_name, zip_path, errors=errors)
 
 
 async def create_folder_preview(db: Session, uploads: list[UploadFile]) -> ImportPreview:

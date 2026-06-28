@@ -24,7 +24,7 @@ async def create_dewesoft_import(
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
     upload_path = await save_dewesoft_upload(project, file)
-    import_job = import_dewesoft_file(db, project_id, cycle_count, run_name, upload_path)
+    import_job = import_dewesoft_file(db, project_id, cycle_count, run_name, upload_path, file.filename)
     return DewesoftImportOut.model_validate(import_job)
 
 
