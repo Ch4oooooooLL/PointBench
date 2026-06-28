@@ -1,4 +1,4 @@
-\# TEST\_POINT\_MANIFEST\_SPEC.md
+﻿\# TEST\_POINT\_MANIFEST\_SPEC.md
 
 
 
@@ -44,11 +44,11 @@ App 导出的压缩包必须采用如下结构：
 
 ├─ images/
 
-│  ├─ SG01\_overview\_001.jpg
+│  ├─ 01\_overview\_001.jpg
 
-│  ├─ SG01\_detail\_001.jpg
+│  ├─ 01\_detail\_001.jpg
 
-│  ├─ SG02\_overview\_001.jpg
+│  ├─ 02\_overview\_001.jpg
 
 │  └─ ...
 
@@ -130,7 +130,7 @@ Web 系统导入时必须以 `manifest.json` 为主数据源，不应依赖 Exce
 
 ```text
 
-images/SG01\_overview\_001.jpg
+images/01\_overview\_001.jpg
 
 ```
 
@@ -420,7 +420,7 @@ App 导出前必须检查：
 
 {
 
-&#x20; "point\_id": "SG01",
+&#x20; "point\_id": "01",
 
 &#x20; "point\_name": "左侧纵梁前段应变测点",
 
@@ -446,7 +446,7 @@ App 导出前必须检查：
 
 &#x20;   "device": "Dewesoft",
 
-&#x20;   "channel\_name": "SG01",
+&#x20;   "channel\_name": "01",
 
 &#x20;   "unit": "ue",
 
@@ -458,7 +458,7 @@ App 导出前必须检查：
 
 &#x20; "cae\_mapping": {
 
-&#x20;   "cae\_point\_id": "CAE\_SG01",
+&#x20;   "cae\_point\_id": "CAE\_01",
 
 &#x20;   "cae\_component": "Frame\_Longitudinal\_Beam",
 
@@ -474,13 +474,13 @@ App 导出前必须检查：
 
 &#x20;   {
 
-&#x20;     "photo\_id": "P-SG01-001",
+&#x20;     "photo\_id": "PHOTO-01-001",
 
 &#x20;     "type": "overview",
 
-&#x20;     "path": "images/SG01\_overview\_001.jpg",
+&#x20;     "path": "images/01\_overview\_001.jpg",
 
-&#x20;     "filename": "SG01\_overview\_001.jpg",
+&#x20;     "filename": "01\_overview\_001.jpg",
 
 &#x20;     "taken\_time": "2026-06-24T10:10:00+08:00",
 
@@ -516,7 +516,7 @@ App 导出前必须检查：
 
 | ---------------------- | ------------- | -: | ---------------- |
 
-| `point\_id`             | string        |  是 | 点位唯一编号，例如 `SG01` |
+| `point\_id`             | string        |  是 | 点位唯一编号，例如 `01` |
 
 | `point\_name`           | string        |  是 | 点位名称             |
 
@@ -574,7 +574,7 @@ App 导出前必须检查：
 
 &#x20; "device": "Dewesoft",
 
-&#x20; "channel\_name": "SG01",
+&#x20; "channel\_name": "01",
 
 &#x20; "unit": "ue",
 
@@ -636,7 +636,7 @@ App 导出前必须检查：
 
 {
 
-&#x20; "cae\_point\_id": "CAE\_SG01",
+&#x20; "cae\_point\_id": "CAE\_01",
 
 &#x20; "cae\_component": "Frame\_Longitudinal\_Beam",
 
@@ -688,13 +688,13 @@ App 导出前必须检查：
 
 {
 
-&#x20; "photo\_id": "P-SG01-001",
+&#x20; "photo\_id": "PHOTO-01-001",
 
 &#x20; "type": "overview",
 
-&#x20; "path": "images/SG01\_overview\_001.jpg",
+&#x20; "path": "images/01\_overview\_001.jpg",
 
-&#x20; "filename": "SG01\_overview\_001.jpg",
+&#x20; "filename": "01\_overview\_001.jpg",
 
 &#x20; "taken\_time": "2026-06-24T10:10:00+08:00",
 
@@ -768,7 +768,7 @@ App 导出前必须检查：
 
 {
 
-&#x20; "file\_id": "F-001",
+&#x20; "file\_id": "001",
 
 &#x20; "type": "excel\_export",
 
@@ -1170,7 +1170,7 @@ Web 后端导入预览接口建议返回：
 
 &#x20;   {
 
-&#x20;     "point\_id": "SG01",
+&#x20;     "point\_id": "01",
 
 &#x20;     "point\_name": "左侧纵梁前段应变测点",
 
@@ -1196,7 +1196,7 @@ Web 后端导入预览接口建议返回：
 
 &#x20;       "device": "Dewesoft",
 
-&#x20;       "channel\_name": "SG01",
+&#x20;       "channel\_name": "01",
 
 &#x20;       "unit": "ue",
 
@@ -1208,7 +1208,7 @@ Web 后端导入预览接口建议返回：
 
 &#x20;     "cae\_mapping": {
 
-&#x20;       "cae\_point\_id": "CAE\_SG01",
+&#x20;       "cae\_point\_id": "CAE\_01",
 
 &#x20;       "cae\_component": "Frame\_Longitudinal\_Beam",
 
@@ -1224,13 +1224,13 @@ Web 后端导入预览接口建议返回：
 
 &#x20;       {
 
-&#x20;         "photo\_id": "P-SG01-001",
+&#x20;         "photo\_id": "PHOTO-01-001",
 
 &#x20;         "type": "overview",
 
-&#x20;         "path": "images/SG01\_overview\_001.jpg",
+&#x20;         "path": "images/01\_overview\_001.jpg",
 
-&#x20;         "filename": "SG01\_overview\_001.jpg",
+&#x20;         "filename": "01\_overview\_001.jpg",
 
 &#x20;         "taken\_time": "2026-06-24T10:10:00+08:00",
 
@@ -1242,13 +1242,13 @@ Web 后端导入预览接口建议返回：
 
 &#x20;       {
 
-&#x20;         "photo\_id": "P-SG01-002",
+&#x20;         "photo\_id": "PHOTO-01-002",
 
 &#x20;         "type": "detail",
 
-&#x20;         "path": "images/SG01\_detail\_001.jpg",
+&#x20;         "path": "images/01\_detail\_001.jpg",
 
-&#x20;         "filename": "SG01\_detail\_001.jpg",
+&#x20;         "filename": "01\_detail\_001.jpg",
 
 &#x20;         "taken\_time": "2026-06-24T10:12:00+08:00",
 
@@ -1278,7 +1278,7 @@ Web 后端导入预览接口建议返回：
 
 &#x20;   {
 
-&#x20;     "file\_id": "F-001",
+&#x20;     "file\_id": "001",
 
 &#x20;     "type": "excel\_export",
 

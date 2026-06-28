@@ -26,7 +26,7 @@ def build_points(now: str) -> list[dict]:
     components = ["左纵梁", "右纵梁", "前横梁", "后横梁", "中部连接板"]
     points: list[dict] = []
     for index in range(1, 11):
-        point_id = f"SG{index:02d}"
+        point_id = f"{index:02d}"
         component = components[(index - 1) % len(components)]
         points.append(
             {
@@ -112,7 +112,7 @@ def build_manifest(points: list[dict], now: str) -> dict:
         "points": points,
         "files": [
             {
-                "file_id": "F-001",
+                "file_id": "001",
                 "type": "excel_export",
                 "path": "points.xlsx",
                 "filename": "points.xlsx",

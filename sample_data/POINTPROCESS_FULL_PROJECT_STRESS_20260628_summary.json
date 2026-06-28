@@ -1,0 +1,63 @@
+{
+  "zip_path": "C:\\Users\\Chao\\Desktop\\DOC\\CODE\\PointProcess\\sample_data\\POINTPROCESS_FULL_PROJECT_STRESS_20260628.zip",
+  "project_id": "POINTPROCESS-FULL-STRESS-20260628",
+  "point_count": 72,
+  "photo_count": 216,
+  "test_run_count": 36,
+  "measurement_count": 2592,
+  "abnormal_point_count": 20,
+  "crack_record_count": 120,
+  "dewesoft_import_count": 6,
+  "dewesoft_channel_count": 432,
+  "file_count": 349,
+  "coverage": [
+    "project create/list/detail/update/delete data paths",
+    "manifest import preview",
+    "full backup import confirm",
+    "point filters, statuses, CAE mappings, channels and tags",
+    "overall/local/wiring point media",
+    "36 fatigue runs and 2592 measurement records",
+    "manual and computed abnormal measurement cases",
+    "analysis summary, max amplitude and growth ranking",
+    "crack timeline records and crack image retrieval",
+    "Dewesoft import history, matched channels and unmatched channels",
+    "raw files and attachments folder copy",
+    "full project ZIP re-export"
+  ],
+  "zip_size_bytes": 472401,
+  "validation": {
+    "validated": true,
+    "preview": {
+      "can_import": true,
+      "point_count": 72,
+      "photo_count": 336,
+      "warnings": [
+        "Detected a PointProcess full backup. Import will restore points, photos, runs, measurements, cracks, and Dewesoft records."
+      ],
+      "errors": []
+    },
+    "import_counts": {
+      "points": 72,
+      "media": 216,
+      "runs": 36,
+      "measurements": 2592,
+      "cracks": 120,
+      "dewesoft_imports": 6,
+      "dewesoft_channels": 432
+    },
+    "analysis": {
+      "point_count": 72,
+      "run_count": 36,
+      "measurement_count": 2592,
+      "abnormal_count": 20,
+      "max_amplitude_rows": 10,
+      "fastest_growth_rows": 10
+    },
+    "round_trip_export_counts": {
+      "points": 72,
+      "runs": 36,
+      "cracks": 120,
+      "dewesoft_imports": 6
+    }
+  }
+}

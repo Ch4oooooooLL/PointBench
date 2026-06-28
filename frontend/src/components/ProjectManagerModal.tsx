@@ -151,6 +151,7 @@ export function ProjectManagerModal({ onClose }: Props) {
 
                 <div className="manager-actions">
                   <button className="button primary" disabled={busy} onClick={save}><Save size={18} />保存修改</button>
+                  <a className="button primary" href={`/api/projects/${selectedProject.id}/export.zip`}><Download size={18} />导出项目</a>
                   <a className="button" href={`/api/projects/${selectedProject.id}/export.json`}><Download size={18} />导出 JSON</a>
                   <a className="button" href={`/api/projects/${selectedProject.id}/export.csv`}><Download size={18} />导出 CSV</a>
                   <button className="button danger-button" disabled={busy} onClick={remove}><Trash2 size={18} />删除项目</button>
