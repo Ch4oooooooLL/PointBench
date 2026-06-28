@@ -3,6 +3,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.utils.path_utils import PROJECT_ID_PATTERN
+
 
 class ChannelIn(BaseModel):
     device: str | None = None
@@ -72,7 +74,7 @@ class ExportInfoIn(BaseModel):
 
 
 class ProjectIn(BaseModel):
-    project_id: str = Field(min_length=1)
+    project_id: str = Field(min_length=1, max_length=64, pattern=PROJECT_ID_PATTERN)
     project_name: str = Field(min_length=1)
     test_object: str | None = None
     test_type: str | None = None
@@ -210,7 +212,7 @@ class ProjectOut(BaseModel):
 
 
 class ProjectCreate(BaseModel):
-    project_id: str = Field(min_length=1)
+    project_id: str = Field(min_length=1, max_length=64, pattern=PROJECT_ID_PATTERN)
     project_name: str = Field(min_length=1)
     test_object: str | None = None
     test_type: str | None = None
