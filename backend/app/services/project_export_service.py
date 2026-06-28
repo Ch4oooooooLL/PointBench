@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app import models
 from app.database import STORAGE_DIR
+from app.utils.path_utils import safe_project_dir
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -270,7 +271,7 @@ def build_project_export_zip(db: Session, project_id: int) -> tuple[Path, str]:
     records_by_run_point = {(record.run_id, record.point_db_id): record for run in runs for record in run.measurements}
     workbook_path = package_root / RECORDS_XLSX
     _write_workbook(project, points, runs, records_by_run_point, cracks, photo_paths, crack_paths, workbook_path)
-    project_storage_root = STORAGE_DIR / "projects" / project.project_id
+    project_storage_root = safe_project_dir(project.project_id)
     for folder in ["raw", "attachments"]:
         source = project_storage_root / folder
         target = package_root / folder

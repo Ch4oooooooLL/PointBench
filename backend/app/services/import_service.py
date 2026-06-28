@@ -15,6 +15,7 @@ from app.database import STORAGE_DIR
 from app.schemas import ImportPreview, ManifestIn
 from app.services.analysis_service import compute_measurement_fields
 from app.utils.hash_utils import file_sha256
+from app.utils.path_utils import safe_project_dir
 from app.utils.zip_utils import is_safe_zip_path, normalize_zip_name, safe_extract, validate_zip_members
 
 
@@ -384,7 +385,7 @@ def _confirm_backup_import(db: Session, temporary_import_id: str, temp_dir: Path
     if db.scalar(select(models.Project.id).where(models.Project.project_id == project_id)):
         raise HTTPException(status_code=400, detail=f"Project {project_id} already exists. Delete it before importing this backup.")
 
-    project_root = STORAGE_DIR / "projects" / project_id
+    project_root = safe_project_dir(project_id)
     project_root.mkdir(parents=True, exist_ok=True)
     project = models.Project(
         project_id=project_id,
@@ -595,7 +596,7 @@ def confirm_import(db: Session, temporary_import_id: str) -> models.Project:
     if errors or missing_files or duplicate_point_ids:
         raise HTTPException(status_code=400, detail="; ".join(errors + warnings))
 
-    project_root = STORAGE_DIR / "projects" / manifest.project.project_id
+    project_root = safe_project_dir(manifest.project.project_id)
     project_root.mkdir(parents=True, exist_ok=True)
 
     zip_files = list(temp_dir.glob("*.zip"))

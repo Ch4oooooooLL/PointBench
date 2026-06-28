@@ -14,6 +14,7 @@ from app.database import STORAGE_DIR, get_db
 from app.schemas import PointCreate, PointOut, ProjectCreate, ProjectOut, ProjectUpdate, TestRunCreate, TestRunOut
 from app.services.dewesoft_service import delete_dewesoft_project_files
 from app.services.project_export_service import build_project_export_zip
+from app.utils.path_utils import safe_project_dir
 
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -57,7 +58,7 @@ def create_project(payload: ProjectCreate, db: Session = Depends(get_db)) -> Pro
     db.add(project)
     db.commit()
     db.refresh(project)
-    (STORAGE_DIR / "projects" / project.project_id).mkdir(parents=True, exist_ok=True)
+    safe_project_dir(project.project_id).mkdir(parents=True, exist_ok=True)
     return project_out(db, project)
 
 
@@ -89,11 +90,10 @@ def delete_project(project_id: int, db: Session = Depends(get_db)) -> dict:
     project = db.get(models.Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
-    project_storage = STORAGE_DIR / "projects" / project.project_id
-    dewesoft_project_id = project.project_id
+    project_storage = safe_project_dir(project.project_id)
     if project_storage.exists():
         shutil.rmtree(project_storage)
-    delete_dewesoft_project_files(dewesoft_project_id)
+    delete_dewesoft_project_files(project.project_id)
     db.delete(project)
     db.commit()
     return {"ok": True}

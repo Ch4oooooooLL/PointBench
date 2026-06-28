@@ -12,6 +12,7 @@ from app.database import STORAGE_DIR, get_db
 from app.schemas import CrackRecordOut
 from app.services.file_service import resolve_stored_path
 from app.utils.hash_utils import file_sha256
+from app.utils.path_utils import safe_project_dir
 
 
 router = APIRouter(prefix="/api", tags=["crack-records"])
@@ -107,7 +108,7 @@ async def create_project_crack_record(
         raise HTTPException(status_code=400, detail="只支持上传图片文件")
 
     safe_name = _safe_filename(file.filename)
-    target_dir = STORAGE_DIR / "projects" / project.project_id / "cracks" / str(point.id)
+    target_dir = safe_project_dir(project.project_id) / "cracks" / str(point.id)
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / f"{uuid.uuid4().hex[:10]}_{safe_name}"
     with target.open("wb") as output:
@@ -166,7 +167,7 @@ async def update_crack_record(
     if file and file.filename:
         safe_name = _safe_filename(file.filename)
         project = db.get(models.Project, record.project_db_id)
-        target_dir = STORAGE_DIR / "projects" / project.project_id / "cracks" / str(point.id)
+        target_dir = safe_project_dir(project.project_id) / "cracks" / str(point.id)
         target_dir.mkdir(parents=True, exist_ok=True)
         target = target_dir / f"{uuid.uuid4().hex[:10]}_{safe_name}"
         with target.open("wb") as output:

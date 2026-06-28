@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, selectinload
 from app import models
 from app.database import STORAGE_DIR
 from app.services.analysis_service import compute_measurement_fields, refresh_point_abnormal_flags
+from app.utils.path_utils import safe_dewesoft_dir
 
 
 RAW_SUFFIXES = {".dxd", ".dxz", ".d7d", ".d7z"}
@@ -48,7 +49,7 @@ async def save_dewesoft_upload(project: models.Project, upload: UploadFile) -> P
     suffix = Path(upload.filename).suffix.lower()
     if suffix not in RAW_SUFFIXES | TEXT_SUFFIXES:
         raise HTTPException(status_code=400, detail="支持 Dewesoft .dxd/.dxz/.d7d/.d7z 原始文件，以及 .csv/.txt 导出文件")
-    target_dir = STORAGE_DIR / "dewesoft" / project.project_id
+    target_dir = safe_dewesoft_dir(project.project_id)
     target_dir.mkdir(parents=True, exist_ok=True)
     target = _unique_upload_path(target_dir, _safe_filename(upload.filename))
     with target.open("wb") as output:
@@ -542,6 +543,9 @@ def import_dewesoft_file(db: Session, project_id: int, cycle_count: int, run_nam
 
 
 def delete_dewesoft_project_files(project_id: str) -> None:
-    target = STORAGE_DIR / "dewesoft" / project_id
+    try:
+        target = safe_dewesoft_dir(project_id)
+    except Exception:
+        return
     if target.exists():
         shutil.rmtree(target)

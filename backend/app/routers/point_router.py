@@ -12,6 +12,7 @@ from app.database import STORAGE_DIR, get_db
 from app.schemas import MediaFileOut, PointOut, PointUpdate
 from app.services.file_service import resolve_stored_path
 from app.utils.hash_utils import file_sha256
+from app.utils.path_utils import safe_project_dir
 
 
 router = APIRouter(prefix="/api/points", tags=["points"])
@@ -123,7 +124,7 @@ async def upload_point_media(
         raise HTTPException(status_code=400, detail="图片类型只能是 overall 或 local")
 
     safe_name = _safe_filename(file.filename)
-    target_dir = STORAGE_DIR / "projects" / point.project.project_id / "uploads" / str(point.id)
+    target_dir = safe_project_dir(point.project.project_id) / "uploads" / str(point.id)
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / f"{uuid.uuid4().hex[:10]}_{safe_name}"
     with target.open("wb") as output:
