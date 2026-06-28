@@ -89,68 +89,83 @@ function buildOption(
   return {
     color: palette,
     tooltip: {
-      trigger: 'item',
+      trigger: 'axis',
+      triggerOn: 'mousemove',
       appendToBody: true,
       confine: true,
-      extraCssText: 'max-width: 280px; white-space: normal;',
+      extraCssText: 'max-width: min(360px, 92vw); max-height: min(420px, 70vh); white-space: normal; font-size: 13px;',
       formatter: (rawParams: unknown) => {
-        const p = rawParams as {
+        const params = (Array.isArray(rawParams) ? rawParams : [rawParams]) as Array<{
           seriesIndex: number;
           seriesName: string;
           value: [number, number];
           color: string;
           data?: { crackRecordId?: number; pointDbId?: number };
-        } | null;
-        if (!p) return '';
+        }>;
+        if (!params.length) return '';
 
-        // 裂纹散点系列：seriesIndex === trends.length
-        if (p.seriesIndex === trends.length && p.data?.crackRecordId) {
-          const record = crackRecords.find((r) => r.id === p.data!.crackRecordId);
-          if (record) return `<div style="padding:4px;font-size:12px"><b>${record.point_id}</b> 裂纹 · ${record.cycle_count} 次<br/>${record.remark ?? ''}</div>`;
+        // 过滤：只展示位于折线系列且在当前位置有有效值的数据项
+        const lineParams = params.filter(
+          (p) => p.seriesIndex < trends.length && p.value != null && p.value[0] != null && p.value[1] != null,
+        );
+        if (!lineParams.length) {
+          // 只有裂纹散点
+          const crackParam = params.find((p) => p.data?.crackRecordId);
+          if (crackParam?.data?.crackRecordId) {
+            const record = crackRecords.find((r) => r.id === crackParam.data!.crackRecordId);
+            if (record) return `<div style="padding:6px 8px"><b>${record.point_id}</b> 裂纹 · ${record.cycle_count} 次<br/>${record.remark ?? ''}</div>`;
+          }
           return '';
         }
 
-        // 折线数据点：seriesIndex < trends.length
-        if (p.seriesIndex >= trends.length) return '';
-        const pt = trends[p.seriesIndex];
-        if (!pt) return '';
-        const point = pt.point;
-        const cracks = cracksByPoint[point.id] ?? [];
-        const photos = point.media_files?.slice(0, 2) ?? [];
-        const cycleCount = p.value?.[0] ?? '-';
-        const stress = p.value?.[1] != null ? `${Number(p.value[1]).toFixed(2)} MPa` : '-';
+        const items = lineParams.map((p) => {
+          const pt = trends[p.seriesIndex];
+          if (!pt) return '';
+          const point = pt.point;
+          const cracks = cracksByPoint[point.id] ?? [];
+          const photos = point.media_files?.slice(0, 2) ?? [];
+          const cycleCount = p.value[0];
+          const stress = `${Number(p.value[1]).toFixed(2)} MPa`;
 
-        let photoHtml = '';
-        if (photos.length) {
-          photoHtml = `<div style="display:flex;gap:4px;margin-top:6px">${photos
-            .map((m) => `<img src="/api/media/${m.id}" style="width:64px;height:48px;object-fit:cover;border-radius:4px;border:1px solid #e2e8f0" />`)
-            .join('')}</div>`;
-        }
+          let photoHtml = '';
+          if (photos.length) {
+            photoHtml = `<div style="display:flex;gap:6px;margin-top:8px">${photos
+              .map((m) => `<img src="/api/media/${m.id}" style="width:min(120px,24vw);height:min(90px,18vw);object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;flex:1;min-width:0" />`)
+              .join('')}</div>`;
+          }
 
-        const crackBadge = cracks.length
-          ? `<span style="display:inline-block;background:#fef2f2;color:#dc2626;border-radius:3px;padding:0 4px;font-size:11px;margin-left:6px">裂纹×${cracks.length}</span>`
-          : '';
+          const crackBadge = cracks.length
+            ? `<span style="display:inline-block;background:#fef2f2;color:#dc2626;border-radius:3px;padding:1px 6px;font-size:12px;margin-left:6px">裂纹×${cracks.length}</span>`
+            : '';
 
-        const crackList = cracks.length
-          ? `<div style="font-size:11px;color:#dc2626;margin-top:4px">裂纹记录: ${cracks.map((c) => `${c.cycle_count}次`).join(' · ')}</div>`
-          : '';
+          const crackList = cracks.length
+            ? `<div style="font-size:12px;color:#dc2626;margin-top:4px">裂纹记录: ${cracks.map((c) => `${c.cycle_count}次`).join(' · ')}</div>`
+            : '';
 
-        return `<div style="font-size:12px;line-height:1.5">
-          <div style="display:flex;align-items:center;gap:4px;margin-bottom:4px">
-            <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${p.color};flex-shrink:0"></span>
-            <b>${point.point_id}</b>
-            <span style="color:#64748b;font-size:11px">${point.point_name}</span>
-            ${crackBadge}
-          </div>
-          <div style="font-size:11px;color:#475569;margin:2px 0">
-            循环次数: ${cycleCount} · 应力幅: ${stress}
-          </div>
-          ${point.component ? `<div style="font-size:11px;color:#64748b">部件: ${point.component}${point.side ? ' · ' + point.side : ''}${point.direction ? ' · ' + point.direction : ''}</div>` : ''}
-          ${point.position_description ? `<div style="font-size:11px;color:#64748b">位置: ${point.position_description}</div>` : ''}
-          ${crackList}
-          ${photoHtml}
-          <div style="color:#94a3b8;font-size:10px;margin-top:6px;text-align:center;border-top:1px solid #f1f5f9;padding-top:4px">🖱 点击跳转点位详情</div>
-        </div>`;
+          const meta: string[] = [];
+          if (point.component) meta.push(`部件: ${point.component}`);
+          if (point.side) meta.push(point.side);
+          if (point.direction) meta.push(point.direction);
+          const metaLine = meta.length ? `<div style="font-size:12px;color:#64748b;margin-top:2px">${meta.join(' · ')}</div>` : '';
+          const posLine = point.position_description ? `<div style="font-size:12px;color:#64748b">位置: ${point.position_description}</div>` : '';
+
+          return `<div style="margin:2px 0;padding:6px 8px;border-left:3px solid ${p.color}">
+            <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
+              <b style="font-size:14px">${point.point_id}</b>
+              <span style="color:#64748b;font-size:12px">${point.point_name}</span>
+              ${crackBadge}
+            </div>
+            <div style="font-size:12px;color:#475569;margin:4px 0">
+              循环次数: ${cycleCount} · 应力幅: ${stress}
+            </div>
+            ${metaLine}
+            ${posLine}
+            ${crackList}
+            ${photoHtml}
+          </div>`;
+        });
+
+        return `<div style="line-height:1.5;min-width:200px">${items.join('')}</div>`;
       },
     },
     grid: { left: 58, right: 24, top: 24, bottom: 62 },
