@@ -1,7 +1,7 @@
 import * as echarts from 'echarts';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { mediaUrl } from '../api/client';
+import { crackImageUrl, mediaUrl } from '../api/client';
 import { useAppContext } from '../context/AppContext';
 import { CrackRecord, Point, TrendItem } from '../types';
 
@@ -17,7 +17,6 @@ interface Props {
   expandable?: boolean;
   crackRecords?: CrackRecord[];
   onCrackSelect?: (record: CrackRecord) => void;
-  onPointSelect?: (pointTrend: PointTrend) => void;
   loading?: boolean;
 }
 
@@ -127,6 +126,21 @@ function buildPointTooltip(pointTrend: PointTrend, cracks: CrackRecord[], color:
   `;
 }
 
+function buildCrackTooltip(record: CrackRecord): string {
+  return `
+    <div class="line-tooltip-card crack-tooltip-card">
+      <div class="crack-tooltip-copy">
+        <b>${escapeHtml(record.point_id)}</b>
+        <strong>${escapeHtml(record.point_name)}</strong>
+        <span>裂纹 · ${record.cycle_count} 次</span>
+        ${record.run_name ? `<span>${escapeHtml(record.run_name)}</span>` : ''}
+        ${record.remark ? `<p>${escapeHtml(record.remark)}</p>` : ''}
+      </div>
+      <img class="crack-tooltip-image" src="${crackImageUrl(record.id)}" alt="${escapeHtml(record.point_id)} 裂纹图片" />
+    </div>
+  `;
+}
+
 function buildOption(
   trends: PointTrend[],
   focusPointId: number | null,
@@ -162,6 +176,11 @@ function buildOption(
             }
           | undefined;
         if (!activeParam || typeof activeParam.seriesIndex !== 'number') return '';
+        const crackRecordId = activeParam.data?.crackRecordId;
+        if (crackRecordId) {
+          const record = crackRecords.find((item) => item.id === crackRecordId);
+          return record ? buildCrackTooltip(record) : '';
+        }
         if (activeParam.seriesIndex < trends.length) {
           const pointTrend = trends[activeParam.seriesIndex];
           return buildPointTooltip(
@@ -169,13 +188,6 @@ function buildOption(
             cracksByPoint[pointTrend.point.id] ?? [],
             activeParam.color ?? colorForIndex(activeParam.seriesIndex),
           );
-        }
-        const crackRecordId = activeParam.data?.crackRecordId;
-        if (crackRecordId) {
-          const record = crackRecords.find((item) => item.id === crackRecordId);
-          if (record) {
-            return `<div class="line-tooltip-card crack-tooltip-card"><b>${escapeHtml(record.point_id)}</b><span>裂纹 · ${record.cycle_count} 次</span><p>${escapeHtml(record.remark ?? '')}</p></div>`;
-          }
         }
         return '';
 
@@ -230,7 +242,7 @@ function buildOption(
         type: 'scatter',
         symbol: 'circle',
         symbolSize: 18,
-        z: 8,
+        z: 20,
         itemStyle: {
           color: 'rgba(255,255,255,0.08)',
           borderColor: '#dc2626',
@@ -281,16 +293,18 @@ function ChartCanvas({
     chart.on('click', (params) => {
       if (!params || !('seriesIndex' in params)) return;
       const seriesIndex = params.seriesIndex as number;
+      const data = params.data as { crackRecordId?: number; pointDbId?: number } | undefined;
+      const crackRecord = crackRecords.find((record) => record.id === data?.crackRecordId);
+      if (crackRecord) {
+        onCrackSelect?.(crackRecord);
+        return;
+      }
       // 裂纹散点系列排在最后
       if (seriesIndex === trends.length) {
-        const data = params.data as { crackRecordId?: number } | undefined;
-        const crackRecord = crackRecords.find((record) => record.id === data?.crackRecordId);
-        if (crackRecord) onCrackSelect?.(crackRecord);
         return;
       }
       // 折线数据点 → 跳转点位详情
       if (seriesIndex < trends.length) {
-        const data = params.data as { pointDbId?: number } | undefined;
         onPointClick?.(data?.pointDbId ?? trends[seriesIndex].point.id);
       }
     });
@@ -376,16 +390,14 @@ function SideLegend({
             key={point.id}
             className={`side-legend-item ${interactive ? 'interactive' : ''} ${active ? 'active' : ''} ${dimmed ? 'dimmed' : ''}`}
             type="button"
-            onClick={() => {
-              if (interactive && !active) {
-                onFocus?.(point.id);
-              } else if (interactive && active) {
-                onFocus?.(null);
-              } else {
-                navigate(`/points/${point.id}`);
-              }
+            onMouseEnter={() => {
+              if (interactive) onFocus?.(point.id);
             }}
-            title={interactive ? '点击突出折线 · 再次点击跳转详情' : '点击跳转点位详情'}
+            onMouseLeave={() => {
+              if (interactive) onFocus?.(null);
+            }}
+            onClick={() => navigate(`/points/${point.id}`)}
+            title="点击跳转点位详情"
           >
             <span className="legend-dot" style={{ background: colorForIndex(index) }} />
             <span className="legend-text">
@@ -407,7 +419,6 @@ export function MultiPointTrendChart({
   expandable = true,
   crackRecords = [],
   onCrackSelect,
-  onPointSelect,
   loading = false,
 }: Props) {
   const { chartSettings } = useAppContext();
@@ -417,11 +428,6 @@ export function MultiPointTrendChart({
   const availableTrends = useMemo(() => trends.filter((item) => item.trend.length), [trends]);
 
   const handlePointClick = (pointId: number) => {
-    const pointTrend = availableTrends.find((item) => item.point.id === pointId);
-    if (pointTrend && onPointSelect) {
-      onPointSelect(pointTrend);
-      return;
-    }
     navigate(`/points/${pointId}`);
   };
 
@@ -479,7 +485,7 @@ export function MultiPointTrendChart({
             <div className="section-head">
               <div>
                 <h2>全项目点位应力趋势</h2>
-                <p>Ctrl+滚轮缩放 · Shift+滚轮平移 · 拖拽下方滑块选取区间 · 点击曲线跳转点位详情 · 点击右侧标注突出折线</p>
+                <p>Ctrl+滚轮缩放 · Shift+滚轮平移 · 拖拽下方滑块选取区间 · 点击曲线跳转点位详情 · 悬停右侧标注突出折线</p>
               </div>
               <button className="button" onClick={() => setExpanded(false)}>关闭</button>
             </div>

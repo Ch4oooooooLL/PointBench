@@ -6,7 +6,6 @@ import { DebugCsvImporter } from '../components/DebugCsvImporter';
 import { MultiPointTrendChart, PointTrend } from '../components/MultiPointTrendChart';
 import { ProjectSelector } from '../components/ProjectSelector';
 import { useAppContext } from '../context/AppContext';
-import { PointRiskModal } from './ProjectRowsPage';
 import { CrackRecord, Point, TrendItem } from '../types';
 
 type SummaryValue = string | number | null | undefined;
@@ -71,7 +70,6 @@ export function ProjectOverviewPage() {
   const [trends, setTrends] = useState<PointTrend[]>([]);
   const [crackRecords, setCrackRecords] = useState<CrackRecord[]>([]);
   const [selectedCrackRecord, setSelectedCrackRecord] = useState<CrackRecord | null>(null);
-  const [selectedPointTrend, setSelectedPointTrend] = useState<PointTrend | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
@@ -83,7 +81,6 @@ export function ProjectOverviewPage() {
       setSummary(null);
       setTrends([]);
       setCrackRecords([]);
-      setSelectedPointTrend(null);
       return () => {
         cancelled = true;
       };
@@ -92,7 +89,6 @@ export function ProjectOverviewPage() {
     setSummary(null);
     setTrends([]);
     setCrackRecords([]);
-    setSelectedPointTrend(null);
     setError('');
     setLoading(true);
     Promise.all([
@@ -211,7 +207,6 @@ export function ProjectOverviewPage() {
               expandedHeight={chartSettings.overviewExpandedHeight}
               crackRecords={crackRecords}
               onCrackSelect={setSelectedCrackRecord}
-              onPointSelect={setSelectedPointTrend}
               loading={loading}
             />
           </div>
@@ -225,17 +220,6 @@ export function ProjectOverviewPage() {
 
       {selectedCrackRecord && (
         <CrackOverviewModal record={selectedCrackRecord} onClose={() => setSelectedCrackRecord(null)} />
-      )}
-
-      {selectedPointTrend && (
-        <PointRiskModal
-          row={selectedPointTrend}
-          editMode={false}
-          onClose={() => setSelectedPointTrend(null)}
-          onChanged={async () => {
-            setReloadKey((key) => key + 1);
-          }}
-        />
       )}
     </section>
   );

@@ -845,13 +845,46 @@ label {
 
 .crack-tooltip-card {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(150px, 1fr) minmax(140px, 190px);
+  gap: 12px;
+  width: min(460px, 82vw);
+}
+
+.crack-tooltip-copy {
+  display: grid;
   gap: 4px;
-  width: min(320px, 82vw);
+  align-content: start;
+}
+
+.crack-tooltip-copy b {
+  color: #dc2626;
+  font-size: 18px;
+}
+
+.crack-tooltip-copy strong {
+  overflow-wrap: anywhere;
+}
+
+.crack-tooltip-copy span {
+  color: #475569;
+  font-size: 12px;
 }
 
 .crack-tooltip-card p {
   margin: 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.crack-tooltip-image {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid #fecaca;
+  background: #fff1f0;
 }
 
 .trend-chart-layout {
@@ -905,7 +938,7 @@ label {
   cursor: pointer;
 }
 
-.side-legend-item.interactive:hover,
+.side-legend-item:hover,
 .side-legend-item.active {
   border-color: #9bc7c2;
   background: #ecf8f6;
