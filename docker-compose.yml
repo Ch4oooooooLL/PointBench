@@ -1,0 +1,43 @@
+version: "3.8"
+
+services:
+  backend:
+    build: ./backend
+    container_name: pointbench-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///./data/pointbench.db
+      - JWT_SECRET_KEY=change-this-in-production
+    volumes:
+      - pointbench-data:/app/data
+      - pointbench-storage:/app/storage
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: pointbench-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # Optional: PostgreSQL for multi-user deployments
+  # db:
+  #   image: postgres:16-alpine
+  #   container_name: pointbench-db
+  #   environment:
+  #     POSTGRES_USER: pointbench
+  #     POSTGRES_PASSWORD: change-this-password
+  #     POSTGRES_DB: pointbench
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
+  # Uncomment and set DATABASE_URL=postgresql+psycopg://pointbench:change-this-password@db:5432/pointbench
+
+volumes:
+  pointbench-data:
+  pointbench-storage:
+  # pgdata:

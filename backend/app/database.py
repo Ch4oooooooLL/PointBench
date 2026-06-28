@@ -1,3 +1,4 @@
+import os
 from collections.abc import Generator
 from pathlib import Path
 
@@ -7,18 +8,27 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 STORAGE_DIR = BASE_DIR / "storage"
-DATABASE_URL = f"sqlite:///{BASE_DIR / 'test_point.db'}"
+
+# 支持通过环境变量切换数据库（默认 SQLite）
+#   SQLite:   不设置 或 DATABASE_URL=sqlite:///./test_point.db
+#   PostgreSQL: DATABASE_URL=postgresql+psycopg://user:pass@localhost:5432/pointbench
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL",
+    f"sqlite:///{BASE_DIR / 'test_point.db'}",
+)
+
+IS_SQLITE = DATABASE_URL.startswith("sqlite")
 
 
 class Base(DeclarativeBase):
     pass
 
 
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    future=True,
-)
+engine_kwargs: dict = {"future": True}
+if IS_SQLITE:
+    engine_kwargs["connect_args"] = {"check_same_thread": False}
+
+engine = create_engine(DATABASE_URL, **engine_kwargs)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
 
