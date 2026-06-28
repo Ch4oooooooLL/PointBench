@@ -52,6 +52,19 @@ interface ChartClickEvent {
   zrY?: number;
 }
 
+interface CrackHitTarget {
+  record: CrackRecord;
+  dataIndex: number;
+  distance: number;
+}
+
+interface LineHitTarget {
+  pointId: number;
+  seriesIndex: number;
+  dataIndex: number;
+  distance: number;
+}
+
 function colorForIndex(index: number): string {
   return palette[index % palette.length];
 }
@@ -168,43 +181,62 @@ function valueToPixel(chart: echarts.ECharts, value: [number, number]): [number,
   return [pixel[0], pixel[1]];
 }
 
+function findCrackHitTarget(
+  chart: echarts.ECharts,
+  trends: PointTrend[],
+  crackRecords: CrackRecord[],
+  clickPixel: [number, number],
+  threshold = 18,
+): CrackHitTarget | null {
+  let best: CrackHitTarget | null = null;
+  for (const [dataIndex, crack] of buildCrackData(trends, crackRecords).entries()) {
+    const pixel = valueToPixel(chart, crack.value);
+    if (!pixel) continue;
+    const distance = distanceBetween(clickPixel, pixel);
+    const record = crackRecords.find((item) => item.id === crack.crackRecordId);
+    if (record && distance <= threshold && (!best || distance < best.distance)) {
+      best = { record, dataIndex, distance };
+    }
+  }
+  return best;
+}
+
 function findClickedCrack(
   chart: echarts.ECharts,
   trends: PointTrend[],
   crackRecords: CrackRecord[],
   clickPixel: [number, number],
 ): CrackRecord | null {
-  let best: { record: CrackRecord; distance: number } | null = null;
-  for (const crack of buildCrackData(trends, crackRecords)) {
-    const pixel = valueToPixel(chart, crack.value);
-    if (!pixel) continue;
-    const distance = distanceBetween(clickPixel, pixel);
-    const record = crackRecords.find((item) => item.id === crack.crackRecordId);
-    if (record && distance <= 18 && (!best || distance < best.distance)) {
-      best = { record, distance };
-    }
-  }
-  return best?.record ?? null;
+  return findCrackHitTarget(chart, trends, crackRecords, clickPixel)?.record ?? null;
 }
 
-function findClickedLinePointId(chart: echarts.ECharts, trends: PointTrend[], clickPixel: [number, number]): number | null {
-  let best: { pointId: number; distance: number } | null = null;
-  for (const { point, trend } of trends) {
+function findLineHitTarget(chart: echarts.ECharts, trends: PointTrend[], clickPixel: [number, number], threshold = 12): LineHitTarget | null {
+  let best: LineHitTarget | null = null;
+  for (const [seriesIndex, { point, trend }] of trends.entries()) {
     const pixels = trend
       .filter((item) => item.stress_amplitude_mpa != null)
       .map((item) => valueToPixel(chart, [item.cycle_count, item.stress_amplitude_mpa as number]))
       .filter((pixel): pixel is [number, number] => pixel !== null);
     if (!pixels.length) continue;
 
-    let distance = pixels.length === 1 ? distanceBetween(clickPixel, pixels[0]) : Number.POSITIVE_INFINITY;
+    let distance = distanceBetween(clickPixel, pixels[0]);
+    let dataIndex = 0;
     for (let index = 1; index < pixels.length; index += 1) {
-      distance = Math.min(distance, distanceToSegment(clickPixel, pixels[index - 1], pixels[index]));
+      const segmentDistance = distanceToSegment(clickPixel, pixels[index - 1], pixels[index]);
+      if (segmentDistance < distance) {
+        distance = segmentDistance;
+        dataIndex = distanceBetween(clickPixel, pixels[index - 1]) <= distanceBetween(clickPixel, pixels[index]) ? index - 1 : index;
+      }
     }
-    if (distance <= 12 && (!best || distance < best.distance)) {
-      best = { pointId: point.id, distance };
+    if (distance <= threshold && (!best || distance < best.distance)) {
+      best = { pointId: point.id, seriesIndex, dataIndex, distance };
     }
   }
-  return best?.pointId ?? null;
+  return best;
+}
+
+function findClickedLinePointId(chart: echarts.ECharts, trends: PointTrend[], clickPixel: [number, number]): number | null {
+  return findLineHitTarget(chart, trends, clickPixel)?.pointId ?? null;
 }
 
 function buildOption(
@@ -353,6 +385,48 @@ function ChartCanvas({
     const chartDom = ref.current;
     const chart = echarts.init(chartDom);
     chart.setOption(buildOption(trends, focusPointId, crackRecords), true);
+    let activeTipKey = '';
+
+    const hideActiveTip = () => {
+      if (!activeTipKey) return;
+      activeTipKey = '';
+      chart.dispatchAction({ type: 'hideTip' });
+    };
+
+    const handlePointerMove = (event: ChartClickEvent) => {
+      const x = event.offsetX ?? event.zrX;
+      const y = event.offsetY ?? event.zrY;
+      if (x == null || y == null || !Number.isFinite(x) || !Number.isFinite(y)) {
+        hideActiveTip();
+        return;
+      }
+
+      const hoverPixel: [number, number] = [x, y];
+      const crackTarget = findCrackHitTarget(chart, trends, crackRecords, hoverPixel);
+      if (crackTarget) {
+        const key = `crack-${crackTarget.record.id}`;
+        if (activeTipKey !== key) {
+          activeTipKey = key;
+          chart.dispatchAction({ type: 'showTip', seriesIndex: trends.length, dataIndex: crackTarget.dataIndex });
+        }
+        return;
+      }
+
+      const lineTarget = findLineHitTarget(chart, trends, hoverPixel);
+      if (lineTarget) {
+        const key = `line-${lineTarget.seriesIndex}`;
+        if (activeTipKey !== key) {
+          activeTipKey = key;
+          chart.dispatchAction({ type: 'showTip', seriesIndex: lineTarget.seriesIndex, dataIndex: lineTarget.dataIndex });
+        }
+        return;
+      }
+
+      hideActiveTip();
+    };
+
+    chart.getZr().on('mousemove', handlePointerMove);
+    chart.getZr().on('globalout', hideActiveTip);
 
     // 点击事件：红圈优先，其次折线，最后才是空白区域。
     chart.off('click');
@@ -394,6 +468,8 @@ function ChartCanvas({
     return () => {
       chartDom.removeEventListener('wheel', handleWheel, { capture: true });
       window.removeEventListener('resize', resize);
+      chart.getZr().off('mousemove', handlePointerMove);
+      chart.getZr().off('globalout', hideActiveTip);
       chart.dispose();
     };
   }, [trends, focusPointId, crackRecords, onCrackSelect, onChartClick, onPointClick, loading]);
