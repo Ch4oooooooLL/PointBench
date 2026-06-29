@@ -51,6 +51,8 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     to_encode = data.copy()
+    if "sub" in to_encode:
+        to_encode["sub"] = str(to_encode["sub"])
     expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
@@ -76,8 +78,12 @@ def get_current_user(
     payload = decode_access_token(credentials.credentials)
     if payload is None:
         return None
-    user_id: int | None = payload.get("sub")
-    if user_id is None:
+    user_id_raw = payload.get("sub")
+    if user_id_raw is None:
+        return None
+    try:
+        user_id = int(user_id_raw)
+    except (TypeError, ValueError):
         return None
     user = db.get(models.User, user_id)
     if user is None or not user.is_active:
