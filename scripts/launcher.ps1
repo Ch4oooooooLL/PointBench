@@ -20,16 +20,48 @@ $backendLog = Join-Path $logDir 'backend.log'
 $frontendLog = Join-Path $logDir 'frontend.log'
 $latestLogDirFile = Join-Path $logRoot 'latest-run.txt'
 
-Set-Content -Path $latestLogDirFile -Value $logDir -Encoding UTF8
-Set-Content -Path $launcherLog -Value ("[{0}] Starting launcher. ShowLogs={1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $ShowLogs) -Encoding UTF8
-Set-Content -Path $backendLog -Value ("[{0}] Backend log started." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) -Encoding UTF8
-Set-Content -Path $frontendLog -Value ("[{0}] Frontend log started." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) -Encoding UTF8
+$script:TextEncoding = New-Object System.Text.UTF8Encoding -ArgumentList $false
+
+function ConvertTo-LogText {
+    param([object]$Value)
+
+    if ($null -eq $Value) {
+        return ''
+    }
+    if ($Value -is [array]) {
+        return (($Value | ForEach-Object { [string]$_ }) -join [Environment]::NewLine)
+    }
+    return [string]$Value
+}
+
+function Set-TextFile {
+    param(
+        [string]$Path,
+        [object]$Value
+    )
+
+    [System.IO.File]::WriteAllText($Path, (ConvertTo-LogText $Value) + [Environment]::NewLine, $script:TextEncoding)
+}
+
+function Add-TextLine {
+    param(
+        [string]$Path,
+        [object]$Value
+    )
+
+    [System.IO.File]::AppendAllText($Path, (ConvertTo-LogText $Value) + [Environment]::NewLine, $script:TextEncoding)
+}
+
+Set-TextFile -Path $latestLogDirFile -Value $logDir
+Set-TextFile -Path $launcherLog -Value ("[{0}] Starting launcher. ShowLogs={1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $ShowLogs)
+Set-TextFile -Path $backendLog -Value ("[{0}] Backend log started." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
+Set-TextFile -Path $frontendLog -Value ("[{0}] Frontend log started." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
 
 $logOffsets = @{}
 
 function Write-LauncherLog {
     param([string]$Text)
-    Add-Content -Path $launcherLog -Value ("[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Text) -Encoding UTF8
+    Add-TextLine -Path $launcherLog -Value ("[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Text)
 }
 
 function Write-ExceptionLog {
@@ -39,31 +71,31 @@ function Write-ExceptionLog {
         [string]$Path = $launcherLog
     )
 
-    Add-Content -Path $Path -Value '' -Encoding UTF8
-    Add-Content -Path $Path -Value ("===== {0} =====" -f $Title) -Encoding UTF8
-    Add-Content -Path $Path -Value ("time={0}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) -Encoding UTF8
+    Add-TextLine -Path $Path -Value ''
+    Add-TextLine -Path $Path -Value ("===== {0} =====" -f $Title)
+    Add-TextLine -Path $Path -Value ("time={0}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
 
     if ($null -eq $Record) {
-        Add-Content -Path $Path -Value 'message=<null error record>' -Encoding UTF8
+        Add-TextLine -Path $Path -Value 'message=<null error record>'
         return
     }
 
     $exception = $Record.Exception
     if ($exception) {
-        Add-Content -Path $Path -Value ("exception_type={0}" -f $exception.GetType().FullName) -Encoding UTF8
-        Add-Content -Path $Path -Value ("message={0}" -f $exception.Message) -Encoding UTF8
+        Add-TextLine -Path $Path -Value ("exception_type={0}" -f $exception.GetType().FullName)
+        Add-TextLine -Path $Path -Value ("message={0}" -f $exception.Message)
     } else {
-        Add-Content -Path $Path -Value ("message={0}" -f $Record.ToString()) -Encoding UTF8
+        Add-TextLine -Path $Path -Value ("message={0}" -f $Record.ToString())
     }
     if ($Record.ScriptStackTrace) {
-        Add-Content -Path $Path -Value ("script_stack_trace={0}" -f $Record.ScriptStackTrace) -Encoding UTF8
+        Add-TextLine -Path $Path -Value ("script_stack_trace={0}" -f $Record.ScriptStackTrace)
     }
     if ($Record.InvocationInfo) {
-        Add-Content -Path $Path -Value ("position={0}" -f $Record.InvocationInfo.PositionMessage) -Encoding UTF8
+        Add-TextLine -Path $Path -Value ("position={0}" -f $Record.InvocationInfo.PositionMessage)
     }
     if ($exception -and $exception.StackTrace) {
-        Add-Content -Path $Path -Value 'exception_stack_trace=' -Encoding UTF8
-        Add-Content -Path $Path -Value $exception.StackTrace -Encoding UTF8
+        Add-TextLine -Path $Path -Value 'exception_stack_trace='
+        Add-TextLine -Path $Path -Value $exception.StackTrace
     }
 }
 
@@ -153,10 +185,10 @@ function Invoke-DiagnosticCommand {
         [switch]$Required
     )
 
-    Add-Content -Path $LogPath -Value '' -Encoding UTF8
-    Add-Content -Path $LogPath -Value ("===== diagnostic: {0} =====" -f $Name) -Encoding UTF8
-    Add-Content -Path $LogPath -Value ("cwd={0}" -f $WorkingDirectory) -Encoding UTF8
-    Add-Content -Path $LogPath -Value ("> {0} {1}" -f $FilePath, $Arguments) -Encoding UTF8
+    Add-TextLine -Path $LogPath -Value ''
+    Add-TextLine -Path $LogPath -Value ("===== diagnostic: {0} =====" -f $Name)
+    Add-TextLine -Path $LogPath -Value ("cwd={0}" -f $WorkingDirectory)
+    Add-TextLine -Path $LogPath -Value ("> {0} {1}" -f $FilePath, $Arguments)
     Write-LauncherLog "Diagnostic started: $Name"
 
     $psi = New-Object System.Diagnostics.ProcessStartInfo
@@ -177,19 +209,19 @@ function Invoke-DiagnosticCommand {
         $proc.WaitForExit()
 
         if ($stdout) {
-            Add-Content -Path $LogPath -Value $stdout -Encoding UTF8
+            Add-TextLine -Path $LogPath -Value $stdout
         }
         if ($stderr) {
-            Add-Content -Path $LogPath -Value $stderr -Encoding UTF8
+            Add-TextLine -Path $LogPath -Value $stderr
         }
-        Add-Content -Path $LogPath -Value ("exit_code={0}" -f $proc.ExitCode) -Encoding UTF8
+        Add-TextLine -Path $LogPath -Value ("exit_code={0}" -f $proc.ExitCode)
         Write-LauncherLog "Diagnostic finished: $Name ExitCode=$($proc.ExitCode)"
 
         if ($Required -and $proc.ExitCode -ne 0) {
             throw "Diagnostic failed: $Name. See $LogPath"
         }
     } catch {
-        Add-Content -Path $LogPath -Value ("diagnostic_exception={0}" -f $_.Exception.Message) -Encoding UTF8
+        Add-TextLine -Path $LogPath -Value ("diagnostic_exception={0}" -f $_.Exception.Message)
         Write-ExceptionLog -Title "diagnostic_exception: $Name" -Record $_ -Path $LogPath
         Write-LauncherLog "Diagnostic exception: $Name $($_.Exception.Message)"
         if ($Required) {
