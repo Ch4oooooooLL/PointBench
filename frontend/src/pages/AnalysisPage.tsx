@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/client';
+import { useAppContext } from '../context/AppContext';
 
 interface Summary {
   project_db_id: number;
@@ -34,6 +35,8 @@ const COLUMN_LABELS: Record<string, string> = {
 
 export function AnalysisPage() {
   const { projectId } = useParams();
+  const navigate = useNavigate();
+  const { setSelectedProjectId } = useAppContext();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [abnormal, setAbnormal] = useState<Array<Record<string, string | number | null>>>([]);
 
@@ -51,7 +54,16 @@ export function AnalysisPage() {
           <h1>分析总览</h1>
           <p>最新测量、异常点、应变幅排序和增长趋势</p>
         </div>
-        <Link className="button" to={`/projects/${projectId}`}>返回项目</Link>
+        <button
+          className="button"
+          type="button"
+          onClick={() => {
+            setSelectedProjectId(Number(projectId));
+            navigate('/');
+          }}
+        >
+          返回项目
+        </button>
       </div>
       <div className="metric-grid">
         <div><span>点位数</span><strong>{summary.point_count}</strong></div>

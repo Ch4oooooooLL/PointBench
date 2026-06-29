@@ -1,9 +1,10 @@
 import { ImagePlus, Pencil, Plus, Save, Trash2, Upload, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, mediaUrl } from '../api/client';
 import { StatusPill } from '../components/StatusPill';
 import { TrendChart } from '../components/TrendChart';
+import { useAppContext } from '../context/AppContext';
 import { Point, PointMeasurementRow, TrendItem } from '../types';
 
 type Metric = 'max_strain_ue' | 'min_strain_ue' | 'amplitude_strain_ue' | 'stress_amplitude_mpa';
@@ -84,6 +85,8 @@ function isSameValue(left: unknown, right: unknown): boolean {
 
 export function PointDetailPage() {
   const { pointId } = useParams();
+  const navigate = useNavigate();
+  const { setSelectedProjectId } = useAppContext();
   const [searchParams, setSearchParams] = useSearchParams();
   const [point, setPoint] = useState<Point | null>(null);
   const [form, setForm] = useState<PointForm>(toPointForm(null));
@@ -260,7 +263,16 @@ export function PointDetailPage() {
         <div className="actions">
           {editMode && <button className="button primary" disabled={busy} onClick={saveAll}><Save size={18} />保存</button>}
           <button className="button" onClick={toggleEditMode}>{editMode ? <X size={18} /> : <Pencil size={18} />}{editMode ? '退出编辑' : '编辑模式'}</button>
-          <Link className="button" to={`/projects/${point.project_db_id}`}>返回项目</Link>
+          <button
+            className="button"
+            type="button"
+            onClick={() => {
+              setSelectedProjectId(point.project_db_id);
+              navigate('/');
+            }}
+          >
+            返回项目
+          </button>
         </div>
       </div>
 

@@ -14,6 +14,10 @@ export interface ChartSettings {
   expandedChartWidth: number;
 }
 
+export interface AnomalySettings {
+  thresholdPercent: number;
+}
+
 interface AppContextValue {
   projects: Project[];
   isLoadingProjects: boolean;
@@ -26,6 +30,8 @@ interface AppContextValue {
   setRiskSettings: (settings: RiskSettings) => void;
   chartSettings: ChartSettings;
   setChartSettings: (settings: ChartSettings) => void;
+  anomalySettings: AnomalySettings;
+  setAnomalySettings: (settings: AnomalySettings) => void;
   debugMode: boolean;
   setDebugMode: (enabled: boolean) => void;
 }
@@ -40,6 +46,10 @@ const DEFAULT_CHART: ChartSettings = {
   overviewHeight: 520,
   overviewExpandedHeight: 660,
   expandedChartWidth: 1280,
+};
+
+const DEFAULT_ANOMALY: AnomalySettings = {
+  thresholdPercent: 20,
 };
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -71,6 +81,16 @@ function loadSelectedProjectId(): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
+function loadAnomalySettings(): AnomalySettings {
+  const raw = localStorage.getItem('anomalySettings');
+  if (!raw) return DEFAULT_ANOMALY;
+  try {
+    return { ...DEFAULT_ANOMALY, ...JSON.parse(raw) };
+  } catch {
+    return DEFAULT_ANOMALY;
+  }
+}
+
 function loadDebugMode(): boolean {
   return localStorage.getItem('debugMode') === 'true';
 }
@@ -80,6 +100,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [selectedProjectId, setSelectedProjectIdState] = useState<number | null>(loadSelectedProjectId);
   const [riskSettings, setRiskSettingsState] = useState<RiskSettings>(loadRiskSettings);
   const [chartSettings, setChartSettingsState] = useState<ChartSettings>(loadChartSettings);
+  const [anomalySettings, setAnomalySettingsState] = useState<AnomalySettings>(loadAnomalySettings);
   const [debugMode, setDebugModeState] = useState<boolean>(loadDebugMode);
   const [isLoadingProjects, setIsLoadingProjects] = useState(false);
   const [projectsError, setProjectsError] = useState('');
@@ -126,6 +147,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('chartSettings', JSON.stringify(settings));
   };
 
+  const setAnomalySettings = (settings: AnomalySettings) => {
+    setAnomalySettingsState(settings);
+    localStorage.setItem('anomalySettings', JSON.stringify(settings));
+  };
+
   const setDebugMode = (enabled: boolean) => {
     setDebugModeState(enabled);
     localStorage.setItem('debugMode', String(enabled));
@@ -150,6 +176,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setRiskSettings,
         chartSettings,
         setChartSettings,
+        anomalySettings,
+        setAnomalySettings,
         debugMode,
         setDebugMode,
       }}

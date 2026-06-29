@@ -63,8 +63,20 @@ interface Summary {
   fastest_growth_points: SummaryPoint[];
 }
 
+function hasAbnormalGrowth(trend: TrendItem[], thresholdPercent: number): boolean {
+  const valid = trend.filter((item) => item.amplitude_strain_ue != null);
+  for (let index = 1; index < valid.length; index += 1) {
+    const previous = valid[index - 1].amplitude_strain_ue as number;
+    const current = valid[index].amplitude_strain_ue as number;
+    if (previous !== 0 && (current - previous) / Math.abs(previous) > thresholdPercent / 100) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function ProjectOverviewPage() {
-  const { selectedProject, selectedProjectId, chartSettings, debugMode } = useAppContext();
+  const { selectedProject, selectedProjectId, chartSettings, anomalySettings, debugMode } = useAppContext();
   const [points, setPoints] = useState<Point[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [trends, setTrends] = useState<PointTrend[]>([]);
@@ -73,6 +85,7 @@ export function ProjectOverviewPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
+  const [abnormalOnly, setAbnormalOnly] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -126,6 +139,18 @@ export function ProjectOverviewPage() {
     const cycles = trends.flatMap((item) => item.trend.map((trend) => trend.cycle_count));
     return cycles.length ? Math.max(...cycles) : null;
   }, [trends]);
+
+  const threshold = anomalySettings.thresholdPercent;
+
+  const displayTrends = useMemo(() => {
+    if (!abnormalOnly) return trends;
+    return trends.filter(({ trend }) => hasAbnormalGrowth(trend, threshold));
+  }, [trends, abnormalOnly, threshold]);
+
+  const abnormalTrendCount = useMemo(
+    () => trends.filter(({ trend }) => hasAbnormalGrowth(trend, threshold)).length,
+    [trends, threshold],
+  );
 
   const topPoint = summary?.max_amplitude_points[0];
 
@@ -200,9 +225,35 @@ export function ProjectOverviewPage() {
                 <h2>全点位应力幅趋势</h2>
                 <p>Ctrl+滚轮缩放 · Shift+滚轮平移 · 鼠标悬停查看点位照片与裂纹 · 点击曲线跳转点位详情 · 点击空白放大图表 · 红圈=裂纹记录</p>
               </div>
+              <div className="toggle-switch-group">
+                <div
+                  className={`toggle-switch${abnormalOnly ? ' active' : ''}`}
+                  onClick={() => setAbnormalOnly((value) => !value)}
+                  title={abnormalOnly ? '显示全部点位' : `仅显示应变幅增长超过 ${threshold}% 的异常点位`}
+                  role="switch"
+                  aria-checked={abnormalOnly}
+                  tabIndex={0}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      setAbnormalOnly((value) => !value);
+                    }
+                  }}
+                >
+                  <span className="toggle-switch-track">
+                    <span className="toggle-switch-thumb" />
+                  </span>
+                  <span className="toggle-switch-label">
+                    {abnormalOnly ? `仅异常 (${abnormalTrendCount})` : '仅异常'}
+                  </span>
+                </div>
+                <span className="toggle-switch-hint">
+                  筛选应变幅相比上一轮增长超过 {threshold}% 的点位
+                </span>
+              </div>
             </div>
             <MultiPointTrendChart
-              trends={trends}
+              trends={displayTrends}
               height={chartSettings.overviewHeight}
               expandedHeight={chartSettings.overviewExpandedHeight}
               crackRecords={crackRecords}

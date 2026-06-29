@@ -162,6 +162,7 @@ export function ProjectRowsPage() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     setProjectForm(toProjectForm(selectedProject));
@@ -176,10 +177,12 @@ export function ProjectRowsPage() {
       setRows([]);
       setTestRuns([]);
       setSelectedRowId(null);
+      setLoading(false);
       return;
     }
     setRows([]);
     setError('');
+    setLoading(true);
     try {
       const [points, runs] = await Promise.all([
         api.get<Point[]>(`/api/projects/${selectedProjectId}/points`),
@@ -196,6 +199,8 @@ export function ProjectRowsPage() {
       setSelectedRowId((current) => (current && data.some((row) => row.point.id === current) ? current : data[0]?.point.id ?? null));
     } catch (err) {
       setError((err as Error).message);
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -272,7 +277,14 @@ export function ProjectRowsPage() {
       {error && <div className="alert danger">{error}</div>}
       {message && <div className={message.includes('失败') ? 'alert danger' : 'alert ok'}>{message}</div>}
 
-      {selectedProject && (
+      {loading && selectedProject && (
+        <div className="chart chart-loading" style={{ height: 360 }}>
+          <div className="chart-loading-spinner" />
+          <span>点位台账加载中…</span>
+        </div>
+      )}
+
+      {!loading && selectedProject && (
         <>
           <div className="point-summary-strip">
             <div><span>项目名称</span><strong>{selectedProject.project_name || '-'}</strong></div>

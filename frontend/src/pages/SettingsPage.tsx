@@ -11,7 +11,7 @@ const SETTINGS_CATEGORIES: Array<{ id: SettingsCategory; label: string; icon: Lu
 ];
 
 export function SettingsPage() {
-  const { riskSettings, setRiskSettings, chartSettings, setChartSettings, debugMode, setDebugMode } = useAppContext();
+  const { riskSettings, setRiskSettings, chartSettings, setChartSettings, anomalySettings, setAnomalySettings, debugMode, setDebugMode } = useAppContext();
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>('risk');
   const [warnPercent, setWarnPercent] = useState(String(riskSettings.warnPercent));
   const [dangerPercent, setDangerPercent] = useState(String(riskSettings.dangerPercent));
@@ -19,6 +19,7 @@ export function SettingsPage() {
   const [overviewHeight, setOverviewHeight] = useState(String(chartSettings.overviewHeight));
   const [overviewExpandedHeight, setOverviewExpandedHeight] = useState(String(chartSettings.overviewExpandedHeight));
   const [expandedChartWidth, setExpandedChartWidth] = useState(String(chartSettings.expandedChartWidth));
+  const [abnormalThreshold, setAbnormalThreshold] = useState(String(anomalySettings.thresholdPercent));
   const [debugEnabled, setDebugEnabled] = useState(debugMode);
   const [message, setMessage] = useState('');
 
@@ -32,6 +33,9 @@ export function SettingsPage() {
       overviewHeight: clampNumber(Number(overviewHeight), 360, 760),
       overviewExpandedHeight: clampNumber(Number(overviewExpandedHeight), 480, 860),
       expandedChartWidth: clampNumber(Number(expandedChartWidth), 720, 1920),
+    });
+    setAnomalySettings({
+      thresholdPercent: clampNumber(Number(abnormalThreshold), 5, 100),
     });
     setDebugMode(debugEnabled);
     setMessage('设置已保存。');
@@ -96,6 +100,11 @@ export function SettingsPage() {
               <label>普通视图高度 px<input type="number" min="360" max="760" value={overviewHeight} onChange={(event) => setOverviewHeight(event.target.value)} /></label>
               <label>放大视图高度 px<input type="number" min="480" max="860" value={overviewExpandedHeight} onChange={(event) => setOverviewExpandedHeight(event.target.value)} /></label>
               <label>放大视图宽度 px<input type="number" min="720" max="1920" value={expandedChartWidth} onChange={(event) => setExpandedChartWidth(event.target.value)} /></label>
+            </div>
+            <h2 style={{ marginTop: 20 }}>异常筛选</h2>
+            <p>项目概览趋势图右上角的「仅异常」开关，筛选应变幅相比上一轮增长超过此阈值的点位。</p>
+            <div className="settings-grid">
+              <label>异常增长率阈值 %<input type="number" min="5" max="100" value={abnormalThreshold} onChange={(event) => setAbnormalThreshold(event.target.value)} /></label>
             </div>
           </div>
         )}

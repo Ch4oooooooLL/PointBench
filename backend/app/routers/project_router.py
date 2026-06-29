@@ -5,6 +5,7 @@ import shutil
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import FileResponse
+from datetime import datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -16,6 +17,7 @@ from app.schemas import PointCreate, PointOut, ProjectCreate, ProjectOut, Projec
 from app.services.dewesoft_service import delete_dewesoft_project_files
 from app.services.project_export_service import build_project_export_zip
 from app.utils.audit_utils import log_action
+from app.utils.auth_utils import require_role
 from app.utils.path_utils import safe_project_dir
 
 
@@ -29,26 +31,18 @@ def project_out(db: Session, project: models.Project) -> ProjectOut:
     return data
 
 
-def purge_project(db: Session, project: models.Project) -> None:
-    project_storage = safe_project_dir(project.project_id)
-    if project_storage.exists():
-        shutil.rmtree(project_storage)
-    delete_dewesoft_project_files(project.project_id)
-    db.delete(project)
-
-
 @router.get("", response_model=list[ProjectOut])
 def list_projects(db: Session = Depends(get_db)) -> list[ProjectOut]:
-    projects = db.execute(
-        select(models.Project)
-        .where(models.Project.deleted_at.is_(None))
-        .order_by(models.Project.updated_at.desc())
-    ).scalars().all()
+    projects = db.execute(select(models.Project).order_by(models.Project.updated_at.desc())).scalars().all()
     return [project_out(db, project) for project in projects]
 
 
 @router.post("", response_model=ProjectOut)
-def create_project(payload: ProjectCreate, db: Session = Depends(get_db)) -> ProjectOut:
+def create_project(
+    payload: ProjectCreate,
+    db: Session = Depends(get_db),
+    _admin: models.User = Depends(require_role("admin")),
+) -> ProjectOut:
     project_id = payload.project_id.strip()
     project_name = payload.project_name.strip()
     if not project_id:
@@ -57,10 +51,7 @@ def create_project(payload: ProjectCreate, db: Session = Depends(get_db)) -> Pro
         raise HTTPException(status_code=400, detail="项目名称不能为空")
     exists = db.scalar(select(models.Project).where(models.Project.project_id == project_id))
     if exists:
-        if exists.deleted_at is None:
-            raise HTTPException(status_code=400, detail="项目 ID 已存在")
-        purge_project(db, exists)
-        db.flush()
+        raise HTTPException(status_code=400, detail="项目 ID 已存在")
     project = models.Project(
         project_id=project_id,
         project_name=project_name,
@@ -76,7 +67,7 @@ def create_project(payload: ProjectCreate, db: Session = Depends(get_db)) -> Pro
     db.commit()
     db.refresh(project)
     safe_project_dir(project.project_id).mkdir(parents=True, exist_ok=True)
-    log_action(db, "create", "project", project.project_id, project.project_id, f"创建项目 {project.project_name}")
+    log_action(db, "create", "project", project.project_id, project.project_id, f"创建项目 {project.project_name}", user_id=_admin.username)
     return project_out(db, project)
 
 
@@ -85,8 +76,6 @@ def get_project(project_id: int, db: Session = Depends(get_db)) -> ProjectOut:
     project = db.get(models.Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
-    if project.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="项目不存在")
     return project_out(db, project)
 
 
@@ -94,8 +83,6 @@ def get_project(project_id: int, db: Session = Depends(get_db)) -> ProjectOut:
 def update_project(project_id: int, payload: ProjectUpdate, db: Session = Depends(get_db)) -> ProjectOut:
     project = db.get(models.Project, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
-    if project.deleted_at is not None:
         raise HTTPException(status_code=404, detail="项目不存在")
     data = payload.model_dump(exclude_unset=True)
     if "project_name" in data and not data["project_name"]:
@@ -108,16 +95,46 @@ def update_project(project_id: int, payload: ProjectUpdate, db: Session = Depend
 
 
 @router.delete("/{project_id}")
-def delete_project(project_id: int, db: Session = Depends(get_db)) -> dict:
-    """删除项目。测试阶段直接彻底删除。"""
+def delete_project(
+    project_id: int,
+    permanent: bool = False,
+    db: Session = Depends(get_db),
+    _admin: models.User = Depends(require_role("admin")),
+) -> dict:
+    """删除项目。默认软删除（可恢复），permanent=true 彻底删除。"""
     project = db.get(models.Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
 
-    purge_project(db, project)
-    log_action(db, "delete_permanent", "project", project.project_id, project.project_id, f"永久删除项目 {project.project_name}")
+    if permanent:
+        project_storage = safe_project_dir(project.project_id)
+        if project_storage.exists():
+            shutil.rmtree(project_storage)
+        delete_dewesoft_project_files(project.project_id)
+        db.delete(project)
+        log_action(db, "delete_permanent", "project", project.project_id, project.project_id, f"永久删除项目 {project.project_name}")
+        db.commit()
+        return {"ok": True, "action": "permanently_deleted"}
+
+    # 软删除：标记项目及其关联数据
+    project.deleted_at = datetime.utcnow()
+    for point in project.points:
+        point.deleted_at = datetime.utcnow()
+        for media in point.media_files:
+            media.deleted_at = datetime.utcnow()
+        for crack in point.crack_records:
+            crack.deleted_at = datetime.utcnow()
+    for run in project.test_runs:
+        run.deleted_at = datetime.utcnow()
+        for measurement in run.measurements:
+            measurement.deleted_at = datetime.utcnow()
+    for media in project.media_files:
+        media.deleted_at = datetime.utcnow()
+    for crack in project.crack_records:
+        crack.deleted_at = datetime.utcnow()
+    log_action(db, "delete_soft", "project", project.project_id, project.project_id, f"软删除项目 {project.project_name}")
     db.commit()
-    return {"ok": True, "action": "permanently_deleted"}
+    return {"ok": True, "action": "soft_deleted", "message": "项目已移至回收站，可联系管理员恢复"}
 
 
 @router.get("/{project_id}/points")

@@ -45,16 +45,29 @@ export function ProjectDetailPage() {
   const [component, setComponent] = useState('');
   const [status, setStatus] = useState('');
   const [abnormal, setAbnormal] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  const load = () => {
-    api.get<Project>(`/api/projects/${projectId}`).then((data) => {
-      setProject(data);
-      setProjectForm(toProjectForm(data));
-    });
-    api.get<Point[]>(`/api/projects/${projectId}/points`).then(setPoints);
+  const load = (): Promise<void> => {
+    setLoading(true);
+    setError('');
+    return Promise.all([
+      api.get<Project>(`/api/projects/${projectId}`),
+      api.get<Point[]>(`/api/projects/${projectId}/points`),
+    ])
+      .then(([projectData, pointsData]) => {
+        setProject(projectData);
+        setProjectForm(toProjectForm(projectData));
+        setPoints(pointsData);
+        setLoading(false);
+      })
+      .catch((err) => {
+        setError((err as Error).message || '加载项目数据失败');
+        setLoading(false);
+      });
   };
 
-  useEffect(load, [projectId]);
+  useEffect(() => { load(); }, [projectId]);
 
   const components = useMemo(() => Array.from(new Set(points.map((item) => item.component).filter(Boolean))) as string[], [points]);
   const filtered = points.filter((point) => {
@@ -67,7 +80,39 @@ export function ProjectDetailPage() {
     );
   });
 
-  if (!project) return <div className="empty">加载中...</div>;
+  if (loading) {
+    return (
+      <section>
+        <div className="page-head">
+          <div>
+            <h1>项目详情</h1>
+            <p>正在加载项目数据…</p>
+          </div>
+        </div>
+        <div className="chart chart-loading" style={{ height: 360 }}>
+          <div className="chart-loading-spinner" />
+          <span>项目数据加载中…</span>
+        </div>
+      </section>
+    );
+  }
+
+  if (error) {
+    return (
+      <section>
+        <div className="page-head">
+          <div>
+            <h1>项目详情</h1>
+            <p>加载项目数据时出错</p>
+          </div>
+        </div>
+        <div className="alert danger">{error}</div>
+        <button className="button" onClick={load}>重试</button>
+      </section>
+    );
+  }
+
+  if (!project) return <div className="empty">项目不存在</div>;
 
   const hasUnsavedProjectChanges = !isSameProjectForm(projectForm, toProjectForm(project));
 
