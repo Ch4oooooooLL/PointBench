@@ -373,6 +373,13 @@ function Run-Preflight {
         -Arguments '/c npm ls vite @vitejs/plugin-react react react-dom --depth=0' `
         -WorkingDirectory (Join-Path $root 'frontend') `
         -LogPath $frontendLog
+
+    Invoke-DiagnosticCommand -Name 'vite-direct-check' `
+        -FilePath 'cmd.exe' `
+        -Arguments '/c node .\node_modules\vite\bin\vite.js --version' `
+        -WorkingDirectory (Join-Path $root 'frontend') `
+        -LogPath $frontendLog `
+        -Required
 }
 
 try {
@@ -416,8 +423,8 @@ try {
         'set NODE_OPTIONS=--trace-uncaught --trace-warnings',
         ('cd /d "{0}"' -f $frontendDir),
         ('echo cwd=%CD% >> "{0}"' -f $frontendLog),
-        ('echo command=npm run dev -- --clearScreen false >> "{0}"' -f $frontendLog),
-        ('npm run dev -- --clearScreen false >> "{0}" 2>&1' -f $frontendLog),
+        ('echo command=node .\node_modules\vite\bin\vite.js --host 0.0.0.0 --clearScreen false >> "{0}"' -f $frontendLog),
+        ('node .\node_modules\vite\bin\vite.js --host 0.0.0.0 --clearScreen false >> "{0}" 2>&1' -f $frontendLog),
         ('echo frontend_exit_code=%ERRORLEVEL% >> "{0}"' -f $frontendLog),
         'exit /b %ERRORLEVEL%'
     )
