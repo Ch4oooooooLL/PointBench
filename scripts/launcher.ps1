@@ -35,22 +35,35 @@ function Write-LauncherLog {
 function Write-ExceptionLog {
     param(
         [string]$Title,
-        [System.Management.Automation.ErrorRecord]$ErrorRecord,
+        [object]$Record,
         [string]$Path = $launcherLog
     )
 
     Add-Content -Path $Path -Value '' -Encoding UTF8
     Add-Content -Path $Path -Value ("===== {0} =====" -f $Title) -Encoding UTF8
     Add-Content -Path $Path -Value ("time={0}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) -Encoding UTF8
-    Add-Content -Path $Path -Value ("exception_type={0}" -f $ErrorRecord.Exception.GetType().FullName) -Encoding UTF8
-    Add-Content -Path $Path -Value ("message={0}" -f $ErrorRecord.Exception.Message) -Encoding UTF8
-    Add-Content -Path $Path -Value ("script_stack_trace={0}" -f $ErrorRecord.ScriptStackTrace) -Encoding UTF8
-    if ($ErrorRecord.InvocationInfo) {
-        Add-Content -Path $Path -Value ("position={0}" -f $ErrorRecord.InvocationInfo.PositionMessage) -Encoding UTF8
+
+    if ($null -eq $Record) {
+        Add-Content -Path $Path -Value 'message=<null error record>' -Encoding UTF8
+        return
     }
-    if ($ErrorRecord.Exception.StackTrace) {
+
+    $exception = $Record.Exception
+    if ($exception) {
+        Add-Content -Path $Path -Value ("exception_type={0}" -f $exception.GetType().FullName) -Encoding UTF8
+        Add-Content -Path $Path -Value ("message={0}" -f $exception.Message) -Encoding UTF8
+    } else {
+        Add-Content -Path $Path -Value ("message={0}" -f $Record.ToString()) -Encoding UTF8
+    }
+    if ($Record.ScriptStackTrace) {
+        Add-Content -Path $Path -Value ("script_stack_trace={0}" -f $Record.ScriptStackTrace) -Encoding UTF8
+    }
+    if ($Record.InvocationInfo) {
+        Add-Content -Path $Path -Value ("position={0}" -f $Record.InvocationInfo.PositionMessage) -Encoding UTF8
+    }
+    if ($exception -and $exception.StackTrace) {
         Add-Content -Path $Path -Value 'exception_stack_trace=' -Encoding UTF8
-        Add-Content -Path $Path -Value $ErrorRecord.Exception.StackTrace -Encoding UTF8
+        Add-Content -Path $Path -Value $exception.StackTrace -Encoding UTF8
     }
 }
 
@@ -177,7 +190,7 @@ function Invoke-DiagnosticCommand {
         }
     } catch {
         Add-Content -Path $LogPath -Value ("diagnostic_exception={0}" -f $_.Exception.Message) -Encoding UTF8
-        Write-ExceptionLog -Title "diagnostic_exception: $Name" -ErrorRecord $_ -Path $LogPath
+        Write-ExceptionLog -Title "diagnostic_exception: $Name" -Record $_ -Path $LogPath
         Write-LauncherLog "Diagnostic exception: $Name $($_.Exception.Message)"
         if ($Required) {
             throw
@@ -189,7 +202,11 @@ function Stop-ProcessTree {
     param([System.Diagnostics.Process]$Process)
 
     if ($Process -and -not $Process.HasExited) {
-        & taskkill /PID $Process.Id /T /F 2>$null
+        try {
+            & taskkill /PID $Process.Id /T /F 2>$null
+        } catch {
+            Write-LauncherLog ("Failed to stop process tree PID={0}: {1}" -f $Process.Id, $_.Exception.Message)
+        }
     }
 }
 
@@ -222,6 +239,25 @@ function Start-CmdScript {
     return $proc
 }
 
+function Wait-UntilProcessExit {
+    param(
+        [System.Diagnostics.Process]$BackendProcess,
+        [System.Diagnostics.Process]$FrontendProcess
+    )
+
+    while (-not $BackendProcess.HasExited -and -not $FrontendProcess.HasExited) {
+        Write-AllNewLogs
+        Start-Sleep -Seconds 1
+    }
+    Write-AllNewLogs
+    $backendExit = if ($BackendProcess.HasExited) { $BackendProcess.ExitCode } else { 'running' }
+    $frontendExit = if ($FrontendProcess.HasExited) { $FrontendProcess.ExitCode } else { 'running' }
+    Write-FailureSummary "Process exited. Backend=$backendExit Frontend=$frontendExit"
+    Stop-ProcessTree $BackendProcess
+    Stop-ProcessTree $FrontendProcess
+    exit 1
+}
+
 function Wait-HttpReady {
     param(
         [string]$Name,
@@ -231,7 +267,7 @@ function Wait-HttpReady {
         [int]$TimeoutSeconds = 30
     )
 
-    Write-LauncherLog "Waiting for $Name: $Url"
+    Write-LauncherLog ("Waiting for {0}: {1}" -f $Name, $Url)
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $lastError = $null
     while ((Get-Date) -lt $deadline) {
@@ -327,28 +363,28 @@ try {
 
     Set-Content -Path $backendCmd -Encoding ASCII -Value @(
         '@echo off',
-        'echo ===== backend process bootstrap =====',
-        'echo time=%DATE% %TIME%',
+        ('echo ===== backend process bootstrap ===== >> "{0}"' -f $backendLog),
+        ('echo time=%DATE% %TIME% >> "{0}"' -f $backendLog),
         'set PYTHONUNBUFFERED=1',
         'set PYTHONIOENCODING=utf-8',
         'set PYTHONFAULTHANDLER=1',
         'set POINTBENCH_LOG_LEVEL=INFO',
         ('cd /d "{0}"' -f $backendDir),
-        'echo cwd=%CD%',
-        ('echo python="{0}"' -f $pythonExe),
-        ('echo command="{0}" -X faulthandler -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level info --access-log' -f $pythonExe),
+        ('echo cwd=%CD% >> "{0}"' -f $backendLog),
+        ('echo python="{0}" >> "{1}"' -f $pythonExe, $backendLog),
+        ('echo command="{0}" -X faulthandler -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level info --access-log >> "{1}"' -f $pythonExe, $backendLog),
         ('"{0}" -X faulthandler -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level info --access-log >> "{1}" 2>&1' -f $pythonExe, $backendLog),
         ('echo backend_exit_code=%ERRORLEVEL% >> "{0}"' -f $backendLog),
         'exit /b %ERRORLEVEL%'
     )
     Set-Content -Path $frontendCmd -Encoding ASCII -Value @(
         '@echo off',
-        'echo ===== frontend process bootstrap =====',
-        'echo time=%DATE% %TIME%',
+        ('echo ===== frontend process bootstrap ===== >> "{0}"' -f $frontendLog),
+        ('echo time=%DATE% %TIME% >> "{0}"' -f $frontendLog),
         'set NODE_OPTIONS=--trace-uncaught --trace-warnings',
         ('cd /d "{0}"' -f $frontendDir),
-        'echo cwd=%CD%',
-        'echo command=npm run dev -- --clearScreen false',
+        ('echo cwd=%CD% >> "{0}"' -f $frontendLog),
+        ('echo command=npm run dev -- --clearScreen false >> "{0}"' -f $frontendLog),
         ('npm run dev -- --clearScreen false >> "{0}" 2>&1' -f $frontendLog),
         ('echo frontend_exit_code=%ERRORLEVEL% >> "{0}"' -f $frontendLog),
         'exit /b %ERRORLEVEL%'
@@ -374,27 +410,28 @@ try {
         exit 1
     }
 
-    Start-Process 'http://localhost:5173'
+    try {
+        Start-Process 'http://localhost:5173'
+    } catch {
+        Write-ExceptionLog -Title 'open_browser_failed' -Record $_ -Path $launcherLog
+        Write-LauncherLog "Failed to open browser automatically: $($_.Exception.Message)"
+    }
 
     if ($ShowLogs) {
         Write-Host ''
         Write-Host 'PointBench is running. Close this window or press Ctrl+C to stop backend and frontend.'
         Write-Host ''
-        while (-not $backendProc.HasExited -and -not $frontendProc.HasExited) {
-            Write-AllNewLogs
-            Start-Sleep -Seconds 1
-        }
-        Write-AllNewLogs
-        $backendExit = if ($backendProc.HasExited) { $backendProc.ExitCode } else { 'running' }
-        $frontendExit = if ($frontendProc.HasExited) { $frontendProc.ExitCode } else { 'running' }
-        Write-FailureSummary "Process exited. Backend=$backendExit Frontend=$frontendExit"
-        Stop-ProcessTree $backendProc
-        Stop-ProcessTree $frontendProc
-        exit 1
+        Wait-UntilProcessExit -BackendProcess $backendProc -FrontendProcess $frontendProc
     }
 
-    Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName System.Drawing
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        Add-Type -AssemblyName System.Drawing
+    } catch {
+        Write-ExceptionLog -Title 'tray_initialization_failed' -Record $_ -Path $launcherLog
+        Write-LauncherLog "Tray UI is unavailable; continuing without tray icon."
+        Wait-UntilProcessExit -BackendProcess $backendProc -FrontendProcess $frontendProc
+    }
 
     $trayIcon = New-Object System.Windows.Forms.NotifyIcon
     $trayIcon.Icon = [System.Drawing.SystemIcons]::Application
@@ -436,7 +473,7 @@ try {
     Stop-ProcessTree $frontendProc
 } catch {
     Write-LauncherLog "Unhandled launcher error: $($_.Exception.Message)"
-    Write-ExceptionLog -Title 'unhandled_launcher_error' -ErrorRecord $_ -Path $launcherLog
+    Write-ExceptionLog -Title 'unhandled_launcher_error' -Record $_ -Path $launcherLog
     Write-FailureSummary "Unhandled launcher error: $($_.Exception.Message)"
     Stop-ProcessTree $backendProc
     Stop-ProcessTree $frontendProc
