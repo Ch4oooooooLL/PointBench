@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app import models
 from app.database import get_db
 from app.schemas import DewesoftImportOut
+from app.services.analysis_service import refresh_point_abnormal_flags
 from app.services.file_service import resolve_stored_path
 from app.services.dewesoft_service import import_dewesoft_file, save_dewesoft_upload
 
@@ -56,39 +57,27 @@ def get_dewesoft_import(import_id: int, db: Session = Depends(get_db)) -> Deweso
 @router.delete("/imports/{import_id}")
 def delete_dewesoft_import(
     import_id: int,
-    permanent: bool = Query(False, description="永久删除（同时删除关联测量数据和文件）"),
     db: Session = Depends(get_db),
 ) -> dict:
-    """删除 Dewesoft 导入记录。默认软删除（标记为 disabled），数据仍参与趋势分析。
-
-    设置 permanent=true 可永久删除记录、关联测量数据和原始文件。
-    """
+    """删除 Dewesoft 导入记录、关联测量数据和原始文件。"""
     import_job = db.get(models.DewesoftImport, import_id)
     if not import_job:
         raise HTTPException(status_code=404, detail="Dewesoft 导入记录不存在")
 
-    if permanent:
-        # 永久删除：清理关联的测量数据和文件
-        stored = resolve_stored_path(import_job.stored_path) if import_job.stored_path else None
-        # 删除关联的 DewesoftChannel 和 MeasurementRecord
-        for channel in import_job.channels:
-            if channel.measurement_id:
-                measurement = db.get(models.MeasurementRecord, channel.measurement_id)
-                if measurement:
-                    db.delete(measurement)
-            db.delete(channel)
-        db.delete(import_job)
-        db.commit()
-        if stored and stored.exists():
-            stored.unlink()
-        return {"ok": True, "action": "permanently_deleted"}
-
-    # 软删除：标记为 disabled
-    import_job.status = "disabled"
-    import_job.message = (import_job.message or "") + "；已禁用，数据仍保留在趋势分析中"
+    stored = resolve_stored_path(import_job.stored_path) if import_job.stored_path else None
+    point_ids: set[int] = set()
+    for channel in import_job.channels:
+        if channel.measurement_id:
+            measurement = db.get(models.MeasurementRecord, channel.measurement_id)
+            if measurement:
+                point_ids.add(measurement.point_db_id)
+                db.delete(measurement)
+        db.delete(channel)
+    db.delete(import_job)
+    db.flush()
+    for point_id in point_ids:
+        refresh_point_abnormal_flags(db, point_id)
     db.commit()
-    return {
-        "ok": True,
-        "action": "disabled",
-        "message": "导入记录已禁用。关联的测量数据仍保留。如需彻底删除请使用 permanent=true",
-    }
+    if stored and stored.exists():
+        stored.unlink()
+    return {"ok": True, "action": "permanently_deleted"}

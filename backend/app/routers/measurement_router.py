@@ -1,7 +1,6 @@
 import json
 import uuid
 from collections import Counter, defaultdict
-from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -301,27 +300,17 @@ def update_test_run(run_id: int, payload: TestRunUpdate, db: Session = Depends(g
 
 
 @router.delete("/api/test-runs/{run_id}")
-def delete_test_run(run_id: int, permanent: bool = False, db: Session = Depends(get_db)) -> dict:
+def delete_test_run(run_id: int, db: Session = Depends(get_db)) -> dict:
     run = db.get(models.TestRun, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="测试轮次不存在")
     point_ids = [record.point_db_id for record in run.measurements]
-    if permanent:
-        db.delete(run)
-        db.flush()
-        for point_id in set(point_ids):
-            refresh_point_abnormal_flags(db, point_id)
-        db.commit()
-        return {"ok": True, "action": "permanently_deleted"}
-    # 软删除：标记测试轮次及其测量记录
-    run.deleted_at = datetime.utcnow()
-    for record in run.measurements:
-        record.deleted_at = datetime.utcnow()
+    db.delete(run)
     db.flush()
     for point_id in set(point_ids):
         refresh_point_abnormal_flags(db, point_id)
     db.commit()
-    return {"ok": True, "action": "soft_deleted"}
+    return {"ok": True, "action": "permanently_deleted"}
 
 
 @router.post("/api/test-runs/{run_id}/measurements", response_model=list[MeasurementOut])
@@ -520,18 +509,15 @@ def save_point_measurement_rows(
 
 
 @router.delete("/api/points/{point_id}/measurement-rows/{measurement_id}")
-def delete_point_measurement_row(point_id: int, measurement_id: int, permanent: bool = False, db: Session = Depends(get_db)) -> dict:
+def delete_point_measurement_row(point_id: int, measurement_id: int, db: Session = Depends(get_db)) -> dict:
     record = db.get(models.MeasurementRecord, measurement_id)
     if not record or record.point_db_id != point_id:
         raise HTTPException(status_code=404, detail="测量记录不存在")
-    if permanent:
-        db.delete(record)
-    else:
-        record.deleted_at = datetime.utcnow()
+    db.delete(record)
     db.flush()
     refresh_point_abnormal_flags(db, point_id)
     db.commit()
-    return {"ok": True, "action": "permanently_deleted" if permanent else "soft_deleted"}
+    return {"ok": True, "action": "permanently_deleted"}
 
 
 @router.put("/api/measurements/{measurement_id}", response_model=MeasurementOut)
@@ -548,19 +534,16 @@ def update_measurement(measurement_id: int, payload: MeasurementUpdate, db: Sess
 
 
 @router.delete("/api/measurements/{measurement_id}")
-def delete_measurement(measurement_id: int, permanent: bool = False, db: Session = Depends(get_db)) -> dict:
+def delete_measurement(measurement_id: int, db: Session = Depends(get_db)) -> dict:
     record = db.get(models.MeasurementRecord, measurement_id)
     if not record:
         raise HTTPException(status_code=404, detail="测量记录不存在")
     point_id = record.point_db_id
-    if permanent:
-        db.delete(record)
-    else:
-        record.deleted_at = datetime.utcnow()
+    db.delete(record)
     db.flush()
     refresh_point_abnormal_flags(db, point_id)
     db.commit()
-    return {"ok": True, "action": "permanently_deleted" if permanent else "soft_deleted"}
+    return {"ok": True, "action": "permanently_deleted"}
 
 
 # ── XLSX 导入：预检 + 确认 两步流程 ────────────────────────────────────────

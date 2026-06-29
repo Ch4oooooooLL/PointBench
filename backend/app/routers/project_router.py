@@ -5,7 +5,6 @@ import shutil
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import FileResponse
-from datetime import datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -109,37 +108,16 @@ def update_project(project_id: int, payload: ProjectUpdate, db: Session = Depend
 
 
 @router.delete("/{project_id}")
-def delete_project(project_id: int, permanent: bool = True, db: Session = Depends(get_db)) -> dict:
-    """删除项目。测试阶段默认彻底删除；permanent=false 保留软删除分支。"""
+def delete_project(project_id: int, db: Session = Depends(get_db)) -> dict:
+    """删除项目。测试阶段直接彻底删除。"""
     project = db.get(models.Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
 
-    if permanent:
-        purge_project(db, project)
-        log_action(db, "delete_permanent", "project", project.project_id, project.project_id, f"永久删除项目 {project.project_name}")
-        db.commit()
-        return {"ok": True, "action": "permanently_deleted"}
-
-    # 软删除：标记项目及其关联数据
-    project.deleted_at = datetime.utcnow()
-    for point in project.points:
-        point.deleted_at = datetime.utcnow()
-        for media in point.media_files:
-            media.deleted_at = datetime.utcnow()
-        for crack in point.crack_records:
-            crack.deleted_at = datetime.utcnow()
-    for run in project.test_runs:
-        run.deleted_at = datetime.utcnow()
-        for measurement in run.measurements:
-            measurement.deleted_at = datetime.utcnow()
-    for media in project.media_files:
-        media.deleted_at = datetime.utcnow()
-    for crack in project.crack_records:
-        crack.deleted_at = datetime.utcnow()
-    log_action(db, "delete_soft", "project", project.project_id, project.project_id, f"软删除项目 {project.project_name}")
+    purge_project(db, project)
+    log_action(db, "delete_permanent", "project", project.project_id, project.project_id, f"永久删除项目 {project.project_name}")
     db.commit()
-    return {"ok": True, "action": "soft_deleted", "message": "项目已移至回收站，可联系管理员恢复"}
+    return {"ok": True, "action": "permanently_deleted"}
 
 
 @router.get("/{project_id}/points")

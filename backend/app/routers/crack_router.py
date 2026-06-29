@@ -1,6 +1,5 @@
 import re
 import uuid
-from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -202,17 +201,13 @@ def get_crack_record_image(record_id: int, db: Session = Depends(get_db)) -> Fil
 
 
 @router.delete("/crack-records/{record_id}")
-def delete_crack_record(record_id: int, permanent: bool = False, db: Session = Depends(get_db)) -> dict:
+def delete_crack_record(record_id: int, db: Session = Depends(get_db)) -> dict:
     record = db.get(models.CrackRecord, record_id)
     if not record:
         raise HTTPException(status_code=404, detail="裂纹记录不存在")
-    if permanent:
-        stored = resolve_stored_path(record.stored_path)
-        db.delete(record)
-        db.commit()
-        if stored.exists():
-            stored.unlink()
-        return {"ok": True, "action": "permanently_deleted"}
-    record.deleted_at = datetime.utcnow()
+    stored = resolve_stored_path(record.stored_path)
+    db.delete(record)
     db.commit()
-    return {"ok": True, "action": "soft_deleted"}
+    if stored.exists():
+        stored.unlink()
+    return {"ok": True, "action": "permanently_deleted"}
