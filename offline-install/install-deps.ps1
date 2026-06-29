@@ -431,17 +431,7 @@ function Install-PythonDeps {
     $pipExit = Invoke-LoggedCommand -FilePath $PythonExe -ArgumentList $pipArgs
 
     if ($pipExit -ne 0) {
-        Write-Host ''
-        Write-Host '  ========================================'
-        Write-Host '  NOTE: Some packages failed to install'
-        Write-Host '  ========================================'
-        Write-Host ''
-        Write-Host '  If dwdatareader failed, this can be normal.'
-        Write-Host '  It requires the DWDataReaderLib native C++ library,'
-        Write-Host '  which must be downloaded from www.dewesoft.com separately.'
-        Write-Host ''
-        Write-Host '  CSV / TXT / Excel imports are NOT affected.'
-        Write-Host ''
+        throw "Python dependency installation failed. The offline pip package set is incomplete or incompatible with Python 3.14. Regenerate offline-install on an internet-connected PC."
     } else {
         Write-Host ''
         Write-Info '[OK] All Python packages installed successfully'
@@ -479,14 +469,21 @@ function Test-Import {
     param(
         [string]$PythonExe,
         [string]$ModuleName,
-        [string]$DisplayName
+        [string]$DisplayName,
+        [switch]$Required
     )
 
-    & $PythonExe -c "import $ModuleName" 2>$null
+    $output = & $PythonExe -c "import $ModuleName" 2>&1
     if ($LASTEXITCODE -eq 0) {
         Write-Host ("    {0,-17} OK" -f $DisplayName)
     } else {
         Write-Host ("    {0,-17} FAIL" -f $DisplayName)
+        if ($output) {
+            Write-Host ("      {0}" -f ($output -join [Environment]::NewLine))
+        }
+        if ($Required) {
+            throw "Required Python module failed to import: $ModuleName"
+        }
     }
 }
 
@@ -506,11 +503,16 @@ function Verify-Install {
     } else {
         Write-Host '    Python ........... FAIL'
     }
-    Test-Import -PythonExe $PythonExe -ModuleName 'fastapi' -DisplayName 'fastapi'
-    Test-Import -PythonExe $PythonExe -ModuleName 'sqlalchemy' -DisplayName 'sqlalchemy'
-    Test-Import -PythonExe $PythonExe -ModuleName 'pydantic' -DisplayName 'pydantic'
-    Test-Import -PythonExe $PythonExe -ModuleName 'openpyxl' -DisplayName 'openpyxl'
-    Test-Import -PythonExe $PythonExe -ModuleName 'uvicorn' -DisplayName 'uvicorn'
+    Test-Import -PythonExe $PythonExe -ModuleName 'fastapi' -DisplayName 'fastapi' -Required
+    Test-Import -PythonExe $PythonExe -ModuleName 'starlette' -DisplayName 'starlette' -Required
+    Test-Import -PythonExe $PythonExe -ModuleName 'uvicorn' -DisplayName 'uvicorn' -Required
+    Test-Import -PythonExe $PythonExe -ModuleName 'sqlalchemy' -DisplayName 'sqlalchemy' -Required
+    Test-Import -PythonExe $PythonExe -ModuleName 'alembic' -DisplayName 'alembic' -Required
+    Test-Import -PythonExe $PythonExe -ModuleName 'pydantic' -DisplayName 'pydantic' -Required
+    Test-Import -PythonExe $PythonExe -ModuleName 'jose' -DisplayName 'python-jose' -Required
+    Test-Import -PythonExe $PythonExe -ModuleName 'multipart' -DisplayName 'multipart' -Required
+    Test-Import -PythonExe $PythonExe -ModuleName 'openpyxl' -DisplayName 'openpyxl' -Required
+    Test-Import -PythonExe $PythonExe -ModuleName 'dwdatareader' -DisplayName 'dwdatareader' -Required
 
     Write-Host ''
     Write-Host '  Node.js environment:'
@@ -533,6 +535,20 @@ function Verify-Install {
         Write-Host '    node_modules ..... OK'
     } else {
         Write-Host '    node_modules ..... FAIL'
+        throw 'frontend\node_modules is missing after installation.'
+    }
+    $viteEntry = Join-Path $ProjectDir 'frontend\node_modules\vite\bin\vite.js'
+    if (Test-Path $viteEntry) {
+        & $nodeExe $viteEntry --version >$null 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host '    vite direct ..... OK'
+        } else {
+            Write-Host '    vite direct ..... FAIL'
+            throw 'Vite exists but cannot be executed through node_modules\vite\bin\vite.js.'
+        }
+    } else {
+        Write-Host '    vite direct ..... FAIL'
+        throw 'Missing frontend dependency: node_modules\vite\bin\vite.js'
     }
     Write-Host ''
 }

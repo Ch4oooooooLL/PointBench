@@ -115,10 +115,17 @@ echo   [3/4] Downloading Python packages
 echo ========================================
 echo.
 
-pip download -r "%PROJECT_DIR%\backend\requirements.txt" -d "%PIP_DIR%"
+python -m pip download ^
+    --only-binary=:all: ^
+    --platform win_amd64 ^
+    --python-version 3.14 ^
+    --implementation cp ^
+    --abi cp314 ^
+    -r "%PROJECT_DIR%\backend\requirements.txt" ^
+    -d "%PIP_DIR%"
 if %ERRORLEVEL% NEQ 0 (
     echo   [FAIL] pip download failed
-    echo   Please make sure pip is installed and working
+    echo   Please make sure pip is installed and that all requirements provide Windows Python 3.14 wheels.
     pause
     exit /b 1
 )
