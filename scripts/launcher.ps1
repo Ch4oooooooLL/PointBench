@@ -13,10 +13,30 @@ param(
 # ============================================================
 
 $root = $ProjectDir.TrimEnd('\', '/', '"', ' ')
+$logDir = Join-Path $root 'logs'
+New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+$launcherLog = Join-Path $logDir 'launcher.log'
+$backendLog = Join-Path $logDir 'backend.log'
+$frontendLog = Join-Path $logDir 'frontend.log'
+
+Set-Content -Path $launcherLog -Value ("[{0}] Starting launcher. ShowLogs={1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $ShowLogs) -Encoding UTF8
+Set-Content -Path $backendLog -Value ("[{0}] Backend log started." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) -Encoding UTF8
+Set-Content -Path $frontendLog -Value ("[{0}] Frontend log started." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) -Encoding UTF8
+
+function Write-LauncherLog {
+    param([string]$Text)
+    Add-Content -Path $launcherLog -Value ("[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Text) -Encoding UTF8
+}
 
 # --- Helper: start a hidden process ---
 function Start-HiddenProcess {
-    param([string]$FilePath, [string]$Arguments, [string]$WorkingDirectory)
+    param(
+        [string]$Name,
+        [string]$FilePath,
+        [string]$Arguments,
+        [string]$WorkingDirectory,
+        [string]$LogPath
+    )
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $FilePath
     $psi.Arguments = $Arguments
@@ -24,7 +44,30 @@ function Start-HiddenProcess {
     $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
     $psi.CreateNoWindow = $true
     $psi.UseShellExecute = $false
-    return [System.Diagnostics.Process]::Start($psi)
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+
+    $proc = New-Object System.Diagnostics.Process
+    $proc.StartInfo = $psi
+
+    $label = $Name
+    $path = $LogPath
+    $proc.add_OutputDataReceived({
+        if ($EventArgs.Data) {
+            Add-Content -Path $path -Value ("[{0}] {1}" -f $label, $EventArgs.Data) -Encoding UTF8
+        }
+    }.GetNewClosure())
+    $proc.add_ErrorDataReceived({
+        if ($EventArgs.Data) {
+            Add-Content -Path $path -Value ("[{0}] {1}" -f $label, $EventArgs.Data) -Encoding UTF8
+        }
+    }.GetNewClosure())
+
+    [void]$proc.Start()
+    $proc.BeginOutputReadLine()
+    $proc.BeginErrorReadLine()
+    Write-LauncherLog "$Name started. PID=$($proc.Id)"
+    return $proc
 }
 
 function Start-LoggedProcess {
@@ -32,7 +75,8 @@ function Start-LoggedProcess {
         [string]$Name,
         [string]$FilePath,
         [string]$Arguments,
-        [string]$WorkingDirectory
+        [string]$WorkingDirectory,
+        [string]$LogPath
     )
 
     $psi = New-Object System.Diagnostics.ProcessStartInfo
@@ -48,13 +92,16 @@ function Start-LoggedProcess {
     $proc.StartInfo = $psi
 
     $label = $Name
+    $path = $LogPath
     $proc.add_OutputDataReceived({
         if ($EventArgs.Data) {
+            Add-Content -Path $path -Value ("[{0}] {1}" -f $label, $EventArgs.Data) -Encoding UTF8
             Write-Host "[$label] $($EventArgs.Data)"
         }
     }.GetNewClosure())
     $proc.add_ErrorDataReceived({
         if ($EventArgs.Data) {
+            Add-Content -Path $path -Value ("[{0}] {1}" -f $label, $EventArgs.Data) -Encoding UTF8
             Write-Host "[$label] $($EventArgs.Data)"
         }
     }.GetNewClosure())
@@ -62,6 +109,7 @@ function Start-LoggedProcess {
     [void]$proc.Start()
     $proc.BeginOutputReadLine()
     $proc.BeginErrorReadLine()
+    Write-LauncherLog "$Name started. PID=$($proc.Id)"
     return $proc
 }
 
@@ -80,6 +128,7 @@ if (Test-Path $venvPython) {
 } else {
     $pythonExe = 'python'
 }
+Write-LauncherLog "Python executable: $pythonExe"
 
 # --- Release occupied ports (ignore errors) ---
 $null = & netstat -ano 2>$null | Select-String ':8000.*LISTENING' | ForEach-Object {
@@ -94,18 +143,21 @@ $null = & netstat -ano 2>$null | Select-String ':5173.*LISTENING' | ForEach-Obje
 if ($ShowLogs) {
     Write-Host 'Starting PointBench...'
     Write-Host "Project: $root"
+    Write-Host "Logs:    $logDir"
     Write-Host ''
 
     $backendArgs = '-m uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level info'
     $backendProc = Start-LoggedProcess -Name 'backend' `
         -FilePath $pythonExe `
         -Arguments $backendArgs `
-        -WorkingDirectory (Join-Path $root 'backend')
+        -WorkingDirectory (Join-Path $root 'backend') `
+        -LogPath $backendLog
 
     $frontendProc = Start-LoggedProcess -Name 'frontend' `
         -FilePath 'cmd.exe' `
         -Arguments '/c npm run dev' `
-        -WorkingDirectory (Join-Path $root 'frontend')
+        -WorkingDirectory (Join-Path $root 'frontend') `
+        -LogPath $frontendLog
 
     Start-Sleep -Seconds 4
     Start-Process 'http://localhost:5173'
@@ -115,9 +167,19 @@ if ($ShowLogs) {
     Write-Host ''
 
     try {
-        while (($backendProc -and -not $backendProc.HasExited) -or ($frontendProc -and -not $frontendProc.HasExited)) {
+        while ($backendProc -and $frontendProc -and -not $backendProc.HasExited -and -not $frontendProc.HasExited) {
             Start-Sleep -Seconds 1
         }
+
+        $backendExit = if ($backendProc.HasExited) { $backendProc.ExitCode } else { 'running' }
+        $frontendExit = if ($frontendProc.HasExited) { $frontendProc.ExitCode } else { 'running' }
+        $exitText = "Process exited. Backend=$backendExit Frontend=$frontendExit"
+        Write-LauncherLog $exitText
+        Write-Host ''
+        Write-Host $exitText
+        Write-Host "Backend log:  $backendLog"
+        Write-Host "Frontend log: $frontendLog"
+        Write-Host "Launcher log: $launcherLog"
     } finally {
         Stop-ProcessTree $backendProc
         Stop-ProcessTree $frontendProc
@@ -128,14 +190,18 @@ if ($ShowLogs) {
 
 # --- Start backend (hidden, no window) ---
 $backendArgs = '-m uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level warning'
-$backendProc = Start-HiddenProcess -FilePath $pythonExe `
+$backendProc = Start-HiddenProcess -Name 'backend' `
+    -FilePath $pythonExe `
     -Arguments $backendArgs `
-    -WorkingDirectory (Join-Path $root 'backend')
+    -WorkingDirectory (Join-Path $root 'backend') `
+    -LogPath $backendLog
 
 # --- Start frontend (hidden, no window) ---
-$frontendProc = Start-HiddenProcess -FilePath 'cmd.exe' `
+$frontendProc = Start-HiddenProcess -Name 'frontend' `
+    -FilePath 'cmd.exe' `
     -Arguments '/c npm run dev' `
-    -WorkingDirectory (Join-Path $root 'frontend')
+    -WorkingDirectory (Join-Path $root 'frontend') `
+    -LogPath $frontendLog
 
 # --- Wait for servers to be ready ---
 Start-Sleep -Seconds 4

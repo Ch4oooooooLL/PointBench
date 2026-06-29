@@ -20,6 +20,7 @@ backend/storage/temp/*
 !backend/storage/temp/.gitkeep
 storage/
 outputs/
+logs/
 
 # Offline dependency packages (large files)
 offline-install/installers/
