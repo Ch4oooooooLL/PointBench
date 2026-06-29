@@ -179,3 +179,81 @@ export interface DewesoftImport {
   created_at: string;
   channels: DewesoftChannel[];
 }
+
+// ── XLSX 导入预览 / 确认类型 ──────────────────────────────────────────────
+
+export type XlsxRowStatus =
+  | 'new_measurement'
+  | 'existing_measurement'
+  | 'unknown_point'
+  | 'file_duplicate'
+  | 'invalid';
+
+export interface XlsxImportRowError {
+  row: number;
+  field?: string | null;
+  message: string;
+  severity: 'error' | 'warning';
+}
+
+export interface XlsxPreviewItem {
+  row_index: number;
+  cycle_count?: number | null;
+  point_id?: string | null;
+  point_name?: string | null;
+  run_name?: string | null;
+  test_time?: string | null;
+  max_strain_ue?: number | null;
+  min_strain_ue?: number | null;
+  status: XlsxRowStatus;
+  message?: string | null;
+  existing_max_strain_ue?: number | null;
+  existing_min_strain_ue?: number | null;
+  existing_run_name?: string | null;
+  incoming_max_strain_ue?: number | null;
+  incoming_min_strain_ue?: number | null;
+}
+
+export interface XlsxImportPreview {
+  preview_id: string;
+  filename: string;
+  total_rows: number;
+  valid_rows: number;
+  invalid_rows: number;
+  cycle_counts: number[];
+  new_run_count: number;
+  existing_run_count: number;
+  new_measurement_count: number;
+  existing_measurement_count: number;
+  will_update_count: number;
+  unknown_point_count: number;
+  file_duplicate_count: number;
+  warnings: XlsxImportRowError[];
+  errors: XlsxImportRowError[];
+  items: XlsxPreviewItem[];
+  can_confirm: boolean;
+}
+
+export type XlsxImportStrategy = 'append_only' | 'fill_missing' | 'overwrite' | 'strict';
+
+export interface XlsxImportConfirmRequest {
+  preview_id: string;
+  strategy: XlsxImportStrategy;
+  update_run_meta: boolean;
+  skip_unknown_points: boolean;
+  skip_file_duplicates: boolean;
+}
+
+export interface XlsxImportResult {
+  success: boolean;
+  strategy: string;
+  created_run_count: number;
+  created_measurement_count: number;
+  updated_measurement_count: number;
+  filled_missing_count: number;
+  skipped_existing_count: number;
+  skipped_invalid_count: number;
+  skipped_unknown_point_count: number;
+  skipped_file_duplicate_count: number;
+  message: string;
+}

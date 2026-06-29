@@ -498,42 +498,100 @@ class DewesoftImportOut(BaseModel):
 
 # ── XLSX 导入预览 / 确认 ──────────────────────────────────────────────────
 
+from enum import Enum
+
+
+class XlsxRowStatus(str, Enum):
+    """XLSX 行导入状态分类。"""
+    NEW_MEASUREMENT = "new_measurement"            # 新测量记录
+    EXISTING_MEASUREMENT = "existing_measurement"   # 已有测量记录（可更新/覆盖）
+    UNKNOWN_POINT = "unknown_point"                 # 点位不存在于当前项目
+    FILE_DUPLICATE = "file_duplicate"               # 文件内重复（同一 cycle_count + point_id）
+    INVALID = "invalid"                             # 无效行（缺少必要字段或数据错误）
+
+
+class XlsxImportStrategyEnum(str, Enum):
+    """XLSX 导入策略。
+
+    - append_only: 仅新增不存在的记录，已有记录跳过
+    - fill_missing: 新增不存在的记录；已有记录仅填补 NULL 字段
+    - overwrite: 新增不存在的记录；已有记录用非空字段覆盖
+    - strict: 存在任何已有记录/未知点位/重复/无效行则拒绝导入
+    """
+    APPEND_ONLY = "append_only"
+    FILL_MISSING = "fill_missing"
+    OVERWRITE = "overwrite"
+    STRICT = "strict"
+
+
 class XlsxImportRowError(BaseModel):
+    """单行校验错误/警告。"""
     row: int
-    field: str
+    field: str | None = None
     message: str
+    severity: str = "error"  # "error" | "warning"
+
+
+class XlsxPreviewItem(BaseModel):
+    """单行的预览信息，包含状态和对比数据。"""
+    row_index: int
+    cycle_count: int | None = None
+    point_id: str | None = None
+    point_name: str | None = None
+    run_name: str | None = None
+    test_time: str | None = None
+    max_strain_ue: float | None = None
+    min_strain_ue: float | None = None
+    status: XlsxRowStatus
+    message: str | None = None
+    # 已有记录值（用于前端对比展示）
+    existing_max_strain_ue: float | None = None
+    existing_min_strain_ue: float | None = None
+    existing_run_name: str | None = None
+    incoming_max_strain_ue: float | None = None
+    incoming_min_strain_ue: float | None = None
 
 
 class XlsxImportPreview(BaseModel):
-    temporary_import_id: str
+    """XLSX 导入预览完整报告。"""
+    preview_id: str
+    filename: str
     total_rows: int
     valid_rows: int
     invalid_rows: int
-    unmatched_points: list[str] = []
-    duplicate_cycle_in_file: list[int] = []
-    will_overwrite: bool = False
-    overwrite_count: int = 0
+    cycle_counts: list[int] = []
+    new_run_count: int = 0
+    existing_run_count: int = 0
+    new_measurement_count: int = 0
+    existing_measurement_count: int = 0
+    will_update_count: int = 0
+    unknown_point_count: int = 0
+    file_duplicate_count: int = 0
+    warnings: list[XlsxImportRowError] = []
     errors: list[XlsxImportRowError] = []
-    can_import: bool = False
-
-
-class XlsxImportStrategy:
-    ABORT = "abort"
-    SKIP_INVALID = "skip_invalid"
-    OVERWRITE = "overwrite"
-    APPEND_ONLY = "append_only"
+    items: list[XlsxPreviewItem] = []
+    can_confirm: bool = False
 
 
 class XlsxImportConfirmRequest(BaseModel):
-    temporary_import_id: str
-    strategy: str = Field(default="abort", pattern=r"^(abort|skip_invalid|overwrite|append_only)$")
+    """确认导入请求。"""
+    preview_id: str
+    strategy: XlsxImportStrategyEnum = XlsxImportStrategyEnum.APPEND_ONLY
+    update_run_meta: bool = False
+    skip_unknown_points: bool = False
+    skip_file_duplicates: bool = False
 
 
 class XlsxImportResult(BaseModel):
-    ok: bool
+    """导入结果统计。"""
+    success: bool
     strategy: str
-    run_count: int = 0
     created_run_count: int = 0
-    measurement_count: int = 0
-    skipped_rows: int = 0
-    overwritten_count: int = 0
+    created_measurement_count: int = 0
+    updated_measurement_count: int = 0
+    filled_missing_count: int = 0
+    skipped_existing_count: int = 0
+    skipped_invalid_count: int = 0
+    skipped_unknown_point_count: int = 0
+    skipped_file_duplicate_count: int = 0
+    message: str = ""
