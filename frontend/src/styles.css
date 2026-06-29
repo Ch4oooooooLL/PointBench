@@ -3187,6 +3187,8 @@ label {
 
 /* ── XLSX 导入预览升维与优化样式 ── */
 
+/* ── XLSX 导入预览升维与统一样式 ── */
+
 /* 1. 步骤向导指示器 (Step Wizard) */
 .import-wizard-steps {
   display: flex;
@@ -3224,14 +3226,14 @@ label {
 }
 
 .wizard-step.active {
-  color: var(--accent, #2563eb);
+  color: var(--primary);
   font-weight: 600;
 }
 
 .wizard-step.active .wizard-step-num {
-  background: var(--accent, #2563eb);
+  background: var(--primary);
   color: #fff;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15);
 }
 
 .wizard-step.completed {
@@ -3252,7 +3254,7 @@ label {
 }
 
 .wizard-step-divider.active {
-  background: #93c5fd;
+  background: var(--primary-border);
 }
 
 /* 2. 重构顶栏 Banner */
@@ -3278,13 +3280,13 @@ label {
   width: 44px;
   height: 44px;
   border-radius: 10px;
-  background: #eff6ff;
-  color: #2563eb;
+  background: var(--primary-light);
+  color: var(--primary);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  border: 1px solid #dbeafe;
+  border: 1px solid var(--primary-border);
 }
 
 .preview-file-details h3 {
@@ -3465,7 +3467,7 @@ label {
 
 .status-tab-btn.active {
   background: #ffffff;
-  color: var(--accent, #2563eb);
+  color: var(--primary);
   border-color: var(--border-color);
   font-weight: 600;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
@@ -3480,8 +3482,8 @@ label {
 }
 
 .status-tab-btn.active .status-tab-count {
-  background: #eff6ff;
-  color: #2563eb;
+  background: var(--primary-light);
+  color: var(--primary);
 }
 
 /* 5. 差异比对与表格调整 */
@@ -3527,14 +3529,14 @@ label {
 }
 
 .strategy-card-v2:hover {
-  border-color: #93c5fd;
+  border-color: var(--primary-border);
   background: #f8fafc;
 }
 
 .strategy-card-v2.selected {
-  border-color: #2563eb;
-  background: #eff6ff;
-  box-shadow: 0 0 0 1px #2563eb;
+  border-color: var(--primary);
+  background: var(--primary-light);
+  box-shadow: 0 0 0 1px var(--primary);
 }
 
 .strategy-card-icon {
@@ -3551,7 +3553,7 @@ label {
 }
 
 .strategy-card-v2.selected .strategy-card-icon {
-  background: #2563eb;
+  background: var(--primary);
   color: #fff;
 }
 
@@ -3777,6 +3779,7 @@ label {
   background: #fff;
   color: #334155;
 }
+
 
 
 
