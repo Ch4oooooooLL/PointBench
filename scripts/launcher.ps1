@@ -33,6 +33,64 @@ function Write-LauncherLog {
     Add-Content -Path $launcherLog -Value ("[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Text) -Encoding UTF8
 }
 
+trap {
+    Write-LauncherLog "Unhandled launcher error: $($_.Exception.Message)"
+    Write-LauncherLog "At: $($_.InvocationInfo.PositionMessage)"
+    if ($ShowLogs) {
+        Write-Host ''
+        Write-Host "Unhandled launcher error: $($_.Exception.Message)"
+        Write-Host "Launcher log: $launcherLog"
+        Write-Host "Backend log:  $backendLog"
+        Write-Host "Frontend log: $frontendLog"
+    }
+    exit 1
+}
+
+function Write-LogTail {
+    param(
+        [string]$Title,
+        [string]$Path,
+        [int]$Tail = 80,
+        [switch]$Console
+    )
+
+    Write-LauncherLog "===== $Title tail: $Path ====="
+    if (-not (Test-Path $Path)) {
+        Write-LauncherLog "$Title log is missing."
+        if ($Console) {
+            Write-Host "[$Title] log is missing: $Path"
+        }
+        return
+    }
+
+    $lines = Get-Content -Path $Path -Tail $Tail -ErrorAction SilentlyContinue
+    foreach ($line in $lines) {
+        Write-LauncherLog "$Title> $line"
+    }
+    if ($Console) {
+        Write-Host ''
+        Write-Host "===== $Title log tail ====="
+        foreach ($line in $lines) {
+            Write-Host $line
+        }
+    }
+}
+
+function Write-FailureSummary {
+    param([string]$Reason)
+
+    Write-LauncherLog "Startup failure: $Reason"
+    Write-LogTail -Title 'backend' -Path $backendLog -Console:$ShowLogs
+    Write-LogTail -Title 'frontend' -Path $frontendLog -Console:$ShowLogs
+    if ($ShowLogs) {
+        Write-Host ''
+        Write-Host "Startup failure: $Reason"
+        Write-Host "Launcher log: $launcherLog"
+        Write-Host "Backend log:  $backendLog"
+        Write-Host "Frontend log: $frontendLog"
+    }
+}
+
 function Invoke-DiagnosticCommand {
     param(
         [string]$Name,
@@ -226,6 +284,47 @@ function Stop-ProcessTree {
     }
 }
 
+function Wait-HttpReady {
+    param(
+        [string]$Name,
+        [string]$Url,
+        [System.Diagnostics.Process]$BackendProcess,
+        [System.Diagnostics.Process]$FrontendProcess,
+        [int]$TimeoutSeconds = 30
+    )
+
+    Write-LauncherLog "Waiting for $Name: $Url"
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $lastError = $null
+    while ((Get-Date) -lt $deadline) {
+        if ($BackendProcess -and $BackendProcess.HasExited) {
+            $reason = "Backend exited while waiting for $Name. ExitCode=$($BackendProcess.ExitCode)"
+            Write-FailureSummary $reason
+            return $false
+        }
+        if ($FrontendProcess -and $FrontendProcess.HasExited) {
+            $reason = "Frontend exited while waiting for $Name. ExitCode=$($FrontendProcess.ExitCode)"
+            Write-FailureSummary $reason
+            return $false
+        }
+
+        try {
+            $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2
+            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500) {
+                Write-LauncherLog "$Name is ready. StatusCode=$($response.StatusCode)"
+                return $true
+            }
+            $lastError = "HTTP $($response.StatusCode)"
+        } catch {
+            $lastError = $_.Exception.Message
+        }
+        Start-Sleep -Seconds 1
+    }
+
+    Write-FailureSummary "$Name did not become ready within ${TimeoutSeconds}s. LastError=$lastError"
+    return $false
+}
+
 # --- Detect Python (prefer .venv) ---
 $venvPython = Join-Path $root 'backend\.venv\Scripts\python.exe'
 if (Test-Path $venvPython) {
@@ -277,7 +376,17 @@ if ($ShowLogs) {
         -WorkingDirectory (Join-Path $root 'frontend') `
         -LogPath $frontendLog
 
-    Start-Sleep -Seconds 4
+    if (-not (Wait-HttpReady -Name 'backend health' -Url 'http://127.0.0.1:8000/api/health' -BackendProcess $backendProc -FrontendProcess $frontendProc -TimeoutSeconds 30)) {
+        Stop-ProcessTree $backendProc
+        Stop-ProcessTree $frontendProc
+        exit 1
+    }
+    if (-not (Wait-HttpReady -Name 'frontend' -Url 'http://127.0.0.1:5173/' -BackendProcess $backendProc -FrontendProcess $frontendProc -TimeoutSeconds 30)) {
+        Stop-ProcessTree $backendProc
+        Stop-ProcessTree $frontendProc
+        exit 1
+    }
+
     Start-Process 'http://localhost:5173'
 
     Write-Host ''
@@ -322,11 +431,15 @@ $frontendProc = Start-HiddenProcess -Name 'frontend' `
     -LogPath $frontendLog
 
 # --- Wait for servers to be ready ---
-Start-Sleep -Seconds 4
-if (($backendProc -and $backendProc.HasExited) -or ($frontendProc -and $frontendProc.HasExited)) {
-    $backendExit = if ($backendProc.HasExited) { $backendProc.ExitCode } else { 'running' }
-    $frontendExit = if ($frontendProc.HasExited) { $frontendProc.ExitCode } else { 'running' }
-    Write-LauncherLog "Process exited during startup. Backend=$backendExit Frontend=$frontendExit"
+if (-not (Wait-HttpReady -Name 'backend health' -Url 'http://127.0.0.1:8000/api/health' -BackendProcess $backendProc -FrontendProcess $frontendProc -TimeoutSeconds 30)) {
+    Stop-ProcessTree $backendProc
+    Stop-ProcessTree $frontendProc
+    exit 1
+}
+if (-not (Wait-HttpReady -Name 'frontend' -Url 'http://127.0.0.1:5173/' -BackendProcess $backendProc -FrontendProcess $frontendProc -TimeoutSeconds 30)) {
+    Stop-ProcessTree $backendProc
+    Stop-ProcessTree $frontendProc
+    exit 1
 }
 
 # --- Open browser ---
