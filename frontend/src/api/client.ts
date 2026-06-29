@@ -20,22 +20,29 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     let message = response.statusText;
+    let requestId = response.headers.get('x-request-id');
     try {
       const data = await response.json();
       message = data.detail || message;
+      if (!requestId && data.request_id) {
+        requestId = data.request_id;
+      }
     } catch {
       // Keep default message.
     }
     if (response.status >= 500) {
+      const requestLabel = requestId ? ` request_id=${requestId}` : '';
+      const serverMessage = `${message} (${options?.method ?? 'GET'} ${url}, HTTP ${response.status}${requestLabel})`;
       reportClientError(typeof message === 'string' ? message : JSON.stringify(message), {
         details: {
           type: 'api-server-error',
           url,
           method: options?.method ?? 'GET',
           status: response.status,
-          requestId: response.headers.get('x-request-id'),
+          requestId,
         },
       });
+      throw new Error(serverMessage);
     }
     throw new Error(typeof message === 'string' ? message : JSON.stringify(message));
   }

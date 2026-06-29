@@ -6,6 +6,7 @@ from uuid import uuid4
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse
 
 from app.database import DATABASE_URL, STORAGE_DIR
@@ -38,6 +39,15 @@ app.add_middleware(
 )
 
 
+def get_request_id(request: Request) -> str:
+    request_id = getattr(request.state, "request_id", None)
+    if request_id:
+        return request_id
+    request_id = request.headers.get("x-request-id") or uuid4().hex
+    request.state.request_id = request_id
+    return request_id
+
+
 class ClientLogPayload(BaseModel):
     level: str = Field(default="error", max_length=20)
     message: str = Field(max_length=4000)
@@ -53,7 +63,7 @@ class ClientLogPayload(BaseModel):
 
 @app.middleware("http")
 async def log_unhandled_exceptions(request: Request, call_next) -> Response:
-    request_id = request.headers.get("x-request-id") or uuid4().hex
+    request_id = get_request_id(request)
     started_at = time.perf_counter()
     try:
         response = await call_next(request)
@@ -88,6 +98,25 @@ async def log_unhandled_exceptions(request: Request, call_next) -> Response:
     return response
 
 
+@app.exception_handler(StarletteHTTPException)
+async def log_http_exception(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    request_id = get_request_id(request)
+    if exc.status_code >= 500:
+        logger.error(
+            "HTTP exception request_id=%s method=%s path=%s status=%s detail=%r",
+            request_id,
+            request.method,
+            request.url.path,
+            exc.status_code,
+            exc.detail,
+        )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail, "request_id": request_id},
+        headers={"X-Request-ID": request_id},
+    )
+
+
 @app.on_event("startup")
 def startup() -> None:
     logger.info("Backend startup begin database_url=%s storage_dir=%s", DATABASE_URL, STORAGE_DIR)
@@ -96,6 +125,7 @@ def startup() -> None:
     except Exception:
         logger.exception("Backend startup failed during database initialization")
         raise
+    configure_logging()
     logger.info("Backend startup completed")
 
 

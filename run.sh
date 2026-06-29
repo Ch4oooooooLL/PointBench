@@ -8,6 +8,7 @@ LOG_DIR="$LOG_ROOT/$RUN_ID"
 LAUNCHER_LOG="$LOG_DIR/launcher.log"
 BACKEND_LOG="$LOG_DIR/backend.log"
 FRONTEND_LOG="$LOG_DIR/frontend.log"
+ERROR_LOG="$LOG_DIR/errors.log"
 
 mkdir -p "$LOG_DIR"
 printf '%s\n' "$LOG_DIR" > "$LOG_ROOT/latest-run.txt"
@@ -75,11 +76,13 @@ fi
 log_launcher "Starting PointBench shell launcher"
 log_launcher "Project root: $PROJECT_DIR"
 log_launcher "Log directory: $LOG_DIR"
+log_launcher "Error log: $ERROR_LOG"
 log_launcher "Python executable: $PYTHON_EXE"
 log_launcher "PATH: $PATH"
 
 : > "$BACKEND_LOG"
 : > "$FRONTEND_LOG"
+: > "$ERROR_LOG"
 
 run_diag "python-version" "$BACKEND_LOG" "$PROJECT_DIR/backend" "$PYTHON_EXE" --version
 run_diag "backend-import-check" "$BACKEND_LOG" "$PROJECT_DIR/backend" \
@@ -103,6 +106,7 @@ log_launcher "Starting backend on :8000"
     PYTHONIOENCODING=utf-8 \
     PYTHONFAULTHANDLER=1 \
     POINTBENCH_LOG_LEVEL=INFO \
+    POINTBENCH_ERROR_LOG="$ERROR_LOG" \
     "$PYTHON_EXE" -X faulthandler -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level info --access-log
 ) > >(tee -a "$BACKEND_LOG" | sed -u 's/^/[backend] /') 2> >(tee -a "$BACKEND_LOG" >&2 | sed -u 's/^/[backend] /' >&2) &
 BACKEND_PID=$!
@@ -116,7 +120,7 @@ log_launcher "Starting frontend on :5173"
 FRONTEND_PID=$!
 log_launcher "Frontend PID=$FRONTEND_PID"
 
-log_launcher "Logs: launcher=$LAUNCHER_LOG backend=$BACKEND_LOG frontend=$FRONTEND_LOG"
+log_launcher "Logs: launcher=$LAUNCHER_LOG errors=$ERROR_LOG backend=$BACKEND_LOG frontend=$FRONTEND_LOG"
 log_launcher "Press Ctrl+C to stop."
 
 sleep 4

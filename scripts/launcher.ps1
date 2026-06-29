@@ -18,6 +18,7 @@ New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 $launcherLog = Join-Path $logDir 'launcher.log'
 $backendLog = Join-Path $logDir 'backend.log'
 $frontendLog = Join-Path $logDir 'frontend.log'
+$errorLog = Join-Path $logDir 'errors.log'
 $latestLogDirFile = Join-Path $logRoot 'latest-run.txt'
 
 $script:TextEncoding = New-Object System.Text.UTF8Encoding -ArgumentList $false
@@ -56,6 +57,7 @@ Set-TextFile -Path $latestLogDirFile -Value $logDir
 Set-TextFile -Path $launcherLog -Value ("[{0}] Starting launcher. ShowLogs={1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $ShowLogs)
 Set-TextFile -Path $backendLog -Value ("[{0}] Backend log started." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
 Set-TextFile -Path $frontendLog -Value ("[{0}] Frontend log started." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
+Set-TextFile -Path $errorLog -Value ("[{0}] Error log started." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
 
 $logOffsets = @{}
 
@@ -133,6 +135,7 @@ function Write-NewLogLines {
 function Write-AllNewLogs {
     Write-NewLogLines -Prefix 'backend' -Path $backendLog
     Write-NewLogLines -Prefix 'frontend' -Path $frontendLog
+    Write-NewLogLines -Prefix 'errors' -Path $errorLog
 }
 
 function Write-LogTail {
@@ -166,11 +169,13 @@ function Write-FailureSummary {
     param([string]$Reason)
 
     Write-LauncherLog "Startup failure: $Reason"
+    Write-LogTail -Title 'errors' -Path $errorLog
     Write-LogTail -Title 'backend' -Path $backendLog
     Write-LogTail -Title 'frontend' -Path $frontendLog
     Write-Console ''
     Write-Console "Startup failure: $Reason"
     Write-Console "Launcher log: $launcherLog"
+    Write-Console "Error log:    $errorLog"
     Write-Console "Backend log:  $backendLog"
     Write-Console "Frontend log: $frontendLog"
 }
@@ -336,6 +341,7 @@ function Wait-HttpReady {
 function Run-Preflight {
     Write-LauncherLog "Project root: $root"
     Write-LauncherLog "Log directory: $logDir"
+    Write-LauncherLog "Error log: $errorLog"
     Write-LauncherLog "PowerShell: $($PSVersionTable.PSVersion)"
     Write-LauncherLog "PATH: $env:PATH"
     Write-LauncherLog "Python executable: $pythonExe"
@@ -408,6 +414,7 @@ try {
         'set PYTHONIOENCODING=utf-8',
         'set PYTHONFAULTHANDLER=1',
         'set POINTBENCH_LOG_LEVEL=INFO',
+        ('set POINTBENCH_ERROR_LOG={0}' -f $errorLog),
         ('cd /d "{0}"' -f $backendDir),
         ('echo cwd=%CD% >> "{0}"' -f $backendLog),
         ('echo python="{0}" >> "{1}"' -f $pythonExe, $backendLog),
