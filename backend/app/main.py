@@ -9,12 +9,11 @@ from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse
 
-from app.database import DATABASE_URL, STORAGE_DIR
+from app.database import AUTH_ENABLED, DATABASE_URL, STORAGE_DIR
 from app.database import init_db
 from app.logging_config import configure_logging
 from app.routers import (
     analysis_router,
-    auth_router,
     crack_router,
     dewesoft_router,
     import_router,
@@ -163,7 +162,10 @@ async def collect_client_log(payload: ClientLogPayload, request: Request) -> Res
     return Response(status_code=204)
 
 
-app.include_router(auth_router.router)
+if AUTH_ENABLED:
+    from app.routers import auth_router
+
+    app.include_router(auth_router.router)
 app.include_router(import_router.router)
 app.include_router(project_router.router)
 app.include_router(point_router.router)

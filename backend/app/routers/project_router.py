@@ -30,9 +30,21 @@ def project_out(db: Session, project: models.Project) -> ProjectOut:
     return data
 
 
+def purge_project(db: Session, project: models.Project) -> None:
+    project_storage = safe_project_dir(project.project_id)
+    if project_storage.exists():
+        shutil.rmtree(project_storage)
+    delete_dewesoft_project_files(project.project_id)
+    db.delete(project)
+
+
 @router.get("", response_model=list[ProjectOut])
 def list_projects(db: Session = Depends(get_db)) -> list[ProjectOut]:
-    projects = db.execute(select(models.Project).order_by(models.Project.updated_at.desc())).scalars().all()
+    projects = db.execute(
+        select(models.Project)
+        .where(models.Project.deleted_at.is_(None))
+        .order_by(models.Project.updated_at.desc())
+    ).scalars().all()
     return [project_out(db, project) for project in projects]
 
 
@@ -46,7 +58,10 @@ def create_project(payload: ProjectCreate, db: Session = Depends(get_db)) -> Pro
         raise HTTPException(status_code=400, detail="项目名称不能为空")
     exists = db.scalar(select(models.Project).where(models.Project.project_id == project_id))
     if exists:
-        raise HTTPException(status_code=400, detail="项目 ID 已存在")
+        if exists.deleted_at is None:
+            raise HTTPException(status_code=400, detail="项目 ID 已存在")
+        purge_project(db, exists)
+        db.flush()
     project = models.Project(
         project_id=project_id,
         project_name=project_name,
@@ -71,6 +86,8 @@ def get_project(project_id: int, db: Session = Depends(get_db)) -> ProjectOut:
     project = db.get(models.Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
+    if project.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="项目不存在")
     return project_out(db, project)
 
 
@@ -78,6 +95,8 @@ def get_project(project_id: int, db: Session = Depends(get_db)) -> ProjectOut:
 def update_project(project_id: int, payload: ProjectUpdate, db: Session = Depends(get_db)) -> ProjectOut:
     project = db.get(models.Project, project_id)
     if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    if project.deleted_at is not None:
         raise HTTPException(status_code=404, detail="项目不存在")
     data = payload.model_dump(exclude_unset=True)
     if "project_name" in data and not data["project_name"]:
@@ -90,18 +109,14 @@ def update_project(project_id: int, payload: ProjectUpdate, db: Session = Depend
 
 
 @router.delete("/{project_id}")
-def delete_project(project_id: int, permanent: bool = False, db: Session = Depends(get_db)) -> dict:
-    """删除项目。默认软删除（可恢复），permanent=true 彻底删除。"""
+def delete_project(project_id: int, permanent: bool = True, db: Session = Depends(get_db)) -> dict:
+    """删除项目。测试阶段默认彻底删除；permanent=false 保留软删除分支。"""
     project = db.get(models.Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
 
     if permanent:
-        project_storage = safe_project_dir(project.project_id)
-        if project_storage.exists():
-            shutil.rmtree(project_storage)
-        delete_dewesoft_project_files(project.project_id)
-        db.delete(project)
+        purge_project(db, project)
         log_action(db, "delete_permanent", "project", project.project_id, project.project_id, f"永久删除项目 {project.project_name}")
         db.commit()
         return {"ok": True, "action": "permanently_deleted"}

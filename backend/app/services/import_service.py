@@ -14,6 +14,7 @@ from app import models
 from app.database import STORAGE_DIR
 from app.schemas import ImportPreview, ManifestIn
 from app.services.analysis_service import compute_measurement_fields
+from app.services.dewesoft_service import delete_dewesoft_project_files
 from app.utils.hash_utils import file_sha256
 from app.utils.path_utils import safe_project_dir
 from app.utils.zip_utils import is_safe_zip_path, normalize_zip_name, safe_extract, validate_zip_members
@@ -39,6 +40,34 @@ def _load_manifest(path: Path) -> dict:
         raise HTTPException(status_code=400, detail="manifest.json 必须使用 UTF-8 编码") from exc
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=400, detail=f"manifest.json 不是合法 JSON: {exc}") from exc
+
+
+def _find_project_by_project_id(db: Session, project_id: str) -> models.Project | None:
+    return db.scalar(select(models.Project).where(models.Project.project_id == project_id))
+
+
+def _active_project_exists(db: Session, project_id: str) -> bool:
+    return db.scalar(
+        select(models.Project.id).where(
+            models.Project.project_id == project_id,
+            models.Project.deleted_at.is_(None),
+        )
+    ) is not None
+
+
+def _purge_soft_deleted_project(db: Session, project_id: str) -> None:
+    project = _find_project_by_project_id(db, project_id)
+    if project is None:
+        return
+    if project.deleted_at is None:
+        raise HTTPException(status_code=400, detail=f"项目 {project_id} 已存在，请先删除后重新导入")
+
+    project_root = safe_project_dir(project.project_id)
+    if project_root.exists():
+        shutil.rmtree(project_root)
+    delete_dewesoft_project_files(project.project_id)
+    db.delete(project)
+    db.flush()
 
 
 def _load_json_file(path: Path, label: str) -> dict:
@@ -101,7 +130,7 @@ def _validate_manifest_business(manifest: ManifestIn, zip_names: set[str], db: S
 
     if manifest.schema_version != "1.0.0":
         errors.append(f"不支持的 schema_version: {manifest.schema_version}")
-    if db.scalar(select(models.Project.id).where(models.Project.project_id == manifest.project.project_id)):
+    if _active_project_exists(db, manifest.project.project_id):
         errors.append(f"项目 {manifest.project.project_id} 已存在，请先删除后重新导入")
 
     point_ids = [point.point_id for point in manifest.points]
@@ -171,7 +200,7 @@ def _build_backup_preview(
     project_id = project.get("project_id")
     if not project_id:
         backup_errors.append("PointProcess backup is missing project.project_id")
-    elif db.scalar(select(models.Project.id).where(models.Project.project_id == project_id)):
+    elif _active_project_exists(db, project_id):
         backup_errors.append(f"Project {project_id} already exists. Delete it before importing this backup.")
 
     point_ids = [point.get("point_id") for point in backup.get("points", []) if point.get("point_id")]
@@ -383,8 +412,9 @@ def _confirm_backup_import(db: Session, temporary_import_id: str, temp_dir: Path
     project_name = (project_data.get("project_name") or "").strip()
     if not project_id or not project_name:
         raise HTTPException(status_code=400, detail="PointProcess backup is missing project id or name")
-    if db.scalar(select(models.Project.id).where(models.Project.project_id == project_id)):
+    if _active_project_exists(db, project_id):
         raise HTTPException(status_code=400, detail=f"Project {project_id} already exists. Delete it before importing this backup.")
+    _purge_soft_deleted_project(db, project_id)
 
     project_root = safe_project_dir(project_id)
     project_root.mkdir(parents=True, exist_ok=True)
@@ -596,6 +626,7 @@ def confirm_import(db: Session, temporary_import_id: str) -> models.Project:
     missing_files, duplicate_point_ids, _, warnings, errors = _validate_manifest_business(manifest, zip_names, db)
     if errors or missing_files or duplicate_point_ids:
         raise HTTPException(status_code=400, detail="; ".join(errors + warnings))
+    _purge_soft_deleted_project(db, manifest.project.project_id)
 
     project_root = safe_project_dir(manifest.project.project_id)
     project_root.mkdir(parents=True, exist_ok=True)

@@ -21,6 +21,7 @@ DATABASE_URL = os.environ.get(
 )
 
 IS_SQLITE = DATABASE_URL.startswith("sqlite")
+AUTH_ENABLED = os.environ.get("POINTBENCH_AUTH_ENABLED", "").lower() in {"1", "true", "yes", "on"}
 
 
 class Base(DeclarativeBase):
@@ -60,6 +61,10 @@ def init_db() -> None:
     except Exception:
         logger.exception("Alembic migration failed; falling back to SQLAlchemy create_all")
         Base.metadata.create_all(bind=engine)
+
+    # 权限系统默认不启用；只有显式开启时才初始化默认管理员账号。
+    if not AUTH_ENABLED:
+        return
 
     # 初始化默认管理员账号（如不存在）
     try:
