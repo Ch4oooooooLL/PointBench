@@ -702,10 +702,11 @@ function XlsxPreviewPanel({
   // 筛选与搜索状态
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [onlyRisks, setOnlyRisks] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 15;
+  const [pageSize, setPageSize] = useState<number>(20);
 
-  // 计算各状态的数量
+  // 计算各状态的数量与占比
   const counts = useMemo(() => {
     const map: Record<string, number> = {
       all: preview.items.length,
@@ -723,26 +724,43 @@ function XlsxPreviewPanel({
     return map;
   }, [preview.items]);
 
+  // 计算各片段百分比
+  const distributionPercentages = useMemo(() => {
+    const total = preview.items.length || 1;
+    return {
+      new_pct: (counts.new_measurement / total) * 100,
+      exist_pct: (counts.existing_measurement / total) * 100,
+      unknown_pct: (counts.unknown_point / total) * 100,
+      dup_pct: (counts.file_duplicate / total) * 100,
+      invalid_pct: (counts.invalid / total) * 100,
+    };
+  }, [counts, preview.items.length]);
+
   // 过滤后的数据项
   const filteredItems = useMemo(() => {
     return preview.items.filter((item) => {
+      // 快速仅看风险
+      if (onlyRisks && item.status === 'new_measurement') {
+        return false;
+      }
       // 状态过滤
       if (statusFilter !== 'all' && item.status !== statusFilter) {
         return false;
       }
-      // 搜索搜索
+      // 搜索
       if (searchQuery.trim()) {
         const q = searchQuery.trim().toLowerCase();
         const pid = (item.point_id ?? '').toLowerCase();
         const pname = (item.point_name ?? '').toLowerCase();
+        const rname = (item.run_name ?? '').toLowerCase();
         const msg = (item.message ?? '').toLowerCase();
-        if (!pid.includes(q) && !pname.includes(q) && !msg.includes(q)) {
+        if (!pid.includes(q) && !pname.includes(q) && !rname.includes(q) && !msg.includes(q)) {
           return false;
         }
       }
       return true;
     });
-  }, [preview.items, statusFilter, searchQuery]);
+  }, [preview.items, statusFilter, searchQuery, onlyRisks]);
 
   // 分页数据
   const totalPages = Math.ceil(filteredItems.length / pageSize) || 1;
@@ -773,12 +791,12 @@ function XlsxPreviewPanel({
         <div className="wizard-step-divider active" />
         <div className="wizard-step active">
           <span className="wizard-step-num">2</span>
-          <span>2. 预览与策略配置</span>
+          <span>2. 全宽数据预览与策略配置</span>
         </div>
         <div className="wizard-step-divider" />
         <div className="wizard-step">
           <span className="wizard-step-num">3</span>
-          <span>3. 确认与写入</span>
+          <span>3. 确认与写入后端</span>
         </div>
         <div className="wizard-step-divider" />
         <div className="wizard-step">
@@ -893,6 +911,38 @@ function XlsxPreviewPanel({
         </div>
       </div>
 
+      {/* ── 新增：数据分布占比堆叠看板 (Status Distribution Panel) ── */}
+      <div className="status-distribution-panel">
+        <div className="distribution-header">
+          <span>📊 XLSX 数据行状态构成占比</span>
+          <span style={{ fontSize: 12, fontWeight: 400, color: '#64748b' }}>全量解析预览占比</span>
+        </div>
+        <div className="stacked-bar-container">
+          {distributionPercentages.new_pct > 0 && (
+            <div className="stacked-segment seg-new" style={{ width: `${distributionPercentages.new_pct}%` }} title={`待新增: ${counts.new_measurement} 条 (${distributionPercentages.new_pct.toFixed(1)}%)`} />
+          )}
+          {distributionPercentages.exist_pct > 0 && (
+            <div className="stacked-segment seg-exist" style={{ width: `${distributionPercentages.exist_pct}%` }} title={`已有记录: ${counts.existing_measurement} 条 (${distributionPercentages.exist_pct.toFixed(1)}%)`} />
+          )}
+          {distributionPercentages.dup_pct > 0 && (
+            <div className="stacked-segment seg-dup" style={{ width: `${distributionPercentages.dup_pct}%` }} title={`文件重复: ${counts.file_duplicate} 条 (${distributionPercentages.dup_pct.toFixed(1)}%)`} />
+          )}
+          {distributionPercentages.unknown_pct > 0 && (
+            <div className="stacked-segment seg-unknown" style={{ width: `${distributionPercentages.unknown_pct}%` }} title={`未知点位: ${counts.unknown_point} 条 (${distributionPercentages.unknown_pct.toFixed(1)}%)`} />
+          )}
+          {distributionPercentages.invalid_pct > 0 && (
+            <div className="stacked-segment seg-invalid" style={{ width: `${distributionPercentages.invalid_pct}%` }} title={`无效格式: ${counts.invalid} 条 (${distributionPercentages.invalid_pct.toFixed(1)}%)`} />
+          )}
+        </div>
+        <div className="distribution-legend">
+          <div className="legend-item"><span className="legend-dot seg-new" /><span>待新增: {counts.new_measurement}</span></div>
+          <div className="legend-item"><span className="legend-dot seg-exist" /><span>已有记录: {counts.existing_measurement}</span></div>
+          {counts.file_duplicate > 0 && <div className="legend-item"><span className="legend-dot seg-dup" /><span>文件重复: {counts.file_duplicate}</span></div>}
+          {counts.unknown_point > 0 && <div className="legend-item"><span className="legend-dot seg-unknown" /><span>未知点位: {counts.unknown_point}</span></div>}
+          {counts.invalid > 0 && <div className="legend-item"><span className="legend-dot seg-invalid" /><span>无效格式: {counts.invalid}</span></div>}
+        </div>
+      </div>
+
       {/* ── 主内容区：两栏 ── */}
       <div className="preview-main">
         {/* ── 左栏：筛选工具栏 + 明细表格 + 分页 ── */}
@@ -901,31 +951,31 @@ function XlsxPreviewPanel({
           <div className="preview-filter-bar">
             <div className="status-tabs">
               <button
-                className={`status-tab-btn ${statusFilter === 'all' ? 'active' : ''}`}
-                onClick={() => handleFilterChange('all')}
+                className={`status-tab-btn ${statusFilter === 'all' && !onlyRisks ? 'active' : ''}`}
+                onClick={() => { setOnlyRisks(false); handleFilterChange('all'); }}
               >
                 全部 <span className="status-tab-count">{counts.all}</span>
               </button>
               {counts.new_measurement > 0 && (
                 <button
-                  className={`status-tab-btn ${statusFilter === 'new_measurement' ? 'active' : ''}`}
-                  onClick={() => handleFilterChange('new_measurement')}
+                  className={`status-tab-btn ${statusFilter === 'new_measurement' && !onlyRisks ? 'active' : ''}`}
+                  onClick={() => { setOnlyRisks(false); handleFilterChange('new_measurement'); }}
                 >
                   待新增 <span className="status-tab-count">{counts.new_measurement}</span>
                 </button>
               )}
               {counts.existing_measurement > 0 && (
                 <button
-                  className={`status-tab-btn ${statusFilter === 'existing_measurement' ? 'active' : ''}`}
-                  onClick={() => handleFilterChange('existing_measurement')}
+                  className={`status-tab-btn ${statusFilter === 'existing_measurement' && !onlyRisks ? 'active' : ''}`}
+                  onClick={() => { setOnlyRisks(false); handleFilterChange('existing_measurement'); }}
                 >
                   已有记录 <span className="status-tab-count">{counts.existing_measurement}</span>
                 </button>
               )}
               {counts.unknown_point > 0 && (
                 <button
-                  className={`status-tab-btn ${statusFilter === 'unknown_point' ? 'active' : ''}`}
-                  onClick={() => handleFilterChange('unknown_point')}
+                  className={`status-tab-btn ${statusFilter === 'unknown_point' && !onlyRisks ? 'active' : ''}`}
+                  onClick={() => { setOnlyRisks(false); handleFilterChange('unknown_point'); }}
                   style={{ color: '#dc2626' }}
                 >
                   未知点位 <span className="status-tab-count" style={{ background: '#fee2e2', color: '#dc2626' }}>{counts.unknown_point}</span>
@@ -933,8 +983,8 @@ function XlsxPreviewPanel({
               )}
               {counts.file_duplicate > 0 && (
                 <button
-                  className={`status-tab-btn ${statusFilter === 'file_duplicate' ? 'active' : ''}`}
-                  onClick={() => handleFilterChange('file_duplicate')}
+                  className={`status-tab-btn ${statusFilter === 'file_duplicate' && !onlyRisks ? 'active' : ''}`}
+                  onClick={() => { setOnlyRisks(false); handleFilterChange('file_duplicate'); }}
                   style={{ color: '#d97706' }}
                 >
                   文件重复 <span className="status-tab-count" style={{ background: '#fef3c7', color: '#d97706' }}>{counts.file_duplicate}</span>
@@ -942,8 +992,8 @@ function XlsxPreviewPanel({
               )}
               {counts.invalid > 0 && (
                 <button
-                  className={`status-tab-btn ${statusFilter === 'invalid' ? 'active' : ''}`}
-                  onClick={() => handleFilterChange('invalid')}
+                  className={`status-tab-btn ${statusFilter === 'invalid' && !onlyRisks ? 'active' : ''}`}
+                  onClick={() => { setOnlyRisks(false); handleFilterChange('invalid'); }}
                   style={{ color: '#dc2626' }}
                 >
                   无效行 <span className="status-tab-count" style={{ background: '#fee2e2', color: '#dc2626' }}>{counts.invalid}</span>
@@ -951,38 +1001,50 @@ function XlsxPreviewPanel({
               )}
             </div>
 
-            <div className="preview-search-box">
-              <Search size={14} />
-              <input
-                type="text"
-                placeholder="搜索点位/说明..."
-                value={searchQuery}
-                onChange={(e) => handleSearchChange(e.target.value)}
-              />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <label className="checkbox-label" style={{ fontSize: 12, color: '#475569' }}>
+                <input
+                  type="checkbox"
+                  checked={onlyRisks}
+                  onChange={(e) => { setOnlyRisks(e.target.checked); setCurrentPage(1); }}
+                />
+                只看风险与冲突
+              </label>
+              <div className="preview-search-box">
+                <Search size={14} />
+                <input
+                  type="text"
+                  placeholder="搜索点位/轮次/说明..."
+                  value={searchQuery}
+                  onChange={(e) => handleSearchChange(e.target.value)}
+                />
+              </div>
             </div>
           </div>
 
-          {/* 数据明细表格 wrap */}
-          <div className="table-wrap preview-table-wrap" style={{ borderRadius: 0 }}>
+          {/* 全宽扩展数据明细表格 wrap */}
+          <div className="table-wrap preview-table-wrap">
             <table className="entry-table preview-table">
               <thead>
                 <tr>
                   <th style={{ width: 44 }}>行</th>
                   <th style={{ width: 96 }}>状态</th>
-                  <th style={{ width: 70 }}>循环</th>
-                  <th style={{ width: 70 }}>点位</th>
+                  <th style={{ width: 110 }}>轮次名称</th>
+                  <th style={{ width: 75 }}>循环</th>
+                  <th style={{ width: 130 }}>测试时间</th>
+                  <th style={{ width: 75 }}>点位ID</th>
                   <th>点位名称</th>
-                  <th style={{ width: 90 }}>max με</th>
-                  <th style={{ width: 90 }}>min με</th>
-                  {hasExisting && <th style={{ width: 110 }}>已有 max / min</th>}
-                  <th>说明</th>
+                  <th style={{ width: 95 }}>max με</th>
+                  <th style={{ width: 95 }}>min με</th>
+                  {hasExisting && <th style={{ width: 120 }}>已有 max / min</th>}
+                  <th>校验说明</th>
                 </tr>
               </thead>
               <tbody>
                 {paginatedItems.length === 0 ? (
                   <tr>
-                    <td colSpan={hasExisting ? 9 : 8} style={{ textAlign: 'center', padding: 32, color: '#94a3b8' }}>
-                      没有满足条件的记录
+                    <td colSpan={hasExisting ? 11 : 10} style={{ textAlign: 'center', padding: 36, color: '#94a3b8' }}>
+                      没有满足筛选条件的记录
                     </td>
                   </tr>
                 ) : (
@@ -999,12 +1061,14 @@ function XlsxPreviewPanel({
                         item.status === 'file_duplicate' ? 'row-warn' :
                         item.status === 'existing_measurement' ? 'row-warn' : ''
                       }>
-                        <td style={{ fontWeight: 500, color: '#64748b' }}>{item.row_index}</td>
+                        <td className="cell-num" style={{ color: '#64748b' }}>{item.row_index}</td>
                         <td><StatusBadge status={item.status} /></td>
-                        <td>{item.cycle_count != null ? item.cycle_count.toLocaleString() : '—'}</td>
-                        <td style={{ fontWeight: 600, color: '#334155' }}>{item.point_id ?? '—'}</td>
+                        <td style={{ fontSize: 12, color: '#475569' }}>{item.run_name ?? '—'}</td>
+                        <td className="cell-num">{item.cycle_count != null ? item.cycle_count.toLocaleString() : '—'}</td>
+                        <td style={{ fontSize: 11, color: '#64748b' }}>{item.test_time ? item.test_time.split('T')[0] : '—'}</td>
+                        <td className="cell-num" style={{ fontWeight: 600, color: '#334155' }}>{item.point_id ?? '—'}</td>
                         <td>{item.point_name ?? '—'}</td>
-                        <td>
+                        <td className="cell-num">
                           {item.max_strain_ue != null ? (
                             <span>
                               {item.max_strain_ue.toFixed(1)}
@@ -1016,9 +1080,9 @@ function XlsxPreviewPanel({
                             </span>
                           ) : '—'}
                         </td>
-                        <td>{item.min_strain_ue != null ? item.min_strain_ue.toFixed(1) : '—'}</td>
+                        <td className="cell-num">{item.min_strain_ue != null ? item.min_strain_ue.toFixed(1) : '—'}</td>
                         {hasExisting && (
-                          <td style={{ fontSize: 11, color: '#64748b' }}>
+                          <td className="cell-num" style={{ fontSize: 11, color: '#64748b' }}>
                             {item.existing_max_strain_ue != null ? `${item.existing_max_strain_ue.toFixed(1)} / ${item.existing_min_strain_ue?.toFixed(1) ?? '—'}` : '—'}
                           </td>
                         )}
@@ -1031,11 +1095,23 @@ function XlsxPreviewPanel({
             </table>
           </div>
 
-          {/* 分页控制面板 */}
+          {/* 分页与条数控制面板 */}
           <div className="preview-pagination">
-            <span>
-              显示第 {filteredItems.length === 0 ? 0 : (currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, filteredItems.length)} 条，共 {filteredItems.length} 条
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <div className="page-size-selector">
+                <span>每页显示:</span>
+                <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}>
+                  <option value={15}>15 条</option>
+                  <option value={20}>20 条</option>
+                  <option value={30}>30 条</option>
+                  <option value={50}>50 条</option>
+                  <option value={100}>100 条</option>
+                </select>
+              </div>
+              <span>
+                显示第 {filteredItems.length === 0 ? 0 : (currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, filteredItems.length)} 条，共 {filteredItems.length} 条
+              </span>
+            </div>
             <div className="pagination-controls">
               <button
                 className="pagination-btn"
@@ -1044,7 +1120,7 @@ function XlsxPreviewPanel({
               >
                 上一页
               </button>
-              <span style={{ margin: '0 4px', fontWeight: 600, color: '#334155' }}>
+              <span style={{ margin: '0 6px', fontWeight: 600, color: '#334155' }}>
                 {currentPage} / {totalPages}
               </span>
               <button
