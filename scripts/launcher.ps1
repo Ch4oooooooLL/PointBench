@@ -5,69 +5,88 @@ param(
     [switch]$ShowLogs
 )
 
-# ============================================================
-#  Tray-based launcher for test-point-web
-#  Default mode: starts backend + frontend hidden, shows tray icon
-#  ShowLogs mode: streams backend + frontend logs in the current console
-#  No admin rights required
-# ============================================================
+$ErrorActionPreference = 'Stop'
 
 $root = $ProjectDir.TrimEnd('\', '/', '"', ' ')
 $logRoot = Join-Path $root 'logs'
 New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
+
 $runId = Get-Date -Format 'yyyyMMdd-HHmmss'
 $logDir = Join-Path $logRoot $runId
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+
 $launcherLog = Join-Path $logDir 'launcher.log'
 $backendLog = Join-Path $logDir 'backend.log'
 $frontendLog = Join-Path $logDir 'frontend.log'
 $latestLogDirFile = Join-Path $logRoot 'latest-run.txt'
 
+Set-Content -Path $latestLogDirFile -Value $logDir -Encoding UTF8
 Set-Content -Path $launcherLog -Value ("[{0}] Starting launcher. ShowLogs={1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $ShowLogs) -Encoding UTF8
 Set-Content -Path $backendLog -Value ("[{0}] Backend log started." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) -Encoding UTF8
 Set-Content -Path $frontendLog -Value ("[{0}] Frontend log started." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) -Encoding UTF8
-Set-Content -Path $latestLogDirFile -Value $logDir -Encoding UTF8
+
+$logOffsets = @{}
 
 function Write-LauncherLog {
     param([string]$Text)
     Add-Content -Path $launcherLog -Value ("[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Text) -Encoding UTF8
 }
 
-trap {
-    Write-LauncherLog "Unhandled launcher error: $($_.Exception.Message)"
-    Write-LauncherLog "At: $($_.InvocationInfo.PositionMessage)"
+function Write-Console {
+    param([string]$Text)
     if ($ShowLogs) {
-        Write-Host ''
-        Write-Host "Unhandled launcher error: $($_.Exception.Message)"
-        Write-Host "Launcher log: $launcherLog"
-        Write-Host "Backend log:  $backendLog"
-        Write-Host "Frontend log: $frontendLog"
+        Write-Host $Text
     }
-    exit 1
+}
+
+function Write-NewLogLines {
+    param(
+        [string]$Prefix,
+        [string]$Path
+    )
+
+    if (-not $ShowLogs -or -not (Test-Path $Path)) {
+        return
+    }
+
+    $lines = @(Get-Content -Path $Path -ErrorAction SilentlyContinue)
+    $offset = 0
+    if ($logOffsets.ContainsKey($Path)) {
+        $offset = [int]$logOffsets[$Path]
+    }
+
+    if ($lines.Count -gt $offset) {
+        for ($i = $offset; $i -lt $lines.Count; $i++) {
+            Write-Host "[$Prefix] $($lines[$i])"
+        }
+        $logOffsets[$Path] = $lines.Count
+    }
+}
+
+function Write-AllNewLogs {
+    Write-NewLogLines -Prefix 'backend' -Path $backendLog
+    Write-NewLogLines -Prefix 'frontend' -Path $frontendLog
 }
 
 function Write-LogTail {
     param(
         [string]$Title,
         [string]$Path,
-        [int]$Tail = 80,
-        [switch]$Console
+        [int]$Tail = 100
     )
 
     Write-LauncherLog "===== $Title tail: $Path ====="
     if (-not (Test-Path $Path)) {
         Write-LauncherLog "$Title log is missing."
-        if ($Console) {
-            Write-Host "[$Title] log is missing: $Path"
-        }
+        Write-Console "[$Title] log is missing: $Path"
         return
     }
 
-    $lines = Get-Content -Path $Path -Tail $Tail -ErrorAction SilentlyContinue
+    $lines = @(Get-Content -Path $Path -Tail $Tail -ErrorAction SilentlyContinue)
     foreach ($line in $lines) {
         Write-LauncherLog "$Title> $line"
     }
-    if ($Console) {
+    if ($ShowLogs) {
         Write-Host ''
         Write-Host "===== $Title log tail ====="
         foreach ($line in $lines) {
@@ -80,15 +99,13 @@ function Write-FailureSummary {
     param([string]$Reason)
 
     Write-LauncherLog "Startup failure: $Reason"
-    Write-LogTail -Title 'backend' -Path $backendLog -Console:$ShowLogs
-    Write-LogTail -Title 'frontend' -Path $frontendLog -Console:$ShowLogs
-    if ($ShowLogs) {
-        Write-Host ''
-        Write-Host "Startup failure: $Reason"
-        Write-Host "Launcher log: $launcherLog"
-        Write-Host "Backend log:  $backendLog"
-        Write-Host "Frontend log: $frontendLog"
-    }
+    Write-LogTail -Title 'backend' -Path $backendLog
+    Write-LogTail -Title 'frontend' -Path $frontendLog
+    Write-Console ''
+    Write-Console "Startup failure: $Reason"
+    Write-Console "Launcher log: $launcherLog"
+    Write-Console "Backend log:  $backendLog"
+    Write-Console "Frontend log: $frontendLog"
 }
 
 function Invoke-DiagnosticCommand {
@@ -103,6 +120,7 @@ function Invoke-DiagnosticCommand {
 
     Add-Content -Path $LogPath -Value '' -Encoding UTF8
     Add-Content -Path $LogPath -Value ("===== diagnostic: {0} =====" -f $Name) -Encoding UTF8
+    Add-Content -Path $LogPath -Value ("cwd={0}" -f $WorkingDirectory) -Encoding UTF8
     Add-Content -Path $LogPath -Value ("> {0} {1}" -f $FilePath, $Arguments) -Encoding UTF8
     Write-LauncherLog "Diagnostic started: $Name"
 
@@ -142,6 +160,86 @@ function Invoke-DiagnosticCommand {
             throw
         }
     }
+}
+
+function Stop-ProcessTree {
+    param([System.Diagnostics.Process]$Process)
+
+    if ($Process -and -not $Process.HasExited) {
+        & taskkill /PID $Process.Id /T /F 2>$null
+    }
+}
+
+function Release-Port {
+    param([string]$Port)
+
+    $null = & netstat -ano 2>$null | Select-String (":{0}.*LISTENING" -f $Port) | ForEach-Object {
+        $parts = $_ -split '\s+'
+        if ($parts[-1] -match '^\d+$') {
+            Write-LauncherLog "Killing existing process on port $Port. PID=$($parts[-1])"
+            & taskkill /PID $parts[-1] /F 2>$null
+        }
+    }
+}
+
+function Start-CmdScript {
+    param(
+        [string]$Name,
+        [string]$ScriptPath,
+        [string]$WorkingDirectory
+    )
+
+    Write-LauncherLog "Starting $Name with script: $ScriptPath"
+    $proc = Start-Process -FilePath 'cmd.exe' `
+        -ArgumentList @('/d', '/s', '/c', "`"$ScriptPath`"") `
+        -WorkingDirectory $WorkingDirectory `
+        -WindowStyle Hidden `
+        -PassThru
+    Write-LauncherLog "$Name started. PID=$($proc.Id)"
+    return $proc
+}
+
+function Wait-HttpReady {
+    param(
+        [string]$Name,
+        [string]$Url,
+        [System.Diagnostics.Process]$BackendProcess,
+        [System.Diagnostics.Process]$FrontendProcess,
+        [int]$TimeoutSeconds = 30
+    )
+
+    Write-LauncherLog "Waiting for $Name: $Url"
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $lastError = $null
+    while ((Get-Date) -lt $deadline) {
+        Write-AllNewLogs
+
+        if ($BackendProcess -and $BackendProcess.HasExited) {
+            Write-AllNewLogs
+            Write-FailureSummary "Backend exited while waiting for $Name. ExitCode=$($BackendProcess.ExitCode)"
+            return $false
+        }
+        if ($FrontendProcess -and $FrontendProcess.HasExited) {
+            Write-AllNewLogs
+            Write-FailureSummary "Frontend exited while waiting for $Name. ExitCode=$($FrontendProcess.ExitCode)"
+            return $false
+        }
+
+        try {
+            $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2
+            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500) {
+                Write-LauncherLog "$Name is ready. StatusCode=$($response.StatusCode)"
+                return $true
+            }
+            $lastError = "HTTP $($response.StatusCode)"
+        } catch {
+            $lastError = $_.Exception.Message
+        }
+        Start-Sleep -Seconds 1
+    }
+
+    Write-FailureSummary "$Name did not become ready within ${TimeoutSeconds}s. LastError=$lastError"
+    return $false
 }
 
 function Run-Preflight {
@@ -186,195 +284,49 @@ function Run-Preflight {
         -LogPath $frontendLog
 }
 
-# --- Helper: start a hidden process ---
-function Start-HiddenProcess {
-    param(
-        [string]$Name,
-        [string]$FilePath,
-        [string]$Arguments,
-        [string]$WorkingDirectory,
-        [string]$LogPath
-    )
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $FilePath
-    $psi.Arguments = $Arguments
-    $psi.WorkingDirectory = $WorkingDirectory
-    $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
-    $psi.CreateNoWindow = $true
-    $psi.UseShellExecute = $false
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.EnvironmentVariables['PYTHONUNBUFFERED'] = '1'
-    $psi.EnvironmentVariables['PYTHONIOENCODING'] = 'utf-8'
-
-    Add-Content -Path $LogPath -Value '' -Encoding UTF8
-    Add-Content -Path $LogPath -Value ("===== start {0}: {1} {2} =====" -f $Name, $FilePath, $Arguments) -Encoding UTF8
-    $proc = New-Object System.Diagnostics.Process
-    $proc.StartInfo = $psi
-
-    $path = $LogPath
-    $proc.add_OutputDataReceived({
-        if ($EventArgs.Data) {
-            Add-Content -Path $path -Value ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $EventArgs.Data) -Encoding UTF8
-        }
-    }.GetNewClosure())
-    $proc.add_ErrorDataReceived({
-        if ($EventArgs.Data) {
-            Add-Content -Path $path -Value ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $EventArgs.Data) -Encoding UTF8
-        }
-    }.GetNewClosure())
-
-    [void]$proc.Start()
-    $proc.BeginOutputReadLine()
-    $proc.BeginErrorReadLine()
-    Write-LauncherLog "$Name started. PID=$($proc.Id)"
-    return $proc
-}
-
-function Start-LoggedProcess {
-    param(
-        [string]$Name,
-        [string]$FilePath,
-        [string]$Arguments,
-        [string]$WorkingDirectory,
-        [string]$LogPath
-    )
-
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $FilePath
-    $psi.Arguments = $Arguments
-    $psi.WorkingDirectory = $WorkingDirectory
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.EnvironmentVariables['PYTHONUNBUFFERED'] = '1'
-    $psi.EnvironmentVariables['PYTHONIOENCODING'] = 'utf-8'
-
-    $proc = New-Object System.Diagnostics.Process
-    $proc.StartInfo = $psi
-
-    $label = $Name
-    $path = $LogPath
-    $proc.add_OutputDataReceived({
-        if ($EventArgs.Data) {
-            Add-Content -Path $path -Value ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $EventArgs.Data) -Encoding UTF8
-            Write-Host "[$label] $($EventArgs.Data)"
-        }
-    }.GetNewClosure())
-    $proc.add_ErrorDataReceived({
-        if ($EventArgs.Data) {
-            Add-Content -Path $path -Value ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $EventArgs.Data) -Encoding UTF8
-            Write-Host "[$label] $($EventArgs.Data)"
-        }
-    }.GetNewClosure())
-
-    [void]$proc.Start()
-    $proc.BeginOutputReadLine()
-    $proc.BeginErrorReadLine()
-    Write-LauncherLog "$Name started. PID=$($proc.Id)"
-    return $proc
-}
-
-function Stop-ProcessTree {
-    param([System.Diagnostics.Process]$Process)
-
-    if ($Process -and -not $Process.HasExited) {
-        & taskkill /PID $Process.Id /T /F 2>$null
-    }
-}
-
-function Wait-HttpReady {
-    param(
-        [string]$Name,
-        [string]$Url,
-        [System.Diagnostics.Process]$BackendProcess,
-        [System.Diagnostics.Process]$FrontendProcess,
-        [int]$TimeoutSeconds = 30
-    )
-
-    Write-LauncherLog "Waiting for $Name: $Url"
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    $lastError = $null
-    while ((Get-Date) -lt $deadline) {
-        if ($BackendProcess -and $BackendProcess.HasExited) {
-            $reason = "Backend exited while waiting for $Name. ExitCode=$($BackendProcess.ExitCode)"
-            Write-FailureSummary $reason
-            return $false
-        }
-        if ($FrontendProcess -and $FrontendProcess.HasExited) {
-            $reason = "Frontend exited while waiting for $Name. ExitCode=$($FrontendProcess.ExitCode)"
-            Write-FailureSummary $reason
-            return $false
-        }
-
-        try {
-            $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2
-            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500) {
-                Write-LauncherLog "$Name is ready. StatusCode=$($response.StatusCode)"
-                return $true
-            }
-            $lastError = "HTTP $($response.StatusCode)"
-        } catch {
-            $lastError = $_.Exception.Message
-        }
-        Start-Sleep -Seconds 1
-    }
-
-    Write-FailureSummary "$Name did not become ready within ${TimeoutSeconds}s. LastError=$lastError"
-    return $false
-}
-
-# --- Detect Python (prefer .venv) ---
-$venvPython = Join-Path $root 'backend\.venv\Scripts\python.exe'
-if (Test-Path $venvPython) {
-    $pythonExe = $venvPython
-} else {
-    $pythonExe = 'python'
-}
 try {
-    Run-Preflight
-} catch {
-    Write-LauncherLog "Preflight failed: $($_.Exception.Message)"
-    if ($ShowLogs) {
-        Write-Host ''
-        Write-Host "Startup diagnostics failed: $($_.Exception.Message)"
-        Write-Host "Backend log:  $backendLog"
-        Write-Host "Frontend log: $frontendLog"
-        Write-Host "Launcher log: $launcherLog"
+    $venvPython = Join-Path $root 'backend\.venv\Scripts\python.exe'
+    if (Test-Path $venvPython) {
+        $pythonExe = $venvPython
+    } else {
+        $pythonExe = 'python'
     }
-    throw
-}
 
-# --- Release occupied ports (ignore errors) ---
-$null = & netstat -ano 2>$null | Select-String ':8000.*LISTENING' | ForEach-Object {
-    $parts = $_ -split '\s+'
-    if ($parts[-1] -match '^\d+$') { & taskkill /PID $parts[-1] /F 2>$null }
-}
-$null = & netstat -ano 2>$null | Select-String ':5173.*LISTENING' | ForEach-Object {
-    $parts = $_ -split '\s+'
-    if ($parts[-1] -match '^\d+$') { & taskkill /PID $parts[-1] /F 2>$null }
-}
+    Run-Preflight
 
-if ($ShowLogs) {
-    Write-Host 'Starting PointBench...'
-    Write-Host "Project: $root"
-    Write-Host "Logs:    $logDir"
-    Write-Host "Latest:  $latestLogDirFile"
-    Write-Host ''
+    Release-Port '8000'
+    Release-Port '5173'
 
-    $backendArgs = '-m uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level info'
-    $backendProc = Start-LoggedProcess -Name 'backend' `
-        -FilePath $pythonExe `
-        -Arguments $backendArgs `
-        -WorkingDirectory (Join-Path $root 'backend') `
-        -LogPath $backendLog
+    $backendCmd = Join-Path $logDir 'start-backend.cmd'
+    $frontendCmd = Join-Path $logDir 'start-frontend.cmd'
+    $backendDir = Join-Path $root 'backend'
+    $frontendDir = Join-Path $root 'frontend'
 
-    $frontendProc = Start-LoggedProcess -Name 'frontend' `
-        -FilePath 'cmd.exe' `
-        -Arguments '/c npm run dev' `
-        -WorkingDirectory (Join-Path $root 'frontend') `
-        -LogPath $frontendLog
+    Set-Content -Path $backendCmd -Encoding ASCII -Value @(
+        '@echo off',
+        'set PYTHONUNBUFFERED=1',
+        'set PYTHONIOENCODING=utf-8',
+        ('cd /d "{0}"' -f $backendDir),
+        ('"{0}" -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level info >> "{1}" 2>&1' -f $pythonExe, $backendLog),
+        ('echo backend_exit_code=%ERRORLEVEL% >> "{0}"' -f $backendLog),
+        'exit /b %ERRORLEVEL%'
+    )
+    Set-Content -Path $frontendCmd -Encoding ASCII -Value @(
+        '@echo off',
+        ('cd /d "{0}"' -f $frontendDir),
+        ('npm run dev >> "{0}" 2>&1' -f $frontendLog),
+        ('echo frontend_exit_code=%ERRORLEVEL% >> "{0}"' -f $frontendLog),
+        'exit /b %ERRORLEVEL%'
+    )
+
+    Write-Console 'Starting PointBench...'
+    Write-Console "Project: $root"
+    Write-Console "Logs:    $logDir"
+    Write-Console "Latest:  $latestLogDirFile"
+    Write-Console ''
+
+    $backendProc = Start-CmdScript -Name 'backend' -ScriptPath $backendCmd -WorkingDirectory $backendDir
+    $frontendProc = Start-CmdScript -Name 'frontend' -ScriptPath $frontendCmd -WorkingDirectory $frontendDir
 
     if (-not (Wait-HttpReady -Name 'backend health' -Url 'http://127.0.0.1:8000/api/health' -BackendProcess $backendProc -FrontendProcess $frontendProc -TimeoutSeconds 30)) {
         Stop-ProcessTree $backendProc
@@ -389,108 +341,69 @@ if ($ShowLogs) {
 
     Start-Process 'http://localhost:5173'
 
-    Write-Host ''
-    Write-Host 'PointBench is running. Close this window or press Ctrl+C to stop backend and frontend.'
-    Write-Host ''
-
-    try {
-        while ($backendProc -and $frontendProc -and -not $backendProc.HasExited -and -not $frontendProc.HasExited) {
+    if ($ShowLogs) {
+        Write-Host ''
+        Write-Host 'PointBench is running. Close this window or press Ctrl+C to stop backend and frontend.'
+        Write-Host ''
+        while (-not $backendProc.HasExited -and -not $frontendProc.HasExited) {
+            Write-AllNewLogs
             Start-Sleep -Seconds 1
         }
-
+        Write-AllNewLogs
         $backendExit = if ($backendProc.HasExited) { $backendProc.ExitCode } else { 'running' }
         $frontendExit = if ($frontendProc.HasExited) { $frontendProc.ExitCode } else { 'running' }
-        $exitText = "Process exited. Backend=$backendExit Frontend=$frontendExit"
-        Write-LauncherLog $exitText
-        Write-Host ''
-        Write-Host $exitText
-        Write-Host "Backend log:  $backendLog"
-        Write-Host "Frontend log: $frontendLog"
-        Write-Host "Launcher log: $launcherLog"
-    } finally {
+        Write-FailureSummary "Process exited. Backend=$backendExit Frontend=$frontendExit"
         Stop-ProcessTree $backendProc
         Stop-ProcessTree $frontendProc
+        exit 1
     }
 
-    return
-}
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
 
-# --- Start backend (hidden, no window) ---
-$backendArgs = '-m uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level warning'
-$backendProc = Start-HiddenProcess -Name 'backend' `
-    -FilePath $pythonExe `
-    -Arguments $backendArgs `
-    -WorkingDirectory (Join-Path $root 'backend') `
-    -LogPath $backendLog
+    $trayIcon = New-Object System.Windows.Forms.NotifyIcon
+    $trayIcon.Icon = [System.Drawing.SystemIcons]::Application
+    $trayIcon.Text = 'test-point-web'
+    $trayIcon.Visible = $true
 
-# --- Start frontend (hidden, no window) ---
-$frontendProc = Start-HiddenProcess -Name 'frontend' `
-    -FilePath 'cmd.exe' `
-    -Arguments '/c npm run dev' `
-    -WorkingDirectory (Join-Path $root 'frontend') `
-    -LogPath $frontendLog
+    $menu = New-Object System.Windows.Forms.ContextMenuStrip
 
-# --- Wait for servers to be ready ---
-if (-not (Wait-HttpReady -Name 'backend health' -Url 'http://127.0.0.1:8000/api/health' -BackendProcess $backendProc -FrontendProcess $frontendProc -TimeoutSeconds 30)) {
-    Stop-ProcessTree $backendProc
-    Stop-ProcessTree $frontendProc
-    exit 1
-}
-if (-not (Wait-HttpReady -Name 'frontend' -Url 'http://127.0.0.1:5173/' -BackendProcess $backendProc -FrontendProcess $frontendProc -TimeoutSeconds 30)) {
-    Stop-ProcessTree $backendProc
-    Stop-ProcessTree $frontendProc
-    exit 1
-}
+    $openBrowser = New-Object System.Windows.Forms.ToolStripMenuItem('Open Browser')
+    $openBrowser.Add_Click({ Start-Process 'http://localhost:5173' })
+    $menu.Items.Add($openBrowser) | Out-Null
 
-# --- Open browser ---
-Start-Process 'http://localhost:5173'
+    $menu.Items.Add('-') | Out-Null
 
-# --- Build tray icon ---
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
+    $exitItem = New-Object System.Windows.Forms.ToolStripMenuItem('Exit')
+    $exitItem.Add_Click({
+        $trayIcon.Visible = $false
+        Stop-ProcessTree $backendProc
+        Stop-ProcessTree $frontendProc
+        [System.Windows.Forms.Application]::Exit()
+    }.GetNewClosure())
+    $menu.Items.Add($exitItem) | Out-Null
 
-$trayIcon = New-Object System.Windows.Forms.NotifyIcon
-$trayIcon.Icon = [System.Drawing.SystemIcons]::Application
-$trayIcon.Text = 'test-point-web'
-$trayIcon.Visible = $true
+    $trayIcon.ContextMenuStrip = $menu
+    $trayIcon.Add_Click({
+        if ($_.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
+            Start-Process 'http://localhost:5173'
+        }
+    })
+    $trayIcon.BalloonTipTitle = 'test-point-web'
+    $trayIcon.BalloonTipText = "Backend :8000 | Frontend :5173 | Logs: $runId"
+    $trayIcon.BalloonTipIcon = [System.Windows.Forms.ToolTipIcon]::Info
+    $trayIcon.ShowBalloonTip(3000)
 
-# --- Context menu ---
-$menu = New-Object System.Windows.Forms.ContextMenuStrip
+    [System.Windows.Forms.Application]::Run()
 
-$openBrowser = New-Object System.Windows.Forms.ToolStripMenuItem('Open Browser')
-$openBrowser.Add_Click({ Start-Process 'http://localhost:5173' })
-$menu.Items.Add($openBrowser) | Out-Null
-
-$menu.Items.Add('-') | Out-Null
-
-$exitItem = New-Object System.Windows.Forms.ToolStripMenuItem('Exit')
-$exitItem.Add_Click({
     $trayIcon.Visible = $false
     Stop-ProcessTree $backendProc
     Stop-ProcessTree $frontendProc
-    [System.Windows.Forms.Application]::Exit()
-}.GetNewClosure())
-$menu.Items.Add($exitItem) | Out-Null
-
-$trayIcon.ContextMenuStrip = $menu
-
-# --- Double-click opens browser ---
-$trayIcon.Add_Click({
-    if ($_.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
-        Start-Process 'http://localhost:5173'
-    }
-})
-
-# --- Show balloon tip ---
-$trayIcon.BalloonTipTitle = 'test-point-web'
-$trayIcon.BalloonTipText = 'Backend :8000 | Frontend :5173'
-$trayIcon.BalloonTipIcon = [System.Windows.Forms.ToolTipIcon]::Info
-$trayIcon.ShowBalloonTip(3000)
-
-# --- Run message loop ---
-[System.Windows.Forms.Application]::Run()
-
-# --- Cleanup on exit ---
-$trayIcon.Visible = $false
-Stop-ProcessTree $backendProc
-Stop-ProcessTree $frontendProc
+} catch {
+    Write-LauncherLog "Unhandled launcher error: $($_.Exception.Message)"
+    Write-LauncherLog "At: $($_.InvocationInfo.PositionMessage)"
+    Write-FailureSummary "Unhandled launcher error: $($_.Exception.Message)"
+    Stop-ProcessTree $backendProc
+    Stop-ProcessTree $frontendProc
+    exit 1
+}
