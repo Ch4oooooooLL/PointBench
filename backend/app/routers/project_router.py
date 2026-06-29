@@ -4,6 +4,7 @@ import json
 import shutil
 
 from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import FileResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -11,6 +12,7 @@ from app import models
 from app.database import STORAGE_DIR, get_db
 from app.schemas import PointCreate, PointOut, ProjectCreate, ProjectOut, ProjectUpdate, TestRunCreate, TestRunOut
 from app.services.dewesoft_service import delete_dewesoft_project_files
+from app.services.project_export_service import build_project_export_zip
 
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -243,6 +245,20 @@ def export_project_json(project_id: int, db: Session = Depends(get_db)) -> Respo
         json.dumps(data, ensure_ascii=False, indent=2),
         media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="{project.project_id}.json"'},
+    )
+
+
+@router.get("/{project_id}/export.zip")
+def export_project_zip(project_id: int, db: Session = Depends(get_db)) -> FileResponse:
+    try:
+        zip_path, zip_name = build_project_export_zip(db, project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="项目不存在") from exc
+    return FileResponse(
+        zip_path,
+        media_type="application/zip",
+        filename=zip_name,
+        headers={"Content-Disposition": f'attachment; filename="{zip_name}"'},
     )
 
 

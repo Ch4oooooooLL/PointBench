@@ -59,6 +59,9 @@ export function ProjectListPage() {
                 <td>{project.point_count}</td>
                 <td>{new Date(project.updated_at).toLocaleString()}</td>
                 <td className="actions">
+                  <a className="icon-button" href={`/api/projects/${project.id}/export.zip`} title="导出完整项目 zip">
+                    ZIP
+                  </a>
                   <a className="icon-button" href={`/api/projects/${project.id}/export.json`} title="导出 JSON">
                     <Download size={16} />
                   </a>
