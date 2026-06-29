@@ -4,10 +4,20 @@ from sqlalchemy.orm import Session, selectinload
 
 from app import models
 from app.database import get_db
-from app.schemas import DewesoftImportOut
+from app.schemas import (
+    DewesoftImportConfirmRequest,
+    DewesoftImportOut,
+    DewesoftImportPreview,
+    DewesoftImportResult,
+)
 from app.services.analysis_service import refresh_point_abnormal_flags
 from app.services.file_service import resolve_stored_path
-from app.services.dewesoft_service import import_dewesoft_file, save_dewesoft_upload
+from app.services.dewesoft_service import (
+    confirm_dewesoft_import,
+    create_dewesoft_preview,
+    import_dewesoft_file,
+    save_dewesoft_upload,
+)
 
 
 router = APIRouter(prefix="/api/dewesoft", tags=["dewesoft"])
@@ -27,6 +37,43 @@ async def create_dewesoft_import(
     upload_path = await save_dewesoft_upload(project, file)
     import_job = import_dewesoft_file(db, project_id, cycle_count, run_name, upload_path, file.filename)
     return DewesoftImportOut.model_validate(import_job)
+
+
+@router.post("/projects/{project_id}/imports/preview", response_model=DewesoftImportPreview)
+async def preview_dewesoft_import(
+    project_id: int,
+    cycle_count: int = Form(...),
+    run_name: str | None = Form(None),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> DewesoftImportPreview:
+    """第一步：上传 DXD/CSV 文件，解析通道并匹配点位，返回详细预览报告。
+
+    不写入数据库。将解析结果暂存为临时 JSON，供 confirm 阶段使用。
+    """
+    project = db.get(models.Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    upload_path = await save_dewesoft_upload(project, file)
+    return create_dewesoft_preview(
+        db, project_id, cycle_count, run_name, upload_path, file.filename
+    )
+
+
+@router.post("/projects/{project_id}/imports/confirm", response_model=DewesoftImportResult)
+def confirm_dewesoft_import_route(
+    project_id: int,
+    payload: DewesoftImportConfirmRequest,
+    db: Session = Depends(get_db),
+) -> DewesoftImportResult:
+    """第二步：确认导入，按用户选择的策略写入数据库。
+
+    从 preview 阶段保存的临时数据读取解析结果，不再重新解析文件。
+    """
+    project = db.get(models.Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    return confirm_dewesoft_import(db, project_id, payload)
 
 
 @router.get("/projects/{project_id}/imports", response_model=list[DewesoftImportOut])

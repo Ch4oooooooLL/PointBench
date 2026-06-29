@@ -257,3 +257,76 @@ export interface XlsxImportResult {
   skipped_file_duplicate_count: number;
   message: string;
 }
+
+// ── Dewesoft DXD 导入预览 / 确认类型 ──────────────────────────────────────
+
+export type DewesoftChannelMatchStatus =
+  | 'matched'
+  | 'unmatched_will_create'
+  | 'unmatched_no_key';
+
+export type DewesoftChannelAction =
+  | 'new_measurement'
+  | 'update_measurement'
+  | 'create_point'
+  | 'skip';
+
+export interface DewesoftChannelPreviewItem {
+  channel_name: string;
+  unit?: string | null;
+  sample_count: number;
+  match_status: DewesoftChannelMatchStatus;
+  matched_point_id?: string | null;
+  matched_point_name?: string | null;
+  matched_point_db_id?: number | null;
+  stable_min_strain_ue?: number | null;
+  stable_max_strain_ue?: number | null;
+  stable_mean_strain_ue?: number | null;
+  action: DewesoftChannelAction;
+  existing_max_strain_ue?: number | null;
+  existing_min_strain_ue?: number | null;
+  existing_run_name?: string | null;
+}
+
+export type DewesoftImportStrategy = 'append_only' | 'fill_missing' | 'overwrite';
+
+export interface DewesoftImportPreview {
+  preview_id: string;
+  filename: string;
+  cycle_count: number;
+  run_name: string;
+  total_channels: number;
+  matched_count: number;
+  unmatched_count: number;
+  new_points_will_create: number;
+  new_measurement_count: number;
+  existing_measurement_count: number;
+  missing_point_count: number;
+  duration_seconds?: number | null;
+  stable_start_seconds?: number | null;
+  stable_end_seconds?: number | null;
+  warnings: string[];
+  errors: string[];
+  channels: DewesoftChannelPreviewItem[];
+  can_confirm: boolean;
+}
+
+export interface DewesoftImportConfirmRequest {
+  preview_id: string;
+  strategy: DewesoftImportStrategy;
+  auto_create_points: boolean;
+  skip_unmatched: boolean;
+}
+
+export interface DewesoftImportResult {
+  success: boolean;
+  strategy: string;
+  created_measurement_count: number;
+  updated_measurement_count: number;
+  filled_missing_count: number;
+  skipped_existing_count: number;
+  skipped_unmatched_count: number;
+  created_point_count: number;
+  import_id?: number | null;
+  message: string;
+}

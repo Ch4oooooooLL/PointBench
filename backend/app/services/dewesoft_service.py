@@ -4,7 +4,7 @@ import re
 import shutil
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -14,8 +14,19 @@ from sqlalchemy.orm import Session, selectinload
 
 from app import models
 from app.database import STORAGE_DIR
+from app.schemas import (
+    DewesoftChannelAction,
+    DewesoftChannelMatchStatus,
+    DewesoftChannelPreviewItem,
+    DewesoftImportConfirmRequest,
+    DewesoftImportPreview,
+    DewesoftImportResult,
+    DewesoftImportStrategyEnum,
+)
 from app.services.analysis_service import compute_measurement_fields, refresh_point_abnormal_flags
 from app.utils.path_utils import safe_dewesoft_dir
+
+DEWESOFT_TEMP_DIR = STORAGE_DIR / "temp" / "dewesoft"
 
 
 RAW_SUFFIXES = {".dxd", ".dxz", ".d7d", ".d7z"}
@@ -544,6 +555,522 @@ def import_dewesoft_file(db: Session, project_id: int, cycle_count: int, run_nam
         .options(selectinload(models.DewesoftImport.channels))
         .where(models.DewesoftImport.id == import_job.id)
     ).scalar_one()
+
+
+def create_dewesoft_preview(
+    db: Session,
+    project_id: int,
+    cycle_count: int,
+    run_name: str | None,
+    upload_path: Path,
+    original_filename: str | None = None,
+) -> DewesoftImportPreview:
+    """第一步：解析 DXD 文件，匹配项目点位，生成预览报告（不写入 DB）。"""
+    project = db.get(models.Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    run_name_value = run_name or f"Dewesoft-{cycle_count}"
+    filename = original_filename or upload_path.name
+
+    channels, metadata = read_dewesoft_channels(upload_path)
+    all_times = [time for channel in channels for time in channel.times]
+    duration, stable_start, stable_end = _stable_window(all_times)
+
+    # 加载项目点位
+    project_points = db.execute(
+        select(models.TestPoint).where(models.TestPoint.project_db_id == project_id)
+    ).scalars().all()
+    point_map: dict[str, models.TestPoint] = {}
+    for point in project_points:
+        for match_key in _point_match_keys(point.point_id):
+            if match_key not in point_map:
+                point_map[match_key] = point
+
+    # 查找是否已有对应的 TestRun
+    existing_run = db.scalar(
+        select(models.TestRun).where(
+            models.TestRun.project_db_id == project_id,
+            models.TestRun.cycle_count == cycle_count,
+        )
+    )
+
+    preview_channels: list[DewesoftChannelPreviewItem] = []
+    matched = 0
+    unmatched = 0
+    unmatched_will_create = 0
+    unmatched_no_key = 0
+    new_measurement_count = 0
+    existing_measurement_count = 0
+    warnings: list[str] = []
+
+    for channel in channels:
+        window_values = _window_values(channel, stable_start, stable_end)
+        min_value = min(window_values) if window_values else None
+        max_value = max(window_values) if window_values else None
+        mean_value = sum(window_values) / len(window_values) if window_values else None
+
+        channel_match = _split_dewesoft_point_name(channel.name)
+        channel_keys = [channel_match[0]] if channel_match else _point_match_keys(channel.name)
+        point = next((point_map[key] for key in channel_keys if key in point_map), None)
+
+        # 确定匹配状态
+        if point:
+            match_status = DewesoftChannelMatchStatus.MATCHED
+            matched_point_id = point.point_id
+            matched_point_name = point.point_name
+            matched_point_db_id = point.id
+        elif channel_match:
+            match_status = DewesoftChannelMatchStatus.UNMATCHED_WILL_CREATE
+            matched_point_id = channel_match[0]
+            matched_point_name = channel_match[1]
+            matched_point_db_id = None
+        else:
+            match_status = DewesoftChannelMatchStatus.UNMATCHED_NO_KEY
+            matched_point_id = None
+            matched_point_name = None
+            matched_point_db_id = None
+
+        # 确定操作和已有数据对比
+        action = DewesoftChannelAction.SKIP
+        existing_max = None
+        existing_min = None
+        existing_run_name = None
+
+        if point and min_value is not None and max_value is not None:
+            if existing_run:
+                existing_record = db.scalar(
+                    select(models.MeasurementRecord).where(
+                        models.MeasurementRecord.run_id == existing_run.id,
+                        models.MeasurementRecord.point_db_id == point.id,
+                    )
+                )
+                if existing_record:
+                    action = DewesoftChannelAction.UPDATE_MEASUREMENT
+                    existing_max = existing_record.max_strain_ue
+                    existing_min = existing_record.min_strain_ue
+                    existing_run_name = existing_run.run_name
+                    existing_measurement_count += 1
+                else:
+                    action = DewesoftChannelAction.NEW_MEASUREMENT
+                    new_measurement_count += 1
+            else:
+                action = DewesoftChannelAction.NEW_MEASUREMENT
+                new_measurement_count += 1
+            matched += 1
+        elif point and (min_value is None or max_value is None):
+            action = DewesoftChannelAction.SKIP
+            unmatched += 1
+            warnings.append(f"通道 {channel.name} 匹配到点位 {point.point_id} 但无有效应变数据，将跳过")
+        elif channel_match:
+            action = DewesoftChannelAction.CREATE_POINT
+            unmatched_will_create += 1
+            unmatched += 1
+        else:
+            action = DewesoftChannelAction.SKIP
+            unmatched_no_key += 1
+            unmatched += 1
+
+        preview_channels.append(
+            DewesoftChannelPreviewItem(
+                channel_name=channel.name,
+                unit=channel.unit,
+                sample_count=len(channel.values),
+                match_status=match_status,
+                matched_point_id=matched_point_id,
+                matched_point_name=matched_point_name,
+                matched_point_db_id=matched_point_db_id,
+                stable_min_strain_ue=min_value,
+                stable_max_strain_ue=max_value,
+                stable_mean_strain_ue=mean_value,
+                action=action,
+                existing_max_strain_ue=existing_max,
+                existing_min_strain_ue=existing_min,
+                existing_run_name=existing_run_name,
+            )
+        )
+
+    # 计算项目中有但 DXD 中没有的点位（缺失点位）
+    matched_point_ids = {
+        item.matched_point_db_id
+        for item in preview_channels
+        if item.matched_point_db_id is not None
+    }
+    missing_point_count = sum(
+        1 for point in project_points if point.id not in matched_point_ids
+    )
+
+    can_confirm = (
+        (matched > 0 or unmatched_will_create > 0)
+        and len([c for c in preview_channels if c.action != DewesoftChannelAction.SKIP]) > 0
+    )
+
+    preview = DewesoftImportPreview(
+        preview_id="",  # 稍后填充
+        filename=filename,
+        cycle_count=cycle_count,
+        run_name=run_name_value,
+        total_channels=len(channels),
+        matched_count=matched,
+        unmatched_count=unmatched,
+        new_points_will_create=unmatched_will_create,
+        new_measurement_count=new_measurement_count,
+        existing_measurement_count=existing_measurement_count,
+        missing_point_count=missing_point_count,
+        duration_seconds=duration,
+        stable_start_seconds=stable_start,
+        stable_end_seconds=stable_end,
+        warnings=warnings,
+        errors=[],
+        channels=preview_channels,
+        can_confirm=can_confirm,
+    )
+
+    # 暂存预览数据到临时文件
+    preview_id = f"DXD-{uuid.uuid4().hex[:12]}"
+    DEWESOFT_TEMP_DIR.mkdir(parents=True, exist_ok=True)
+
+    temp_data = {
+        "project_id": project_id,
+        "cycle_count": cycle_count,
+        "run_name": run_name_value,
+        "filename": filename,
+        "upload_path": str(upload_path),
+        "duration_seconds": duration,
+        "stable_start_seconds": stable_start,
+        "stable_end_seconds": stable_end,
+        "metadata": metadata if isinstance(metadata, dict) else str(metadata),
+        "channels": [item.model_dump() for item in preview_channels],
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    temp_path = DEWESOFT_TEMP_DIR / f"{preview_id}.json"
+    temp_path.write_text(
+        json.dumps(temp_data, ensure_ascii=False, default=str),
+        encoding="utf-8",
+    )
+
+    preview.preview_id = preview_id
+    return preview
+
+
+def confirm_dewesoft_import(
+    db: Session,
+    project_id: int,
+    payload: DewesoftImportConfirmRequest,
+) -> DewesoftImportResult:
+    """第二步：确认导入，按用户选择的策略写入数据库。"""
+    temp_path = DEWESOFT_TEMP_DIR / f"{payload.preview_id}.json"
+    if not temp_path.exists():
+        raise HTTPException(status_code=404, detail="预检数据已过期，请重新上传预览")
+
+    try:
+        data = json.loads(temp_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=400, detail=f"预检数据损坏: {exc}") from exc
+
+    if data.get("project_id") != project_id:
+        raise HTTPException(status_code=400, detail="预检数据与当前项目不匹配")
+
+    project = db.get(models.Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    cycle_count = data["cycle_count"]
+    run_name_value = data["run_name"]
+    filename = data.get("filename", "unknown")
+    upload_path = Path(data["upload_path"])
+    duration = data.get("duration_seconds")
+    stable_start = data.get("stable_start_seconds")
+    stable_end = data.get("stable_end_seconds")
+    channels_data: list[dict] = data.get("channels", [])
+
+    if not upload_path.exists():
+        raise HTTPException(status_code=400, detail="原始上传文件已丢失，请重新上传")
+
+    strategy = payload.strategy
+    auto_create = payload.auto_create_points
+    skip_unmatched = payload.skip_unmatched
+
+    # 创建 DewesoftImport 记录
+    import_job = models.DewesoftImport(
+        project_db_id=project_id,
+        cycle_count=cycle_count,
+        run_name=run_name_value,
+        filename=filename,
+        stored_path=str(upload_path.relative_to(Path(__file__).resolve().parents[2])),
+        status="processing",
+        duration_seconds=duration,
+        stable_start_seconds=stable_start,
+        stable_end_seconds=stable_end,
+    )
+    db.add(import_job)
+    db.flush()
+
+    try:
+        # 查找或创建 TestRun（同一个 cycle_count 只有一个 run）
+        test_run = db.scalar(
+            select(models.TestRun).where(
+                models.TestRun.project_db_id == project_id,
+                models.TestRun.cycle_count == cycle_count,
+            )
+        )
+        if not test_run:
+            test_run = models.TestRun(
+                project_db_id=project_id,
+                run_name=run_name_value,
+                cycle_count=cycle_count,
+                remark=f"Dewesoft import: {filename}",
+            )
+            db.add(test_run)
+            db.flush()
+        import_job.test_run_id = test_run.id
+
+        # 加载项目点位
+        project_points = db.execute(
+            select(models.TestPoint).where(models.TestPoint.project_db_id == project_id)
+        ).scalars().all()
+        point_map: dict[str, models.TestPoint] = {}
+        for point in project_points:
+            for match_key in _point_match_keys(point.point_id):
+                if match_key not in point_map:
+                    point_map[match_key] = point
+
+        created_measurement_count = 0
+        updated_measurement_count = 0
+        filled_missing_count = 0
+        skipped_existing_count = 0
+        skipped_unmatched_count = 0
+        created_point_count = 0
+        matched = 0
+        unmatched = 0
+
+        affected_points: set[int] = set()
+
+        for ch_data in channels_data:
+            action = ch_data.get("action", "skip")
+            match_status = ch_data.get("match_status", "")
+            channel_name = ch_data.get("channel_name", "")
+            unit = ch_data.get("unit")
+            sample_count = ch_data.get("sample_count", 0)
+            min_value = ch_data.get("stable_min_strain_ue")
+            max_value = ch_data.get("stable_max_strain_ue")
+            mean_value = ch_data.get("stable_mean_strain_ue")
+            matched_point_db_id = ch_data.get("matched_point_db_id")
+
+            point: models.TestPoint | None = None
+            measurement_id: int | None = None
+
+            if action == "create_point":
+                if skip_unmatched or not auto_create:
+                    skipped_unmatched_count += 1
+                    unmatched += 1
+                else:
+                    point_id = ch_data.get("matched_point_id", "")
+                    point_name = ch_data.get("matched_point_name", channel_name)
+                    # 检查是否已被其他通道创建
+                    existing_point = next(
+                        (p for p in project_points if p.point_id.upper() == point_id.upper()),
+                        None,
+                    )
+                    if existing_point:
+                        point = existing_point
+                    else:
+                        point = models.TestPoint(
+                            project_db_id=project_id,
+                            point_id=point_id,
+                            point_name=point_name,
+                            point_type="strain",
+                            install_status="planned",
+                            remark="由 Dewesoft 通道自动创建，请补充点位信息。",
+                            raw_json=json.dumps(
+                                {"source": "dewesoft", "channel_name": channel_name},
+                                ensure_ascii=False,
+                            ),
+                        )
+                        db.add(point)
+                        db.flush()
+                        db.add(
+                            models.SensorChannel(
+                                point_db_id=point.id,
+                                device="Dewesoft",
+                                channel_name=channel_name,
+                                unit=unit,
+                            )
+                        )
+                        for match_key in _point_match_keys(point.point_id):
+                            point_map[match_key] = point
+                        project_points.append(point)
+                        created_point_count += 1
+
+                    if min_value is not None and max_value is not None:
+                        record = models.MeasurementRecord(
+                            run_id=test_run.id,
+                            point_db_id=point.id,
+                            max_strain_ue=max_value,
+                            min_strain_ue=min_value,
+                            remark=f"Dewesoft channel {channel_name}",
+                        )
+                        if record.max_strain_ue is not None and record.min_strain_ue is not None and record.max_strain_ue < record.min_strain_ue:
+                            record.max_strain_ue, record.min_strain_ue = record.min_strain_ue, record.max_strain_ue
+                        compute_measurement_fields(record)
+                        db.add(record)
+                        db.flush()
+                        measurement_id = record.id
+                        created_measurement_count += 1
+                        matched += 1
+                        affected_points.add(point.id)
+                    else:
+                        unmatched += 1
+
+            elif action in ("new_measurement", "update_measurement"):
+                if matched_point_db_id is None:
+                    skipped_unmatched_count += 1
+                    unmatched += 1
+                elif min_value is None or max_value is None:
+                    skipped_unmatched_count += 1
+                    unmatched += 1
+                else:
+                    point = db.get(models.TestPoint, matched_point_db_id)
+                    if not point:
+                        skipped_unmatched_count += 1
+                        unmatched += 1
+                    else:
+                        existing_record = db.scalar(
+                            select(models.MeasurementRecord).where(
+                                models.MeasurementRecord.run_id == test_run.id,
+                                models.MeasurementRecord.point_db_id == point.id,
+                            )
+                        )
+
+                        if existing_record and strategy == DewesoftImportStrategyEnum.APPEND_ONLY:
+                            # 仅新增策略：已有记录跳过
+                            skipped_existing_count += 1
+                            measurement_id = existing_record.id
+                            matched += 1
+                        elif existing_record and strategy == DewesoftImportStrategyEnum.FILL_MISSING:
+                            # 填补空缺：仅更新 NULL 字段
+                            updated_fields = 0
+                            if existing_record.max_strain_ue is None and max_value is not None:
+                                existing_record.max_strain_ue = max_value
+                                updated_fields += 1
+                            if existing_record.min_strain_ue is None and min_value is not None:
+                                existing_record.min_strain_ue = min_value
+                                updated_fields += 1
+                            if updated_fields > 0:
+                                if existing_record.max_strain_ue is not None and existing_record.min_strain_ue is not None and existing_record.max_strain_ue < existing_record.min_strain_ue:
+                                    existing_record.max_strain_ue, existing_record.min_strain_ue = existing_record.min_strain_ue, existing_record.max_strain_ue
+                                compute_measurement_fields(existing_record)
+                                db.add(existing_record)
+                                db.flush()
+                                filled_missing_count += 1
+                            else:
+                                skipped_existing_count += 1
+                            measurement_id = existing_record.id
+                            matched += 1
+                            affected_points.add(point.id)
+                        elif existing_record and strategy == DewesoftImportStrategyEnum.OVERWRITE:
+                            # 覆盖策略：用新值覆盖
+                            existing_record.max_strain_ue = max_value
+                            existing_record.min_strain_ue = min_value
+                            existing_record.remark = f"Dewesoft channel {channel_name}"
+                            if existing_record.max_strain_ue is not None and existing_record.min_strain_ue is not None and existing_record.max_strain_ue < existing_record.min_strain_ue:
+                                existing_record.max_strain_ue, existing_record.min_strain_ue = existing_record.min_strain_ue, existing_record.max_strain_ue
+                            compute_measurement_fields(existing_record)
+                            db.add(existing_record)
+                            db.flush()
+                            updated_measurement_count += 1
+                            measurement_id = existing_record.id
+                            matched += 1
+                            affected_points.add(point.id)
+                        else:
+                            # 新增记录
+                            record = models.MeasurementRecord(
+                                run_id=test_run.id,
+                                point_db_id=point.id,
+                                max_strain_ue=max_value,
+                                min_strain_ue=min_value,
+                                remark=f"Dewesoft channel {channel_name}",
+                            )
+                            if record.max_strain_ue is not None and record.min_strain_ue is not None and record.max_strain_ue < record.min_strain_ue:
+                                record.max_strain_ue, record.min_strain_ue = record.min_strain_ue, record.max_strain_ue
+                            compute_measurement_fields(record)
+                            db.add(record)
+                            db.flush()
+                            measurement_id = record.id
+                            created_measurement_count += 1
+                            matched += 1
+                            affected_points.add(point.id)
+
+            else:
+                # action == "skip"
+                skipped_unmatched_count += 1
+                unmatched += 1
+
+            db.add(
+                models.DewesoftChannel(
+                    import_id=import_job.id,
+                    channel_name=channel_name,
+                    unit=unit,
+                    sample_count=sample_count,
+                    matched_point_db_id=point.id if point else (matched_point_db_id if action != "skip" else None),
+                    measurement_id=measurement_id,
+                    stable_min_strain_ue=min_value,
+                    stable_max_strain_ue=max_value,
+                    stable_mean_strain_ue=mean_value,
+                    raw_json=json.dumps({"source": "dewesoft_preview"}, ensure_ascii=False),
+                )
+            )
+
+        import_job.matched_channel_count = matched
+        import_job.unmatched_channel_count = unmatched
+        import_job.status = "imported"
+
+        message_parts = [f"已导入 {matched} 个匹配点位通道"]
+        if unmatched > 0:
+            message_parts.append(f"保留 {unmatched} 个未匹配通道")
+        if created_point_count > 0:
+            message_parts.append(f"自动新增 {created_point_count} 个点位")
+        if created_measurement_count > 0:
+            message_parts.append(f"新增 {created_measurement_count} 条测量记录")
+        if updated_measurement_count > 0:
+            message_parts.append(f"覆盖 {updated_measurement_count} 条测量记录")
+        if filled_missing_count > 0:
+            message_parts.append(f"填补 {filled_missing_count} 条空缺字段")
+        if skipped_existing_count > 0:
+            message_parts.append(f"跳过 {skipped_existing_count} 条已有记录")
+
+        import_job.message = "；".join(message_parts)
+        db.flush()
+
+        for point_id in affected_points:
+            refresh_point_abnormal_flags(db, point_id)
+        db.commit()
+    except Exception as exc:
+        import_job.status = "failed"
+        import_job.message = str(exc)
+        db.commit()
+
+    db.refresh(import_job)
+
+    # 清理临时文件
+    try:
+        temp_path.unlink()
+    except OSError:
+        pass
+
+    return DewesoftImportResult(
+        success=import_job.status == "imported",
+        strategy=strategy.value,
+        created_measurement_count=created_measurement_count,
+        updated_measurement_count=updated_measurement_count,
+        filled_missing_count=filled_missing_count,
+        skipped_existing_count=skipped_existing_count,
+        skipped_unmatched_count=skipped_unmatched_count,
+        created_point_count=created_point_count,
+        import_id=import_job.id,
+        message=import_job.message or "",
+    )
 
 
 def delete_dewesoft_project_files(project_id: str) -> None:

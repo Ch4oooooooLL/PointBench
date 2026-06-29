@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import ExcelJS from 'exceljs/dist/exceljs.min.js';
 import { api } from '../api/client';
-import { DewesoftImport, Point, TestRun, XlsxImportPreview, XlsxImportResult, XlsxImportStrategy, XlsxPreviewItem, XlsxRowStatus } from '../types';
+import { DewesoftImport, DewesoftImportPreview, DewesoftImportResult, DewesoftImportStrategy, Point, TestRun, XlsxImportPreview, XlsxImportResult, XlsxImportStrategy, XlsxPreviewItem, XlsxRowStatus } from '../types';
 
 interface RowState {
   max_strain_ue: string;
@@ -56,6 +56,16 @@ export function TestRunNewPage() {
   const [dewesoftAlertTone, setDewesoftAlertTone] = useState<'ok' | 'danger'>('danger');
   const [dewesoftBusy, setDewesoftBusy] = useState(false);
   const [lastDewesoftImport, setLastDewesoftImport] = useState<DewesoftImport | null>(null);
+
+  // ── Dewesoft 多步预览导入流程状态 ──
+  type DewesoftStep = 'upload' | 'preview' | 'confirming' | 'result';
+  const [dewesoftStep, setDewesoftStep] = useState<DewesoftStep>('upload');
+  const [dewesoftPreview, setDewesoftPreview] = useState<DewesoftImportPreview | null>(null);
+  const [dewesoftResult, setDewesoftResult] = useState<DewesoftImportResult | null>(null);
+  const [dewesoftStrategy, setDewesoftStrategy] = useState<DewesoftImportStrategy>('append_only');
+  const [dewesoftAutoCreatePoints, setDewesoftAutoCreatePoints] = useState(true);
+  const [dewesoftSkipUnmatched, setDewesoftSkipUnmatched] = useState(false);
+  const [dewesoftShowAdvanced, setDewesoftShowAdvanced] = useState(false);
 
   async function loadPoints() {
     if (!projectId) return;
@@ -383,6 +393,78 @@ export function TestRunNewPage() {
     }
   }
 
+  // ── Dewesoft 预览：上传文件并获取预览报告 ──
+  async function previewDewesoftImport(file?: File) {
+    if (!file) return;
+    const cycleCountText = dewesoftCycleCount.trim();
+    const cycleCountValue = Number(cycleCountText);
+    if (!cycleCountText || !Number.isFinite(cycleCountValue) || !Number.isInteger(cycleCountValue)) {
+      setDewesoftAlertTone('danger');
+      setDewesoftMessage('请先填写本次导入对应的整数循环次数。');
+      return;
+    }
+    setDewesoftBusy(true);
+    setDewesoftMessage('');
+    setDewesoftPreview(null);
+    setDewesoftResult(null);
+    try {
+      const form = new FormData();
+      form.append('cycle_count', String(cycleCountValue));
+      if (dewesoftRunName.trim()) form.append('run_name', dewesoftRunName.trim());
+      form.append('file', file);
+      const preview = await api.post<DewesoftImportPreview>(
+        `/api/dewesoft/projects/${projectId}/imports/preview`,
+        form,
+      );
+      setDewesoftPreview(preview);
+      setDewesoftStep('preview');
+      // 根据预览结果预调策略
+      if (preview.existing_measurement_count > 0) {
+        setDewesoftStrategy('append_only');
+      }
+    } catch (err) {
+      setDewesoftAlertTone('danger');
+      setDewesoftMessage(`预览失败：${(err as Error).message}`);
+    } finally {
+      setDewesoftBusy(false);
+    }
+  }
+
+  // ── Dewesoft 确认导入 ──
+  async function confirmDewesoftImport() {
+    if (!dewesoftPreview) return;
+    setDewesoftStep('confirming');
+    try {
+      const result = await api.post<DewesoftImportResult>(
+        `/api/dewesoft/projects/${projectId}/imports/confirm`,
+        {
+          preview_id: dewesoftPreview.preview_id,
+          strategy: dewesoftStrategy,
+          auto_create_points: dewesoftAutoCreatePoints,
+          skip_unmatched: dewesoftSkipUnmatched,
+        },
+      );
+      setDewesoftResult(result);
+      setDewesoftStep('result');
+      await loadExistingRuns();
+      if (result.created_point_count > 0) {
+        await refreshPointsAfterDewesoftImport();
+      }
+    } catch (err) {
+      setDewesoftAlertTone('danger');
+      setDewesoftMessage(`导入失败：${(err as Error).message}`);
+      setDewesoftStep('preview');
+    }
+  }
+
+  // ── 重置 Dewesoft 流程 ──
+  function resetDewesoftFlow() {
+    setDewesoftStep('upload');
+    setDewesoftPreview(null);
+    setDewesoftResult(null);
+    setDewesoftMessage('');
+  }
+
   return (
     <section>
       <div className="page-head">
@@ -589,30 +671,69 @@ export function TestRunNewPage() {
 
       {mode === 'dewesoft' && (
         <div className="panel import-mode-panel">
-          <div className="section-head">
-            <div>
-              <h2>Dewesoft 数据导入</h2>
-              <p>上传 .dxd/.dxz 原始记录文件，或 Dewesoft 导出的 .csv/.txt，系统读取总时长中间 1/10 稳定段，按 01-点位名称 通道名匹配点位编号并计算最大/最小应变。</p>
+          {dewesoftStep === 'upload' && (
+            <>
+              <div className="section-head">
+                <div>
+                  <h2>Dewesoft 数据导入</h2>
+                  <p>上传 .dxd/.dxz 原始记录文件，或 Dewesoft 导出的 .csv/.txt，系统解析通道后匹配项目点位，先预览校验再确认写入数据库。</p>
+                </div>
+              </div>
+              <div className="form-row dewesoft-form">
+                <label>本次循环次数<input type="number" value={dewesoftCycleCount} onChange={(e) => setDewesoftCycleCount(e.target.value)} placeholder="必填" /></label>
+                <label>轮次名称<input value={dewesoftRunName} onChange={(e) => setDewesoftRunName(e.target.value)} placeholder="留空则自动生成" /></label>
+              </div>
+              <div className="import-actions">
+                <label className="button primary file-button">
+                  <Upload size={18} />
+                  {dewesoftBusy ? '解析中...' : '选择 Dewesoft 数据文件并预览'}
+                  <input type="file" accept=".dxd,.dxz,.d7d,.d7z,.csv,.txt" disabled={dewesoftBusy} onChange={(event) => previewDewesoftImport(event.target.files?.[0])} />
+                </label>
+                <Link className="button" to={`/projects/${projectId}/dewesoft-imports`}>查看导入记录</Link>
+              </div>
+              <div className="template-note">
+                <DatabaseZap size={18} />
+                上传后将显示通道匹配预览报告，您可以选择导入策略，确认后才会写入数据库。
+              </div>
+              {dewesoftMessage && <div className={`alert ${dewesoftAlertTone}`}>{dewesoftMessage}</div>}
+            </>
+          )}
+
+          {dewesoftStep === 'preview' && dewesoftPreview && (
+            <DewesoftPreviewPanel
+              preview={dewesoftPreview}
+              strategy={dewesoftStrategy}
+              onStrategyChange={setDewesoftStrategy}
+              autoCreatePoints={dewesoftAutoCreatePoints}
+              onAutoCreatePointsChange={setDewesoftAutoCreatePoints}
+              skipUnmatched={dewesoftSkipUnmatched}
+              onSkipUnmatchedChange={setDewesoftSkipUnmatched}
+              showAdvanced={dewesoftShowAdvanced}
+              onToggleAdvanced={() => setDewesoftShowAdvanced(!dewesoftShowAdvanced)}
+              onConfirm={confirmDewesoftImport}
+              onCancel={resetDewesoftFlow}
+            />
+          )}
+
+          {dewesoftStep === 'confirming' && (
+            <div className="import-progress">
+              <div className="spinner" />
+              <p>正在导入 Dewesoft 数据，请稍候...</p>
             </div>
-          </div>
-          <div className="form-row dewesoft-form">
-            <label>本次循环次数<input type="number" value={dewesoftCycleCount} onChange={(e) => setDewesoftCycleCount(e.target.value)} /></label>
-            <label>轮次名称<input value={dewesoftRunName} onChange={(e) => setDewesoftRunName(e.target.value)} placeholder="留空则自动生成" /></label>
-          </div>
-          <div className="import-actions">
-            <label className="button primary file-button">
-              <DatabaseZap size={18} />
-              {dewesoftBusy ? '解析中...' : '选择 Dewesoft 数据文件'}
-              <input type="file" accept=".dxd,.dxz,.d7d,.d7z,.csv,.txt" disabled={dewesoftBusy} onChange={(event) => importDewesoft(event.target.files?.[0])} />
-            </label>
-            <Link className="button" to={`/projects/${projectId}/dewesoft-imports`}>查看 Dewesoft 导入记录</Link>
-          </div>
-          <div className="template-note">
-            <DatabaseZap size={18} />
-            CSV/TXT 导出文件可直接解析；原始 .dxd/.dxz 文件需要本机后端环境可加载 Dewesoft 官方 DWDataReaderLib。
-          </div>
-          {dewesoftMessage && <div className={`alert ${dewesoftAlertTone}`}>{dewesoftMessage}</div>}
-          {lastDewesoftImport && <Link className="button" to={`/projects/${projectId}/dewesoft-imports`}>打开本次导入详情</Link>}
+          )}
+
+          {dewesoftStep === 'result' && dewesoftResult && (
+            <DewesoftResultPanel
+              result={dewesoftResult}
+              projectId={projectId!}
+              onDone={() => navigate(`/projects/${projectId}/analysis`)}
+              onRetry={resetDewesoftFlow}
+            />
+          )}
+
+          {dewesoftStep !== 'upload' && dewesoftMessage && (
+            <div className={dewesoftMessage.includes('失败') ? 'alert danger' : 'alert ok'}>{dewesoftMessage}</div>
+          )}
         </div>
       )}
     </section>
@@ -1299,6 +1420,550 @@ function XlsxResultPanel({ result, onDone, onRetry }: { result: XlsxImportResult
           <CheckCircle size={18} /> 返回当前项目
         </button>
         <button className="button" onClick={onRetry}>继续导入</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Dewesoft 通道匹配状态标签 ──
+const DXD_MATCH_LABELS: Record<string, string> = {
+  matched: '已匹配',
+  unmatched_will_create: '将自动创建点位',
+  unmatched_no_key: '无法匹配',
+};
+
+const DXD_MATCH_COLORS: Record<string, string> = {
+  matched: '#22c55e',
+  unmatched_will_create: '#f59e0b',
+  unmatched_no_key: '#ef4444',
+};
+
+const DXD_ACTION_LABELS: Record<string, string> = {
+  new_measurement: '新增测量',
+  update_measurement: '更新测量',
+  create_point: '创建点位',
+  skip: '跳过',
+};
+
+const DXD_ACTION_COLORS: Record<string, string> = {
+  new_measurement: '#22c55e',
+  update_measurement: '#f59e0b',
+  create_point: '#8b5cf6',
+  skip: '#94a3b8',
+};
+
+function DxdStatusBadge({ status }: { status: string }) {
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        padding: '2px 8px',
+        borderRadius: 12,
+        fontSize: 11,
+        fontWeight: 600,
+        color: '#fff',
+        backgroundColor: DXD_MATCH_COLORS[status] || '#94a3b8',
+        boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+      }}
+    >
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#fff', opacity: 0.8 }} />
+      {DXD_MATCH_LABELS[status] || status}
+    </span>
+  );
+}
+
+function DxdActionBadge({ action }: { action: string }) {
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        padding: '2px 8px',
+        borderRadius: 12,
+        fontSize: 11,
+        fontWeight: 600,
+        color: '#fff',
+        backgroundColor: DXD_ACTION_COLORS[action] || '#94a3b8',
+        boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+      }}
+    >
+      {DXD_ACTION_LABELS[action] || action}
+    </span>
+  );
+}
+
+// ── Dewesoft 策略选项 ──
+const DXD_STRATEGY_OPTIONS: { value: DewesoftImportStrategy; label: string; desc: string }[] = [
+  { value: 'append_only', label: '仅新增，不覆盖已有记录', desc: '只添加数据库中不存在的测量记录，已有记录保持不变。' },
+  { value: 'fill_missing', label: '只填补空缺字段', desc: '已有记录中为空的字段用 DXD 数据填充，非空字段不覆盖。' },
+  { value: 'overwrite', label: '覆盖已有记录', desc: 'DXD 中非空字段覆盖数据库中已有记录。' },
+];
+
+// ── Dewesoft 预览面板 ──
+function DewesoftPreviewPanel({
+  preview,
+  strategy,
+  onStrategyChange,
+  autoCreatePoints,
+  onAutoCreatePointsChange,
+  skipUnmatched,
+  onSkipUnmatchedChange,
+  showAdvanced,
+  onToggleAdvanced,
+  onConfirm,
+  onCancel,
+}: {
+  preview: DewesoftImportPreview;
+  strategy: DewesoftImportStrategy;
+  onStrategyChange: (s: DewesoftImportStrategy) => void;
+  autoCreatePoints: boolean;
+  onAutoCreatePointsChange: (v: boolean) => void;
+  skipUnmatched: boolean;
+  onSkipUnmatchedChange: (v: boolean) => void;
+  showAdvanced: boolean;
+  onToggleAdvanced: () => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const hasExisting = preview.existing_measurement_count > 0;
+  const hasUnmatched = preview.unmatched_count > 0;
+  const hasIssues = preview.errors.length > 0 || preview.unmatched_count > 0;
+
+  // 筛选与搜索
+  const [matchFilter, setMatchFilter] = useState<string>('all');
+  const [actionFilter, setActionFilter] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(20);
+
+  const counts = useMemo(() => {
+    const map: Record<string, number> = {
+      all: preview.channels.length,
+      matched: 0,
+      unmatched_will_create: 0,
+      unmatched_no_key: 0,
+    };
+    preview.channels.forEach((ch) => {
+      if (map[ch.match_status] !== undefined) map[ch.match_status]++;
+    });
+    return map;
+  }, [preview.channels]);
+
+  const filteredChannels = useMemo(() => {
+    return preview.channels.filter((ch) => {
+      if (matchFilter !== 'all' && ch.match_status !== matchFilter) return false;
+      if (actionFilter !== 'all' && ch.action !== actionFilter) return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.trim().toLowerCase();
+        const name = (ch.channel_name ?? '').toLowerCase();
+        const pid = (ch.matched_point_id ?? '').toLowerCase();
+        const pname = (ch.matched_point_name ?? '').toLowerCase();
+        if (!name.includes(q) && !pid.includes(q) && !pname.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [preview.channels, matchFilter, actionFilter, searchQuery]);
+
+  const totalPages = Math.ceil(filteredChannels.length / pageSize) || 1;
+  const paginatedChannels = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredChannels.slice(start, start + pageSize);
+  }, [filteredChannels, currentPage, pageSize]);
+
+  const handleFilterChange = (f: string) => { setMatchFilter(f); setCurrentPage(1); };
+  const handleSearchChange = (q: string) => { setSearchQuery(q); setCurrentPage(1); };
+
+  return (
+    <div>
+      {/* 步骤向导 */}
+      <div className="import-wizard-steps">
+        <div className="wizard-step completed">
+          <span className="wizard-step-num"><Check size={14} /></span>
+          <span>1. 解析 DXD 文件</span>
+        </div>
+        <div className="wizard-step-divider active" />
+        <div className="wizard-step active">
+          <span className="wizard-step-num">2</span>
+          <span>2. 通道匹配预览与策略配置</span>
+        </div>
+        <div className="wizard-step-divider" />
+        <div className="wizard-step">
+          <span className="wizard-step-num">3</span>
+          <span>3. 确认与写入数据库</span>
+        </div>
+        <div className="wizard-step-divider" />
+        <div className="wizard-step">
+          <span className="wizard-step-num">4</span>
+          <span>4. 导入完成</span>
+        </div>
+      </div>
+
+      {/* 顶部 Header */}
+      <div className="preview-topbar-redesigned">
+        <div className="preview-file-info">
+          <div className="preview-file-icon">
+            <DatabaseZap size={24} />
+          </div>
+          <div className="preview-file-details">
+            <h3>数据预览 — {preview.filename}</h3>
+            <div className="preview-file-meta">
+              <span className="preview-file-tag">循环次数: {preview.cycle_count.toLocaleString()}</span>
+              <span className="preview-file-tag">轮次: {preview.run_name}</span>
+              <span className="preview-file-tag">通道总数: {preview.total_channels}</span>
+              {preview.can_confirm ? (
+                <span style={{ color: '#16a34a', display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 600 }}>
+                  <CheckCircle2 size={15} /> 校验通过，就绪
+                </span>
+              ) : (
+                <span style={{ color: '#dc2626', display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 600 }}>
+                  <ShieldAlert size={15} /> 需处理异常
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+        <div className="preview-topbar-actions">
+          <button className="button" onClick={onCancel}>取消</button>
+          <button
+            className="button primary"
+            disabled={!preview.can_confirm}
+            onClick={onConfirm}
+            style={{ padding: '8px 18px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            <Zap size={16} /> 确认并开始导入
+          </button>
+        </div>
+      </div>
+
+      {!preview.can_confirm && (
+        <div className="alert danger" style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <XCircle size={18} />
+          <span>没有可导入的通道数据，请检查文件内容或调整匹配条件。</span>
+        </div>
+      )}
+
+      {/* KPI 卡片 */}
+      <div className="preview-kpi-grid">
+        <div className="preview-kpi-card kpi-ok">
+          <div className="preview-kpi-header">
+            <span className="preview-kpi-title">通道概况</span>
+            <DatabaseZap size={16} className="preview-kpi-icon" />
+          </div>
+          <div className="preview-kpi-body">
+            <span className="preview-kpi-main-val">{preview.total_channels} <small style={{ fontSize: 13, fontWeight: 400, color: '#64748b' }}>个通道</small></span>
+            <div className="preview-kpi-sub">
+              <span>时长 / 稳定窗口</span>
+              <strong>{preview.duration_seconds?.toFixed(3) ?? '-'}s / {preview.stable_start_seconds?.toFixed(3) ?? '-'}-{preview.stable_end_seconds?.toFixed(3) ?? '-'}s</strong>
+            </div>
+          </div>
+        </div>
+
+        <div className="preview-kpi-card kpi-ok">
+          <div className="preview-kpi-header">
+            <span className="preview-kpi-title">通道匹配</span>
+            <Layers size={16} className="preview-kpi-icon" />
+          </div>
+          <div className="preview-kpi-body">
+            <span className="preview-kpi-main-val">{preview.matched_count} <small style={{ fontSize: 13, fontWeight: 400, color: '#64748b' }}>个已匹配</small></span>
+            <div className="preview-kpi-sub">
+              <span>未匹配</span>
+              <strong style={{ color: preview.unmatched_count > 0 ? '#d97706' : '#64748b' }}>{preview.unmatched_count}</strong>
+            </div>
+          </div>
+        </div>
+
+        <div className={`preview-kpi-card ${strategy === 'overwrite' && preview.existing_measurement_count > 0 ? 'kpi-warn' : 'kpi-ok'}`}>
+          <div className="preview-kpi-header">
+            <span className="preview-kpi-title">测量记录预估</span>
+            <Zap size={16} className="preview-kpi-icon" />
+          </div>
+          <div className="preview-kpi-body">
+            <span className="preview-kpi-main-val">+{preview.new_measurement_count} <small style={{ fontSize: 13, fontWeight: 400, color: '#64748b' }}>条新增</small></span>
+            <div className="preview-kpi-sub">
+              <span>{strategy === 'overwrite' ? '将覆盖更新' : '涉及已有记录'}</span>
+              <strong style={{ color: strategy === 'overwrite' && preview.existing_measurement_count > 0 ? '#d97706' : '#64748b' }}>
+                {preview.existing_measurement_count}
+              </strong>
+            </div>
+          </div>
+        </div>
+
+        <div className={`preview-kpi-card ${hasIssues ? 'kpi-danger' : 'kpi-ok'}`}>
+          <div className="preview-kpi-header">
+            <span className="preview-kpi-title">点位变更提醒</span>
+            <ShieldAlert size={16} className="preview-kpi-icon" />
+          </div>
+          <div className="preview-kpi-body">
+            <span className="preview-kpi-main-val" style={{ color: hasUnmatched ? '#d97706' : '#16a34a' }}>
+              {preview.new_points_will_create > 0 ? `+${preview.new_points_will_create}` : '0'} <small style={{ fontSize: 13, fontWeight: 400, color: '#64748b' }}>个将创建点位</small>
+            </span>
+            <div className="preview-kpi-sub">
+              <span>项目缺失点位</span>
+              <strong style={{ color: preview.missing_point_count > 0 ? '#d97706' : '#64748b' }}>{preview.missing_point_count}</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 主内容区：两栏 */}
+      <div className="preview-main">
+        {/* 左栏：通道明细表格 */}
+        <div className="preview-left">
+          <div className="preview-filter-bar">
+            <div className="status-tabs">
+              <button className={`status-tab-btn ${matchFilter === 'all' ? 'active' : ''}`} onClick={() => handleFilterChange('all')}>
+                全部 <span className="status-tab-count">{counts.all}</span>
+              </button>
+              {counts.matched > 0 && (
+                <button className={`status-tab-btn ${matchFilter === 'matched' ? 'active' : ''}`} onClick={() => handleFilterChange('matched')}>
+                  已匹配 <span className="status-tab-count">{counts.matched}</span>
+                </button>
+              )}
+              {counts.unmatched_will_create > 0 && (
+                <button className={`status-tab-btn ${matchFilter === 'unmatched_will_create' ? 'active' : ''}`} onClick={() => handleFilterChange('unmatched_will_create')} style={{ color: '#d97706' }}>
+                  将创建点位 <span className="status-tab-count" style={{ background: '#fef3c7', color: '#d97706' }}>{counts.unmatched_will_create}</span>
+                </button>
+              )}
+              {counts.unmatched_no_key > 0 && (
+                <button className={`status-tab-btn ${matchFilter === 'unmatched_no_key' ? 'active' : ''}`} onClick={() => handleFilterChange('unmatched_no_key')} style={{ color: '#dc2626' }}>
+                  无法匹配 <span className="status-tab-count" style={{ background: '#fee2e2', color: '#dc2626' }}>{counts.unmatched_no_key}</span>
+                </button>
+              )}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <select
+                value={actionFilter}
+                onChange={(e) => { setActionFilter(e.target.value); setCurrentPage(1); }}
+                style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, border: '1px solid #d1d5db' }}
+              >
+                <option value="all">全部操作</option>
+                <option value="new_measurement">新增测量</option>
+                <option value="update_measurement">更新测量</option>
+                <option value="create_point">创建点位</option>
+                <option value="skip">跳过</option>
+              </select>
+              <div className="preview-search-box">
+                <Search size={14} />
+                <input
+                  type="text"
+                  placeholder="搜索通道名/点位..."
+                  value={searchQuery}
+                  onChange={(e) => handleSearchChange(e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="table-wrap preview-table-wrap">
+            <table className="entry-table preview-table">
+              <thead>
+                <tr>
+                  <th style={{ width: 44 }}>#</th>
+                  <th style={{ width: 100 }}>匹配状态</th>
+                  <th style={{ width: 100 }}>操作</th>
+                  <th>通道名</th>
+                  <th style={{ width: 72 }}>单位</th>
+                  <th style={{ width: 72 }}>样本数</th>
+                  <th style={{ width: 80 }}>点位ID</th>
+                  <th style={{ width: 100 }}>点位名称</th>
+                  <th style={{ width: 85 }}>max με</th>
+                  <th style={{ width: 85 }}>min με</th>
+                  <th style={{ width: 85 }}>mean με</th>
+                  {hasExisting && <th style={{ width: 120 }}>已有 max / min</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {paginatedChannels.length === 0 ? (
+                  <tr><td colSpan={hasExisting ? 12 : 11} style={{ textAlign: 'center', padding: 36, color: '#94a3b8' }}>没有满足筛选条件的通道</td></tr>
+                ) : (
+                  paginatedChannels.map((ch, i) => (
+                    <tr key={i} className={
+                      ch.match_status === 'unmatched_no_key' ? 'row-danger' :
+                      ch.match_status === 'unmatched_will_create' ? 'row-warn' :
+                      ch.action === 'update_measurement' ? 'row-warn' : ''
+                    }>
+                      <td className="cell-num" style={{ color: '#64748b' }}>{(currentPage - 1) * pageSize + i + 1}</td>
+                      <td><DxdStatusBadge status={ch.match_status} /></td>
+                      <td><DxdActionBadge action={ch.action} /></td>
+                      <td style={{ fontWeight: 500, color: '#334155' }}>{ch.channel_name}</td>
+                      <td className="cell-num">{ch.unit || '-'}</td>
+                      <td className="cell-num">{ch.sample_count.toLocaleString()}</td>
+                      <td className="cell-num" style={{ fontWeight: 600 }}>{ch.matched_point_id ?? '-'}</td>
+                      <td>{ch.matched_point_name ?? '-'}</td>
+                      <td className="cell-num">{ch.stable_max_strain_ue != null ? ch.stable_max_strain_ue.toFixed(1) : '-'}</td>
+                      <td className="cell-num">{ch.stable_min_strain_ue != null ? ch.stable_min_strain_ue.toFixed(1) : '-'}</td>
+                      <td className="cell-num">{ch.stable_mean_strain_ue != null ? ch.stable_mean_strain_ue.toFixed(1) : '-'}</td>
+                      {hasExisting && (
+                        <td className="cell-num" style={{ fontSize: 11, color: '#64748b' }}>
+                          {ch.existing_max_strain_ue != null ? `${ch.existing_max_strain_ue.toFixed(1)} / ${ch.existing_min_strain_ue?.toFixed(1) ?? '-'}` : '-'}
+                        </td>
+                      )}
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* 分页 */}
+          <div className="preview-pagination">
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <div className="page-size-selector">
+                <span>每页显示:</span>
+                <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}>
+                  <option value={15}>15 条</option>
+                  <option value={20}>20 条</option>
+                  <option value={30}>30 条</option>
+                  <option value={50}>50 条</option>
+                  <option value={100}>100 条</option>
+                </select>
+              </div>
+              <span>显示第 {filteredChannels.length === 0 ? 0 : (currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, filteredChannels.length)} 条，共 {filteredChannels.length} 条</span>
+            </div>
+            <div className="pagination-controls">
+              <button className="pagination-btn" disabled={currentPage <= 1} onClick={() => setCurrentPage(p => Math.max(1, p - 1))}>上一页</button>
+              <span style={{ margin: '0 6px', fontWeight: 600, color: '#334155' }}>{currentPage} / {totalPages}</span>
+              <button className="pagination-btn" disabled={currentPage >= totalPages} onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}>下一页</button>
+            </div>
+          </div>
+        </div>
+
+        {/* 右栏：策略 + 选项 */}
+        <div className="preview-right">
+          {/* 未匹配通道智能助手 */}
+          {preview.unmatched_count > 0 && !skipUnmatched && matchFilter !== 'matched' && (
+            <div className="smart-fix-card">
+              <div className="smart-fix-header">
+                <AlertTriangle size={16} />
+                <span>发现 {preview.unmatched_count} 个未匹配通道</span>
+              </div>
+              <div className="smart-fix-body">
+                {preview.new_points_will_create > 0
+                  ? `其中 ${preview.new_points_will_create} 个通道可自动创建为新点位，${preview.unmatched_count - preview.new_points_will_create} 个无法解析点位编号。`
+                  : '这些通道无法匹配到项目中的任何点位。'}
+              </div>
+              {preview.new_points_will_create > 0 && (
+                <div className="smart-fix-action">
+                  <button className="button small primary" onClick={() => { onAutoCreatePointsChange(true); onSkipUnmatchedChange(false); }}>
+                    一键开启"自动创建匹配点位"
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 策略选择 */}
+          <div className="preview-card">
+            <h4><Layers size={16} /> 导入策略配置</h4>
+            <div style={{ marginTop: 10 }}>
+              {DXD_STRATEGY_OPTIONS.map((opt) => {
+                const isSelected = strategy === opt.value;
+                return (
+                  <div
+                    key={opt.value}
+                    className={`strategy-card-v2 ${isSelected ? 'selected' : ''}`}
+                    onClick={() => onStrategyChange(opt.value)}
+                  >
+                    <div className="strategy-card-icon">
+                      {isSelected ? <Check size={18} /> : <Zap size={16} />}
+                    </div>
+                    <div className="strategy-card-content">
+                      <div className="strategy-card-title">
+                        <span>{opt.label}</span>
+                      </div>
+                      <p className="strategy-card-desc">{opt.desc}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 警告列表 */}
+          {preview.warnings.length > 0 && (
+            <div className="preview-card">
+              <h4><ShieldAlert size={16} /> 校验警告</h4>
+              <div className="preview-issue-list">
+                {preview.warnings.map((w, i) => (
+                  <div key={i} className="preview-issue warning">
+                    <AlertTriangle size={14} />
+                    <span>{w}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 高级选项 */}
+          <div className="preview-card">
+            <button className="button small" onClick={onToggleAdvanced} style={{ width: '100%', justifyContent: 'space-between' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>高级处理选项</span>
+              {showAdvanced ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            </button>
+            {showAdvanced && (
+              <div className="advanced-body">
+                <label className="checkbox-label">
+                  <input type="checkbox" checked={autoCreatePoints} onChange={(e) => onAutoCreatePointsChange(e.target.checked)} />
+                  自动创建匹配点位（对可解析点位编号的未匹配通道）
+                </label>
+                <label className="checkbox-label">
+                  <input type="checkbox" checked={skipUnmatched} onChange={(e) => onSkipUnmatchedChange(e.target.checked)} />
+                  跳过所有未匹配通道
+                </label>
+                <p className="hint" style={{ marginTop: 6 }}>
+                  项目中存在但 DXD 中缺失的 <strong>{preview.missing_point_count}</strong> 个点位本轮不会有测量记录。
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Dewesoft 导入结果面板 ──
+function DewesoftResultPanel({ result, projectId, onDone, onRetry }: { result: DewesoftImportResult; projectId: string; onDone: () => void; onRetry: () => void }) {
+  return (
+    <div>
+      <div className="section-head">
+        <div>
+          <h2>{result.success ? '导入完成' : '导入失败'}</h2>
+          <p>{result.message}</p>
+        </div>
+      </div>
+
+      {result.success && (
+        <div className="preview-stats">
+          <div className="stat-item ok"><span className="stat-label">策略</span><span className="stat-value">{DXD_STRATEGY_OPTIONS.find(o => o.value === result.strategy)?.label || result.strategy}</span></div>
+          <div className="stat-item ok"><span className="stat-label">新增测量记录</span><span className="stat-value">{result.created_measurement_count}</span></div>
+          {result.updated_measurement_count > 0 && (
+            <div className="stat-item warn"><span className="stat-label">覆盖已有记录</span><span className="stat-value">{result.updated_measurement_count}</span></div>
+          )}
+          {result.filled_missing_count > 0 && (
+            <div className="stat-item ok"><span className="stat-label">填补空缺字段</span><span className="stat-value">{result.filled_missing_count}</span></div>
+          )}
+          {result.skipped_existing_count > 0 && (
+            <div className="stat-item"><span className="stat-label">跳过已有记录</span><span className="stat-value">{result.skipped_existing_count}</span></div>
+          )}
+          {result.skipped_unmatched_count > 0 && (
+            <div className="stat-item danger"><span className="stat-label">跳过未匹配</span><span className="stat-value">{result.skipped_unmatched_count}</span></div>
+          )}
+          {result.created_point_count > 0 && (
+            <div className="stat-item warn"><span className="stat-label">自动创建点位</span><span className="stat-value">{result.created_point_count}</span></div>
+          )}
+        </div>
+      )}
+
+      <div className="import-actions" style={{ marginTop: 16 }}>
+        <button className="button primary" onClick={onDone}>
+          <CheckCircle size={18} /> 返回当前项目
+        </button>
+        <button className="button" onClick={onRetry}>继续导入</button>
+        <Link className="button" to={`/projects/${projectId}/dewesoft-imports`}>查看导入记录</Link>
       </div>
     </div>
   );

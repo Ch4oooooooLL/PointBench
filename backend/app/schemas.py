@@ -595,3 +595,90 @@ class XlsxImportResult(BaseModel):
     skipped_unknown_point_count: int = 0
     skipped_file_duplicate_count: int = 0
     message: str = ""
+
+
+# ── Dewesoft DXD 导入预览 / 确认 ────────────────────────────────────────────
+
+
+class DewesoftChannelMatchStatus(str, Enum):
+    """DXD 通道匹配状态。"""
+    MATCHED = "matched"                       # 匹配到项目点位
+    UNMATCHED_WILL_CREATE = "unmatched_will_create"   # 未匹配但可自动创建点位
+    UNMATCHED_NO_KEY = "unmatched_no_key"            # 无法解析点位编号
+
+
+class DewesoftChannelAction(str, Enum):
+    """通道将执行的操作。"""
+    NEW_MEASUREMENT = "new_measurement"          # 新增测量记录
+    UPDATE_MEASUREMENT = "update_measurement"    # 更新已有测量记录
+    CREATE_POINT = "create_point"                # 自动创建点位
+    SKIP = "skip"                                 # 跳过
+
+
+class DewesoftChannelPreviewItem(BaseModel):
+    """单个通道的预览信息。"""
+    channel_name: str
+    unit: str | None = None
+    sample_count: int = 0
+    match_status: DewesoftChannelMatchStatus
+    matched_point_id: str | None = None
+    matched_point_name: str | None = None
+    matched_point_db_id: int | None = None
+    stable_min_strain_ue: float | None = None
+    stable_max_strain_ue: float | None = None
+    stable_mean_strain_ue: float | None = None
+    action: DewesoftChannelAction
+    existing_max_strain_ue: float | None = None
+    existing_min_strain_ue: float | None = None
+    existing_run_name: str | None = None
+
+
+class DewesoftImportStrategyEnum(str, Enum):
+    """DXD 导入策略。"""
+    APPEND_ONLY = "append_only"      # 仅新增不存在的记录
+    FILL_MISSING = "fill_missing"    # 新增 + 填补已有记录的空字段
+    OVERWRITE = "overwrite"          # 新增 + 覆盖已有记录
+
+
+class DewesoftImportPreview(BaseModel):
+    """DXD 导入预览完整报告。"""
+    preview_id: str
+    filename: str
+    cycle_count: int
+    run_name: str
+    total_channels: int = 0
+    matched_count: int = 0
+    unmatched_count: int = 0
+    new_points_will_create: int = 0
+    new_measurement_count: int = 0
+    existing_measurement_count: int = 0
+    missing_point_count: int = 0
+    duration_seconds: float | None = None
+    stable_start_seconds: float | None = None
+    stable_end_seconds: float | None = None
+    warnings: list[str] = []
+    errors: list[str] = []
+    channels: list[DewesoftChannelPreviewItem] = []
+    can_confirm: bool = False
+
+
+class DewesoftImportConfirmRequest(BaseModel):
+    """DXD 确认导入请求。"""
+    preview_id: str
+    strategy: DewesoftImportStrategyEnum = DewesoftImportStrategyEnum.APPEND_ONLY
+    auto_create_points: bool = True
+    skip_unmatched: bool = False
+
+
+class DewesoftImportResult(BaseModel):
+    """DXD 导入结果统计。"""
+    success: bool
+    strategy: str
+    created_measurement_count: int = 0
+    updated_measurement_count: int = 0
+    filled_missing_count: int = 0
+    skipped_existing_count: int = 0
+    skipped_unmatched_count: int = 0
+    created_point_count: int = 0
+    import_id: int | None = None
+    message: str = ""
