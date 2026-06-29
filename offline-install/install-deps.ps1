@@ -512,6 +512,7 @@ function Verify-Install {
     Test-Import -PythonExe $PythonExe -ModuleName 'jose' -DisplayName 'python-jose' -Required
     Test-Import -PythonExe $PythonExe -ModuleName 'multipart' -DisplayName 'multipart' -Required
     Test-Import -PythonExe $PythonExe -ModuleName 'openpyxl' -DisplayName 'openpyxl' -Required
+    Test-Import -PythonExe $PythonExe -ModuleName 'tzdata' -DisplayName 'tzdata' -Required
     Test-Import -PythonExe $PythonExe -ModuleName 'dwdatareader' -DisplayName 'dwdatareader' -Required
 
     Write-Host ''
@@ -566,6 +567,8 @@ function Assert-OfflinePackage {
     }
     if (-not (Test-Path $PipDir)) {
         $missing.Add('pip-packages\')
+    } elseif (-not (Get-ChildItem -Path $PipDir -File -Filter 'tzdata-*.whl' -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+        $missing.Add('pip-packages\tzdata-*.whl')
     }
     if (-not (Find-NodeModulesSource) -and -not (Test-Path (Join-Path $ScriptDir 'node-modules.zip'))) {
         $missing.Add('node_modules\ or node-modules.zip')
