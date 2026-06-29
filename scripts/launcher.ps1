@@ -1,11 +1,14 @@
 param(
     [Parameter(Mandatory=$true)]
-    [string]$ProjectDir
+    [string]$ProjectDir,
+
+    [switch]$ShowLogs
 )
 
 # ============================================================
 #  Tray-based launcher for test-point-web
-#  Starts backend + frontend hidden, shows tray icon
+#  Default mode: starts backend + frontend hidden, shows tray icon
+#  ShowLogs mode: streams backend + frontend logs in the current console
 #  No admin rights required
 # ============================================================
 
@@ -24,6 +27,52 @@ function Start-HiddenProcess {
     return [System.Diagnostics.Process]::Start($psi)
 }
 
+function Start-LoggedProcess {
+    param(
+        [string]$Name,
+        [string]$FilePath,
+        [string]$Arguments,
+        [string]$WorkingDirectory
+    )
+
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $FilePath
+    $psi.Arguments = $Arguments
+    $psi.WorkingDirectory = $WorkingDirectory
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+
+    $proc = New-Object System.Diagnostics.Process
+    $proc.StartInfo = $psi
+
+    $label = $Name
+    $proc.add_OutputDataReceived({
+        if ($EventArgs.Data) {
+            Write-Host "[$label] $($EventArgs.Data)"
+        }
+    }.GetNewClosure())
+    $proc.add_ErrorDataReceived({
+        if ($EventArgs.Data) {
+            Write-Host "[$label] $($EventArgs.Data)"
+        }
+    }.GetNewClosure())
+
+    [void]$proc.Start()
+    $proc.BeginOutputReadLine()
+    $proc.BeginErrorReadLine()
+    return $proc
+}
+
+function Stop-ProcessTree {
+    param([System.Diagnostics.Process]$Process)
+
+    if ($Process -and -not $Process.HasExited) {
+        & taskkill /PID $Process.Id /T /F 2>$null
+    }
+}
+
 # --- Detect Python (prefer .venv) ---
 $venvPython = Join-Path $root 'backend\.venv\Scripts\python.exe'
 if (Test-Path $venvPython) {
@@ -40,6 +89,41 @@ $null = & netstat -ano 2>$null | Select-String ':8000.*LISTENING' | ForEach-Obje
 $null = & netstat -ano 2>$null | Select-String ':5173.*LISTENING' | ForEach-Object {
     $parts = $_ -split '\s+'
     if ($parts[-1] -match '^\d+$') { & taskkill /PID $parts[-1] /F 2>$null }
+}
+
+if ($ShowLogs) {
+    Write-Host 'Starting PointBench...'
+    Write-Host "Project: $root"
+    Write-Host ''
+
+    $backendArgs = '-m uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level info'
+    $backendProc = Start-LoggedProcess -Name 'backend' `
+        -FilePath $pythonExe `
+        -Arguments $backendArgs `
+        -WorkingDirectory (Join-Path $root 'backend')
+
+    $frontendProc = Start-LoggedProcess -Name 'frontend' `
+        -FilePath 'cmd.exe' `
+        -Arguments '/c npm run dev' `
+        -WorkingDirectory (Join-Path $root 'frontend')
+
+    Start-Sleep -Seconds 4
+    Start-Process 'http://localhost:5173'
+
+    Write-Host ''
+    Write-Host 'PointBench is running. Close this window or press Ctrl+C to stop backend and frontend.'
+    Write-Host ''
+
+    try {
+        while (($backendProc -and -not $backendProc.HasExited) -or ($frontendProc -and -not $frontendProc.HasExited)) {
+            Start-Sleep -Seconds 1
+        }
+    } finally {
+        Stop-ProcessTree $backendProc
+        Stop-ProcessTree $frontendProc
+    }
+
+    return
 }
 
 # --- Start backend (hidden, no window) ---
@@ -80,12 +164,8 @@ $menu.Items.Add('-') | Out-Null
 $exitItem = New-Object System.Windows.Forms.ToolStripMenuItem('Exit')
 $exitItem.Add_Click({
     $trayIcon.Visible = $false
-    if ($backendProc -and -not $backendProc.HasExited) {
-        & taskkill /PID $backendProc.Id /T /F 2>$null
-    }
-    if ($frontendProc -and -not $frontendProc.HasExited) {
-        & taskkill /PID $frontendProc.Id /T /F 2>$null
-    }
+    Stop-ProcessTree $backendProc
+    Stop-ProcessTree $frontendProc
     [System.Windows.Forms.Application]::Exit()
 }.GetNewClosure())
 $menu.Items.Add($exitItem) | Out-Null
@@ -110,9 +190,5 @@ $trayIcon.ShowBalloonTip(3000)
 
 # --- Cleanup on exit ---
 $trayIcon.Visible = $false
-if ($backendProc -and -not $backendProc.HasExited) {
-    & taskkill /PID $backendProc.Id /T /F 2>$null
-}
-if ($frontendProc -and -not $frontendProc.HasExited) {
-    & taskkill /PID $frontendProc.Id /T /F 2>$null
-}
+Stop-ProcessTree $backendProc
+Stop-ProcessTree $frontendProc
