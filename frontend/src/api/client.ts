@@ -1,7 +1,23 @@
+import { reportClientError } from '../utils/clientLogger';
+
 const API_BASE = '';
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${url}`, options);
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${url}`, options);
+  } catch (error) {
+    reportClientError(error instanceof Error ? error.message : 'API network request failed', {
+      stack: error instanceof Error ? error.stack : undefined,
+      details: {
+        type: 'api-network-error',
+        url,
+        method: options?.method ?? 'GET',
+      },
+    });
+    throw error;
+  }
+
   if (!response.ok) {
     let message = response.statusText;
     try {
@@ -10,7 +26,21 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     } catch {
       // Keep default message.
     }
+    if (response.status >= 500) {
+      reportClientError(typeof message === 'string' ? message : JSON.stringify(message), {
+        details: {
+          type: 'api-server-error',
+          url,
+          method: options?.method ?? 'GET',
+          status: response.status,
+          requestId: response.headers.get('x-request-id'),
+        },
+      });
+    }
     throw new Error(typeof message === 'string' ? message : JSON.stringify(message));
+  }
+  if (response.status === 204) {
+    return undefined as T;
   }
   return response.json() as Promise<T>;
 }

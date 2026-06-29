@@ -1,3 +1,4 @@
+import logging
 import os
 from collections.abc import Generator
 from pathlib import Path
@@ -5,6 +6,8 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
+
+logger = logging.getLogger("app.database")
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 STORAGE_DIR = BASE_DIR / "storage"
@@ -55,6 +58,7 @@ def init_db() -> None:
         alembic_cfg.set_main_option("sqlalchemy.url", DATABASE_URL)
         command.upgrade(alembic_cfg, "head")
     except Exception:
+        logger.exception("Alembic migration failed; falling back to SQLAlchemy create_all")
         Base.metadata.create_all(bind=engine)
 
     # 初始化默认管理员账号（如不存在）
@@ -78,7 +82,7 @@ def init_db() -> None:
         finally:
             db.close()
     except Exception:
-        pass  # 表可能还没创建，跳过自动初始化
+        logger.exception("Default admin initialization failed")
 
 
 def get_db() -> Generator[Session, None, None]:

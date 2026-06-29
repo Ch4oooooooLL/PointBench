@@ -32,6 +32,28 @@ function Write-LauncherLog {
     Add-Content -Path $launcherLog -Value ("[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Text) -Encoding UTF8
 }
 
+function Write-ExceptionLog {
+    param(
+        [string]$Title,
+        [System.Management.Automation.ErrorRecord]$ErrorRecord,
+        [string]$Path = $launcherLog
+    )
+
+    Add-Content -Path $Path -Value '' -Encoding UTF8
+    Add-Content -Path $Path -Value ("===== {0} =====" -f $Title) -Encoding UTF8
+    Add-Content -Path $Path -Value ("time={0}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) -Encoding UTF8
+    Add-Content -Path $Path -Value ("exception_type={0}" -f $ErrorRecord.Exception.GetType().FullName) -Encoding UTF8
+    Add-Content -Path $Path -Value ("message={0}" -f $ErrorRecord.Exception.Message) -Encoding UTF8
+    Add-Content -Path $Path -Value ("script_stack_trace={0}" -f $ErrorRecord.ScriptStackTrace) -Encoding UTF8
+    if ($ErrorRecord.InvocationInfo) {
+        Add-Content -Path $Path -Value ("position={0}" -f $ErrorRecord.InvocationInfo.PositionMessage) -Encoding UTF8
+    }
+    if ($ErrorRecord.Exception.StackTrace) {
+        Add-Content -Path $Path -Value 'exception_stack_trace=' -Encoding UTF8
+        Add-Content -Path $Path -Value $ErrorRecord.Exception.StackTrace -Encoding UTF8
+    }
+}
+
 function Write-Console {
     param([string]$Text)
     if ($ShowLogs) {
@@ -155,6 +177,7 @@ function Invoke-DiagnosticCommand {
         }
     } catch {
         Add-Content -Path $LogPath -Value ("diagnostic_exception={0}" -f $_.Exception.Message) -Encoding UTF8
+        Write-ExceptionLog -Title "diagnostic_exception: $Name" -ErrorRecord $_ -Path $LogPath
         Write-LauncherLog "Diagnostic exception: $Name $($_.Exception.Message)"
         if ($Required) {
             throw
@@ -304,17 +327,29 @@ try {
 
     Set-Content -Path $backendCmd -Encoding ASCII -Value @(
         '@echo off',
+        'echo ===== backend process bootstrap =====',
+        'echo time=%DATE% %TIME%',
         'set PYTHONUNBUFFERED=1',
         'set PYTHONIOENCODING=utf-8',
+        'set PYTHONFAULTHANDLER=1',
+        'set POINTBENCH_LOG_LEVEL=INFO',
         ('cd /d "{0}"' -f $backendDir),
-        ('"{0}" -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level info >> "{1}" 2>&1' -f $pythonExe, $backendLog),
+        'echo cwd=%CD%',
+        ('echo python="{0}"' -f $pythonExe),
+        ('echo command="{0}" -X faulthandler -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level info --access-log' -f $pythonExe),
+        ('"{0}" -X faulthandler -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level info --access-log >> "{1}" 2>&1' -f $pythonExe, $backendLog),
         ('echo backend_exit_code=%ERRORLEVEL% >> "{0}"' -f $backendLog),
         'exit /b %ERRORLEVEL%'
     )
     Set-Content -Path $frontendCmd -Encoding ASCII -Value @(
         '@echo off',
+        'echo ===== frontend process bootstrap =====',
+        'echo time=%DATE% %TIME%',
+        'set NODE_OPTIONS=--trace-uncaught --trace-warnings',
         ('cd /d "{0}"' -f $frontendDir),
-        ('npm run dev >> "{0}" 2>&1' -f $frontendLog),
+        'echo cwd=%CD%',
+        'echo command=npm run dev -- --clearScreen false',
+        ('npm run dev -- --clearScreen false >> "{0}" 2>&1' -f $frontendLog),
         ('echo frontend_exit_code=%ERRORLEVEL% >> "{0}"' -f $frontendLog),
         'exit /b %ERRORLEVEL%'
     )
@@ -401,7 +436,7 @@ try {
     Stop-ProcessTree $frontendProc
 } catch {
     Write-LauncherLog "Unhandled launcher error: $($_.Exception.Message)"
-    Write-LauncherLog "At: $($_.InvocationInfo.PositionMessage)"
+    Write-ExceptionLog -Title 'unhandled_launcher_error' -ErrorRecord $_ -Path $launcherLog
     Write-FailureSummary "Unhandled launcher error: $($_.Exception.Message)"
     Stop-ProcessTree $backendProc
     Stop-ProcessTree $frontendProc

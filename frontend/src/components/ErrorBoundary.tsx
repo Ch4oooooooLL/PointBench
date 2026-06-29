@@ -1,4 +1,5 @@
 import { Component, ErrorInfo, ReactNode } from 'react';
+import { reportClientError } from '../utils/clientLogger';
 
 interface Props {
   children: ReactNode;
@@ -17,6 +18,11 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error('应用渲染异常', error, info);
+    reportClientError(error.message || 'React render error', {
+      stack: error.stack,
+      component_stack: info.componentStack ?? undefined,
+      details: { type: 'react-error-boundary' },
+    });
   }
 
   render() {

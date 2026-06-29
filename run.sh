@@ -16,6 +16,13 @@ log_launcher() {
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" | tee -a "$LAUNCHER_LOG"
 }
 
+log_error_context() {
+  local code="$1"
+  local line="$2"
+  local command="$3"
+  log_launcher "Launcher error. ExitCode=$code Line=$line Command=$command"
+}
+
 run_diag() {
   local name="$1"
   local logfile="$2"
@@ -41,6 +48,8 @@ run_diag() {
     return "$code"
   fi
 }
+
+trap 'code=$?; log_error_context "$code" "$LINENO" "$BASH_COMMAND"; exit "$code"' ERR
 
 cleanup() {
   local code=$?
@@ -88,7 +97,11 @@ run_diag "frontend-package-check" "$FRONTEND_LOG" "$PROJECT_DIR/frontend" \
 log_launcher "Starting backend on :8000"
 (
   cd "$PROJECT_DIR/backend"
-  PYTHONUNBUFFERED=1 PYTHONIOENCODING=utf-8 "$PYTHON_EXE" -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level info
+  PYTHONUNBUFFERED=1 \
+    PYTHONIOENCODING=utf-8 \
+    PYTHONFAULTHANDLER=1 \
+    POINTBENCH_LOG_LEVEL=INFO \
+    "$PYTHON_EXE" -X faulthandler -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level info --access-log
 ) > >(tee -a "$BACKEND_LOG" | sed -u 's/^/[backend] /') 2> >(tee -a "$BACKEND_LOG" >&2 | sed -u 's/^/[backend] /' >&2) &
 BACKEND_PID=$!
 log_launcher "Backend PID=$BACKEND_PID"
@@ -96,7 +109,7 @@ log_launcher "Backend PID=$BACKEND_PID"
 log_launcher "Starting frontend on :5173"
 (
   cd "$PROJECT_DIR/frontend"
-  npm run dev
+  NODE_OPTIONS="--trace-uncaught --trace-warnings" npm run dev -- --clearScreen false
 ) > >(tee -a "$FRONTEND_LOG" | sed -u 's/^/[frontend] /') 2> >(tee -a "$FRONTEND_LOG" >&2 | sed -u 's/^/[frontend] /' >&2) &
 FRONTEND_PID=$!
 log_launcher "Frontend PID=$FRONTEND_PID"
@@ -106,28 +119,36 @@ log_launcher "Press Ctrl+C to stop."
 
 sleep 4
 if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+  set +e
   wait "$BACKEND_PID"
   backend_code=$?
+  set -e
   log_launcher "Backend exited during startup. ExitCode=$backend_code"
   exit "$backend_code"
 fi
 if ! kill -0 "$FRONTEND_PID" 2>/dev/null; then
+  set +e
   wait "$FRONTEND_PID"
   frontend_code=$?
+  set -e
   log_launcher "Frontend exited during startup. ExitCode=$frontend_code"
   exit "$frontend_code"
 fi
 
 while true; do
   if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+    set +e
     wait "$BACKEND_PID"
     backend_code=$?
+    set -e
     log_launcher "Backend exited. ExitCode=$backend_code"
     exit "$backend_code"
   fi
   if ! kill -0 "$FRONTEND_PID" 2>/dev/null; then
+    set +e
     wait "$FRONTEND_PID"
     frontend_code=$?
+    set -e
     log_launcher "Frontend exited. ExitCode=$frontend_code"
     exit "$frontend_code"
   fi
