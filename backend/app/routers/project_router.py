@@ -35,7 +35,11 @@ def project_out(db: Session, project: models.Project) -> ProjectOut:
 
 @router.get("", response_model=list[ProjectOut])
 def list_projects(db: Session = Depends(get_db)) -> list[ProjectOut]:
-    projects = db.execute(select(models.Project).order_by(models.Project.updated_at.desc())).scalars().all()
+    projects = db.execute(
+        select(models.Project)
+        .where(models.Project.deleted_at.is_(None))
+        .order_by(models.Project.updated_at.desc())
+    ).scalars().all()
     return [project_out(db, project) for project in projects]
 
 
@@ -104,7 +108,7 @@ def download_delete_export(filename: str) -> FileResponse:
 @router.get("/{project_id}", response_model=ProjectOut)
 def get_project(project_id: int, db: Session = Depends(get_db)) -> ProjectOut:
     project = db.get(models.Project, project_id)
-    if not project:
+    if not project or project.deleted_at is not None:
         raise HTTPException(status_code=404, detail="项目不存在")
     return project_out(db, project)
 
@@ -127,10 +131,10 @@ def update_project(project_id: int, payload: ProjectUpdate, db: Session = Depend
 @router.delete("/{project_id}")
 def delete_project(
     project_id: int,
-    permanent: bool = False,
+    permanent: bool = True,
     db: Session = Depends(get_db),
 ) -> dict:
-    """删除项目。默认软删除（可恢复），permanent=true 彻底删除。"""
+    """删除项目。默认彻底删除；permanent=false 时保留软删除分支。"""
     project = db.get(models.Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")

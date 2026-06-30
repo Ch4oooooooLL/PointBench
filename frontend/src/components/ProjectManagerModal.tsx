@@ -87,7 +87,7 @@ export function ProjectManagerModal({ onClose }: Props) {
     setMessage('');
     setDeleteExport(null);
     try {
-      const result = await api.delete<DeleteProjectResult>(`/api/projects/${selectedProject.id}`);
+      const result = await api.delete<DeleteProjectResult>(`/api/projects/${selectedProject.id}?permanent=true`);
       await refreshProjects();
       setDeleteExport(result);
       setMessage(result.export_download_url ? '项目已删除，删除前已自动生成导出文件，请及时下载。' : '项目已删除。');
