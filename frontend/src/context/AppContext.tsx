@@ -1,5 +1,6 @@
 import { ReactNode, createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
+import { BackendBusyGuard } from '../components/BackendBusyGuard';
 import { Project } from '../types';
 
 export interface RiskSettings {
@@ -183,6 +184,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }}
     >
       {children}
+      <BackendBusyGuard />
     </AppContext.Provider>
   );
 }

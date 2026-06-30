@@ -222,6 +222,40 @@ textarea {
   line-height: 1.6;
 }
 
+.backend-busy-guard {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 18px;
+  cursor: wait;
+  background: rgba(248, 250, 252, 0.18);
+  pointer-events: auto;
+}
+
+.backend-busy-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 8px 14px;
+  border: 1px solid rgba(15, 118, 110, 0.22);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--text-main);
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: var(--shadow-md);
+}
+
+.backend-busy-indicator .chart-loading-spinner {
+  width: 20px;
+  height: 20px;
+  border-width: 2px;
+}
+
 .page-head,
 .section-head {
   display: flex;
@@ -4172,4 +4206,3 @@ label {
   background: #fff;
   color: #334155;
 }
-

@@ -1,7 +1,7 @@
 import { Download, Save, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api } from '../api/client';
+import { api, downloadFile } from '../api/client';
 import { useAppContext } from '../context/AppContext';
 import { DeleteProjectResult, Project } from '../types';
 
@@ -98,6 +98,34 @@ export function ProjectManagerModal({ onClose }: Props) {
     }
   }
 
+  async function downloadProjectExport(format: 'zip' | 'json' | 'csv') {
+    if (!selectedProject) return;
+    setBusy(true);
+    setMessage('');
+    try {
+      await downloadFile(
+        `/api/projects/${selectedProject.id}/export.${format}`,
+        `${selectedProject.project_id}.${format}`,
+      );
+    } catch (err) {
+      setMessage(`导出失败：${(err as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function downloadDeleteExport() {
+    if (!deleteExport?.export_download_url) return;
+    setBusy(true);
+    try {
+      await downloadFile(deleteExport.export_download_url, deleteExport.export_filename ?? 'deleted_project.zip');
+    } catch (err) {
+      setMessage(`下载失败：${(err as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="modal-backdrop" onClick={closeWithConfirm}>
       <div className="modal project-manager-modal" onClick={(event) => event.stopPropagation()}>
@@ -155,19 +183,19 @@ export function ProjectManagerModal({ onClose }: Props) {
 
                 <div className="manager-actions">
                   <button className="button primary" disabled={busy} onClick={save}><Save size={18} />保存修改</button>
-                  <a className="button primary" href={`/api/projects/${selectedProject.id}/export.zip`}><Download size={18} />导出项目</a>
-                  <a className="button" href={`/api/projects/${selectedProject.id}/export.json`}><Download size={18} />导出 JSON</a>
-                  <a className="button" href={`/api/projects/${selectedProject.id}/export.csv`}><Download size={18} />导出 CSV</a>
+                  <button className="button primary" type="button" disabled={busy} onClick={() => downloadProjectExport('zip')}><Download size={18} />导出项目</button>
+                  <button className="button" type="button" disabled={busy} onClick={() => downloadProjectExport('json')}><Download size={18} />导出 JSON</button>
+                  <button className="button" type="button" disabled={busy} onClick={() => downloadProjectExport('csv')}><Download size={18} />导出 CSV</button>
                   <button className="button danger-button" disabled={busy} onClick={remove}><Trash2 size={18} />删除项目</button>
                 </div>
                 {message && (
                   <div className={message.includes('失败') ? 'alert danger' : 'alert ok'}>
                     {message}
                     {deleteExport?.export_download_url && (
-                      <a className="button" href={deleteExport.export_download_url}>
+                      <button className="button" type="button" disabled={busy} onClick={downloadDeleteExport}>
                         <Download size={18} />
                         下载删除前导出文件
-                      </a>
+                      </button>
                     )}
                   </div>
                 )}

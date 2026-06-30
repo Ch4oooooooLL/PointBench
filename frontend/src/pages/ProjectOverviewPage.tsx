@@ -1,7 +1,7 @@
 import { ClipboardPlus, Download } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, crackImageUrl } from '../api/client';
+import { api, crackImageUrl, downloadFile } from '../api/client';
 import { DebugCsvImporter } from '../components/DebugCsvImporter';
 import { MultiPointTrendChart, PointTrend } from '../components/MultiPointTrendChart';
 import { ProjectSelector } from '../components/ProjectSelector';
@@ -158,6 +158,19 @@ export function ProjectOverviewPage() {
 
   const topPoint = summary?.max_amplitude_points[0];
 
+  async function downloadProjectExport(format: 'json' | 'csv') {
+    if (!selectedProject) return;
+    setError('');
+    try {
+      await downloadFile(
+        `/api/projects/${selectedProject.id}/export.${format}`,
+        `${selectedProject.project_id}.${format}`,
+      );
+    } catch (err) {
+      setError(`导出失败：${(err as Error).message}`);
+    }
+  }
+
   return (
     <section>
       <div className="page-head">
@@ -205,14 +218,14 @@ export function ProjectOverviewPage() {
               <ClipboardPlus size={18} />
               录入测试数据
             </Link>
-            <a className="button" href={`/api/projects/${selectedProject.id}/export.json`}>
+            <button className="button" type="button" onClick={() => downloadProjectExport('json')}>
               <Download size={18} />
               导出 JSON
-            </a>
-            <a className="button" href={`/api/projects/${selectedProject.id}/export.csv`}>
+            </button>
+            <button className="button" type="button" onClick={() => downloadProjectExport('csv')}>
               <Download size={18} />
               导出 CSV
-            </a>
+            </button>
           </div>
 
           {debugMode && (

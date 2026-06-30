@@ -1,7 +1,7 @@
 import { Download, FileUp, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api } from '../api/client';
+import { api, downloadFile } from '../api/client';
 import { DeleteProjectResult, Project } from '../types';
 
 export function ProjectListPage() {
@@ -31,6 +31,25 @@ export function ProjectListPage() {
     }
   }
 
+  async function downloadProjectExport(project: Project, format: 'json' | 'csv') {
+    setError('');
+    try {
+      await downloadFile(`/api/projects/${project.id}/export.${format}`, `${project.project_id}.${format}`);
+    } catch (err) {
+      setError(`导出失败：${(err as Error).message}`);
+    }
+  }
+
+  async function downloadDeleteExport() {
+    if (!deleteExport?.export_download_url) return;
+    setError('');
+    try {
+      await downloadFile(deleteExport.export_download_url, deleteExport.export_filename ?? 'deleted_project.zip');
+    } catch (err) {
+      setError(`下载失败：${(err as Error).message}`);
+    }
+  }
+
   return (
     <section>
       <div className="page-head">
@@ -48,10 +67,10 @@ export function ProjectListPage() {
         <div className="alert ok">
           {message}
           {deleteExport?.export_download_url && (
-            <a className="button" href={deleteExport.export_download_url}>
+            <button className="button" type="button" onClick={downloadDeleteExport}>
               <Download size={18} />
               下载删除前导出文件
-            </a>
+            </button>
           )}
         </div>
       )}
@@ -81,12 +100,12 @@ export function ProjectListPage() {
                 <td>{project.point_count}</td>
                 <td>{new Date(project.updated_at).toLocaleString()}</td>
                 <td className="actions">
-                  <a className="icon-button" href={`/api/projects/${project.id}/export.json`} title="导出 JSON">
+                  <button className="icon-button" type="button" onClick={() => downloadProjectExport(project, 'json')} title="导出 JSON">
                     <Download size={16} />
-                  </a>
-                  <a className="icon-button" href={`/api/projects/${project.id}/export.csv`} title="导出 CSV">
+                  </button>
+                  <button className="icon-button" type="button" onClick={() => downloadProjectExport(project, 'csv')} title="导出 CSV">
                     CSV
-                  </a>
+                  </button>
                   <button className="icon-button danger-text" title="删除项目" onClick={() => remove(project)}>
                     <Trash2 size={16} />
                   </button>
