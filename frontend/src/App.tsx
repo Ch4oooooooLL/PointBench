@@ -15,6 +15,7 @@ import { ProjectRowsPage } from './pages/ProjectRowsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { TestRunNewPage } from './pages/TestRunNewPage';
 import { UsageGuidePage } from './pages/UsageGuidePage';
+import { WorkflowPage } from './pages/WorkflowPage';
 
 const router = createBrowserRouter([
   {
@@ -28,6 +29,7 @@ const router = createBrowserRouter([
       { path: 'import', element: <ImportPage /> },
       { path: 'settings', element: <SettingsPage /> },
       { path: 'help', element: <UsageGuidePage /> },
+      { path: 'workflow', element: <WorkflowPage /> },
       { path: 'projects/:projectId', element: <ProjectDetailPage /> },
       { path: 'projects/:projectId/test-runs/new', element: <TestRunNewPage /> },
       { path: 'projects/:projectId/analysis', element: <AnalysisPage /> },

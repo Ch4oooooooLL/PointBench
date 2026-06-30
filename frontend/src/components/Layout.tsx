@@ -1,4 +1,4 @@
-import { ActivitySquare, BookOpen, Camera, FilePlus2, FileUp, LayoutDashboard, ListChecks, Settings } from 'lucide-react';
+import { ActivitySquare, BookOpen, Camera, FilePlus2, FileUp, LayoutDashboard, ListChecks, Settings, Workflow } from 'lucide-react';
 import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAppContext } from '../context/AppContext';
@@ -19,6 +19,11 @@ export function Layout() {
   function openUsageGuide() {
     closeFirstUseNotice();
     navigate('/help');
+  }
+
+  function openWorkflowGuide() {
+    closeFirstUseNotice();
+    navigate('/workflow');
   }
 
   return (
@@ -57,6 +62,10 @@ export function Layout() {
               <BookOpen size={18} />
               使用说明
             </NavLink>
+            <NavLink to="/workflow">
+              <Workflow size={18} />
+              使用流程
+            </NavLink>
           </nav>
         </div>
         <NavLink className="settings-button" to="/settings" title="设置">
@@ -75,26 +84,37 @@ export function Layout() {
         )}
         <Outlet />
       </main>
-      {firstUseNoticeOpen && <FirstUseNoticeModal onOpenGuide={openUsageGuide} onSkip={closeFirstUseNotice} />}
+      {firstUseNoticeOpen && (
+        <FirstUseNoticeModal onOpenGuide={openUsageGuide} onOpenWorkflow={openWorkflowGuide} onSkip={closeFirstUseNotice} />
+      )}
     </div>
   );
 }
 
-function FirstUseNoticeModal({ onOpenGuide, onSkip }: { onOpenGuide: () => void; onSkip: () => void }) {
+function FirstUseNoticeModal({
+  onOpenGuide,
+  onOpenWorkflow,
+  onSkip,
+}: {
+  onOpenGuide: () => void;
+  onOpenWorkflow: () => void;
+  onSkip: () => void;
+}) {
   return (
     <div className="modal-backdrop">
       <div className="modal first-use-modal" role="dialog" aria-modal="true" aria-labelledby="first-use-title">
         <div className="first-use-icon">
           <BookOpen size={28} />
         </div>
-        <h2 id="first-use-title">首次使用前请阅读使用说明</h2>
+        <h2 id="first-use-title">首次使用前建议先阅读使用说明和使用流程</h2>
         <p>
-          为了确保项目导入、点位维护、测试数据录入和裂纹记录流程准确，请先仔细阅读使用说明。
-          后续也可以随时从左侧导航栏的“使用说明”再次查看。
+          为了确保项目导入、点位维护、测试数据录入、裂纹记录和阶段归档流程准确，请先阅读相关说明。
+          后续也可以随时从左侧导航栏查看“使用说明”和“使用流程”。
         </p>
         <div className="modal-actions first-use-actions">
           <button className="button" onClick={onSkip}>跳过</button>
-          <button className="button primary" onClick={onOpenGuide}>跳转到使用说明</button>
+          <button className="button" onClick={onOpenGuide}>查看使用说明</button>
+          <button className="button primary" onClick={onOpenWorkflow}>阅读使用流程</button>
         </div>
       </div>
     </div>
