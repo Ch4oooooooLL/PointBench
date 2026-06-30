@@ -2,11 +2,13 @@ import { Download, FileUp, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
-import { Project } from '../types';
+import { DeleteProjectResult, Project } from '../types';
 
 export function ProjectListPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [deleteExport, setDeleteExport] = useState<DeleteProjectResult | null>(null);
 
   const load = () => api.get<Project[]>('/api/projects').then(setProjects).catch((err) => setError(err.message));
 
@@ -16,8 +18,17 @@ export function ProjectListPage() {
 
   async function remove(project: Project) {
     if (!confirm(`删除项目 ${project.project_name}？`)) return;
-    await api.delete(`/api/projects/${project.id}`);
-    load();
+    setError('');
+    setMessage('');
+    setDeleteExport(null);
+    try {
+      const result = await api.delete<DeleteProjectResult>(`/api/projects/${project.id}`);
+      setDeleteExport(result);
+      setMessage(result.export_download_url ? '项目已删除，删除前已自动生成导出文件，请及时下载。' : '项目已删除。');
+      load();
+    } catch (err) {
+      setError(`删除失败：${(err as Error).message}`);
+    }
   }
 
   return (
@@ -33,6 +44,17 @@ export function ProjectListPage() {
         </Link>
       </div>
       {error && <div className="alert danger">{error}</div>}
+      {message && (
+        <div className="alert ok">
+          {message}
+          {deleteExport?.export_download_url && (
+            <a className="button" href={deleteExport.export_download_url}>
+              <Download size={18} />
+              下载删除前导出文件
+            </a>
+          )}
+        </div>
+      )}
       <div className="table-wrap">
         <table>
           <thead>

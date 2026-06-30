@@ -15,6 +15,14 @@ export interface Project {
   point_count: number;
 }
 
+export interface DeleteProjectResult {
+  ok: boolean;
+  action: string;
+  message?: string;
+  export_filename?: string;
+  export_download_url?: string;
+}
+
 export interface MediaFile {
   id: number;
   photo_id?: string | null;

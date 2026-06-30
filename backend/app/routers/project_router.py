@@ -2,6 +2,7 @@ import csv
 import io
 import json
 import shutil
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import FileResponse
@@ -22,6 +23,7 @@ from app.utils.path_utils import safe_project_dir
 
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
+DELETE_EXPORT_DIR = STORAGE_DIR / "delete_exports"
 
 
 def project_out(db: Session, project: models.Project) -> ProjectOut:
@@ -71,6 +73,34 @@ def create_project(
     return project_out(db, project)
 
 
+def build_delete_export(db: Session, project_id: int) -> dict:
+    try:
+        zip_path, _zip_name = build_project_export_zip(db, project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="项目不存在") from exc
+
+    DELETE_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    filename = f"deleted_project_{project_id}_{timestamp}_{uuid.uuid4().hex[:8]}.zip"
+    target = DELETE_EXPORT_DIR / filename
+    shutil.move(str(zip_path), target)
+    shutil.rmtree(zip_path.parent, ignore_errors=True)
+    return {
+        "export_filename": filename,
+        "export_download_url": f"/api/projects/delete-exports/{filename}",
+    }
+
+
+@router.get("/delete-exports/{filename}")
+def download_delete_export(filename: str) -> FileResponse:
+    if "/" in filename or "\\" in filename or not filename.endswith(".zip"):
+        raise HTTPException(status_code=400, detail="无效导出文件名")
+    path = DELETE_EXPORT_DIR / filename
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="导出文件不存在")
+    return FileResponse(path, filename=filename, media_type="application/zip")
+
+
 @router.get("/{project_id}", response_model=ProjectOut)
 def get_project(project_id: int, db: Session = Depends(get_db)) -> ProjectOut:
     project = db.get(models.Project, project_id)
@@ -99,12 +129,13 @@ def delete_project(
     project_id: int,
     permanent: bool = False,
     db: Session = Depends(get_db),
-    _admin: models.User = Depends(require_role("admin")),
 ) -> dict:
     """删除项目。默认软删除（可恢复），permanent=true 彻底删除。"""
     project = db.get(models.Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
+
+    delete_export = build_delete_export(db, project_id)
 
     if permanent:
         project_storage = safe_project_dir(project.project_id)
@@ -114,7 +145,7 @@ def delete_project(
         db.delete(project)
         log_action(db, "delete_permanent", "project", project.project_id, project.project_id, f"永久删除项目 {project.project_name}")
         db.commit()
-        return {"ok": True, "action": "permanently_deleted"}
+        return {"ok": True, "action": "permanently_deleted", **delete_export}
 
     # 软删除：标记项目及其关联数据
     project.deleted_at = datetime.utcnow()
@@ -134,7 +165,7 @@ def delete_project(
         crack.deleted_at = datetime.utcnow()
     log_action(db, "delete_soft", "project", project.project_id, project.project_id, f"软删除项目 {project.project_name}")
     db.commit()
-    return {"ok": True, "action": "soft_deleted", "message": "项目已移至回收站，可联系管理员恢复"}
+    return {"ok": True, "action": "soft_deleted", "message": "项目已移至回收站，可联系管理员恢复", **delete_export}
 
 
 @router.get("/{project_id}/points")

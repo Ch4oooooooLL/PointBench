@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAppContext } from '../context/AppContext';
-import { Project } from '../types';
+import { DeleteProjectResult, Project } from '../types';
 
 interface Props {
   onClose: () => void;
@@ -39,11 +39,13 @@ export function ProjectManagerModal({ onClose }: Props) {
   const { projects, selectedProjectId, selectedProject, setSelectedProjectId, refreshProjects } = useAppContext();
   const [form, setForm] = useState<ProjectForm>(toForm(selectedProject));
   const [message, setMessage] = useState('');
+  const [deleteExport, setDeleteExport] = useState<DeleteProjectResult | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     setForm(toForm(selectedProject));
     setMessage('');
+    setDeleteExport(null);
   }, [selectedProject]);
 
   const hasUnsavedChanges = selectedProject ? !isSameForm(form, toForm(selectedProject)) : false;
@@ -83,10 +85,12 @@ export function ProjectManagerModal({ onClose }: Props) {
     if (!confirm(`确认删除项目「${selectedProject.project_name}」？数据库记录和项目存储文件会一起删除。`)) return;
     setBusy(true);
     setMessage('');
+    setDeleteExport(null);
     try {
-      await api.delete(`/api/projects/${selectedProject.id}`);
+      const result = await api.delete<DeleteProjectResult>(`/api/projects/${selectedProject.id}`);
       await refreshProjects();
-      setMessage('项目已删除。');
+      setDeleteExport(result);
+      setMessage(result.export_download_url ? '项目已删除，删除前已自动生成导出文件，请及时下载。' : '项目已删除。');
     } catch (err) {
       setMessage(`删除失败：${(err as Error).message}`);
     } finally {
@@ -156,7 +160,17 @@ export function ProjectManagerModal({ onClose }: Props) {
                   <a className="button" href={`/api/projects/${selectedProject.id}/export.csv`}><Download size={18} />导出 CSV</a>
                   <button className="button danger-button" disabled={busy} onClick={remove}><Trash2 size={18} />删除项目</button>
                 </div>
-                {message && <div className={message.includes('失败') ? 'alert danger' : 'alert ok'}>{message}</div>}
+                {message && (
+                  <div className={message.includes('失败') ? 'alert danger' : 'alert ok'}>
+                    {message}
+                    {deleteExport?.export_download_url && (
+                      <a className="button" href={deleteExport.export_download_url}>
+                        <Download size={18} />
+                        下载删除前导出文件
+                      </a>
+                    )}
+                  </div>
+                )}
               </>
             )}
           </div>

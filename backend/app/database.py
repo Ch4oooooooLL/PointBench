@@ -42,6 +42,7 @@ def init_storage() -> None:
         STORAGE_DIR / "projects",
         STORAGE_DIR / "dewesoft",
         STORAGE_DIR / "temp",
+        STORAGE_DIR / "delete_exports",
     ]:
         path.mkdir(parents=True, exist_ok=True)
 
