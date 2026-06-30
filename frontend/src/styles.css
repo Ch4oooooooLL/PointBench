@@ -1008,13 +1008,13 @@ label {
 }
 
 .line-tooltip-card {
-  width: min(520px, 82vw);
-  max-height: min(520px, 72vh);
+  width: min(780px, 92vw);
+  max-height: min(780px, 90vh);
   overflow: auto;
   display: grid;
-  grid-template-columns: minmax(170px, 1fr) minmax(160px, 220px);
-  gap: 12px;
-  padding: 14px;
+  grid-template-columns: minmax(255px, 1fr) minmax(240px, 330px);
+  gap: 18px;
+  padding: 21px;
   border-left: 4px solid var(--line-color, var(--primary));
   border-radius: 8px;
   background: var(--bg-surface);
@@ -1097,9 +1097,9 @@ label {
 
 .crack-tooltip-card {
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) minmax(140px, 190px);
-  gap: 12px;
-  width: min(460px, 82vw);
+  grid-template-columns: minmax(225px, 1fr) minmax(210px, 285px);
+  gap: 18px;
+  width: min(690px, 92vw);
 }
 
 .crack-tooltip-copy {
@@ -1137,6 +1137,19 @@ label {
   border-radius: 6px;
   border: 1px solid var(--danger-border);
   background: var(--danger-bg);
+}
+
+@media (max-width: 620px) {
+  .line-tooltip-card,
+  .crack-tooltip-card {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .line-tooltip-meta {
+    grid-template-columns: 1fr;
+  }
 }
 
 .trend-chart-layout {
@@ -4159,6 +4172,4 @@ label {
   background: #fff;
   color: #334155;
 }
-
-
 

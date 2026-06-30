@@ -264,7 +264,7 @@ function buildOption(
       appendToBody: true,
       confine: true,
       hideDelay: 80,
-      extraCssText: 'padding:0;border:0;background:transparent;box-shadow:0 18px 50px rgba(15,23,27,.24);max-width:min(520px,82vw);max-height:min(520px,72vh);white-space:normal;',
+      extraCssText: 'padding:0;border:0;background:transparent;box-shadow:0 18px 50px rgba(15,23,27,.24);max-width:min(780px,92vw);max-height:min(780px,90vh);white-space:normal;',
       formatter: (rawParams: unknown) => {
         const activeParam = (Array.isArray(rawParams) ? rawParams[0] : rawParams) as
           | {
