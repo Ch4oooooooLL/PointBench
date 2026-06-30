@@ -24,6 +24,76 @@ log_error_context() {
   log_launcher "Launcher error. ExitCode=$code Line=$line Command=$command"
 }
 
+is_current_launcher_process() {
+  local pid="$1"
+  [[ "$pid" == "$$" || "$pid" == "${BASHPID:-}" || "$pid" == "$PPID" ]]
+}
+
+stop_process_tree() {
+  local pid="$1"
+  local child
+
+  for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+    stop_process_tree "$child"
+  done
+
+  if kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null || true
+  fi
+}
+
+wait_or_force_stop() {
+  local pid="$1"
+
+  for _ in {1..20}; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      return
+    fi
+    sleep 0.1
+  done
+
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -9 "$pid" 2>/dev/null || true
+  fi
+}
+
+stop_existing_project_processes() {
+  local pid cwd cmdline
+  local pids=()
+
+  for proc in /proc/[0-9]*; do
+    pid="${proc##*/}"
+    is_current_launcher_process "$pid" && continue
+
+    cwd="$(readlink "$proc/cwd" 2>/dev/null || true)"
+    cmdline="$(tr '\0' ' ' < "$proc/cmdline" 2>/dev/null || true)"
+    [[ -n "$cmdline" ]] || continue
+
+    case "$cmdline" in
+      *"uvicorn app.main:app"*|*"vite/bin/vite.js"*|*"vite\\bin\\vite.js"*|*"run.sh"*|*"scripts/launcher.ps1"*)
+        if [[ "$cwd" == "$PROJECT_DIR"* || "$cmdline" == *"$PROJECT_DIR"* ]]; then
+          pids+=("$pid")
+        fi
+        ;;
+    esac
+  done
+
+  if [[ "${#pids[@]}" -eq 0 ]]; then
+    log_launcher "No existing PointBench process found."
+    return
+  fi
+
+  log_launcher "Stopping existing PointBench processes: ${pids[*]}"
+  for pid in "${pids[@]}"; do
+    is_current_launcher_process "$pid" && continue
+    stop_process_tree "$pid"
+  done
+  for pid in "${pids[@]}"; do
+    is_current_launcher_process "$pid" && continue
+    wait_or_force_stop "$pid"
+  done
+}
+
 run_diag() {
   local name="$1"
   local logfile="$2"
@@ -83,6 +153,8 @@ log_launcher "PATH: $PATH"
 : > "$BACKEND_LOG"
 : > "$FRONTEND_LOG"
 : > "$ERROR_LOG"
+
+stop_existing_project_processes
 
 run_diag "python-version" "$BACKEND_LOG" "$PROJECT_DIR/backend" "$PYTHON_EXE" --version
 run_diag "backend-import-check" "$BACKEND_LOG" "$PROJECT_DIR/backend" \

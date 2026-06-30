@@ -240,9 +240,60 @@ function Stop-ProcessTree {
 
     if ($Process -and -not $Process.HasExited) {
         try {
-            & taskkill /PID $Process.Id /T /F 2>$null
+            & taskkill /PID $($Process.Id) /T /F 2>$null
         } catch {
             Write-LauncherLog ("Failed to stop process tree PID={0}: {1}" -f $Process.Id, $_.Exception.Message)
+        }
+    }
+}
+
+function Stop-ExistingPointBenchProcesses {
+    $currentPid = $PID
+    $escapedRoot = [Regex]::Escape($root)
+    $existingProcesses = @()
+
+    try {
+        $processes = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+    } catch {
+        Write-LauncherLog ("Unable to inspect existing processes: {0}" -f $_.Exception.Message)
+        return
+    }
+
+    foreach ($process in $processes) {
+        if ($process.ProcessId -eq $currentPid) {
+            continue
+        }
+
+        $commandLine = [string]$process.CommandLine
+        if ([string]::IsNullOrWhiteSpace($commandLine)) {
+            continue
+        }
+
+        $isPointBenchProcess = $commandLine -match $escapedRoot -and (
+            $commandLine -match 'launcher\.ps1' -or
+            $commandLine -match 'start-backend\.cmd' -or
+            $commandLine -match 'start-frontend\.cmd' -or
+            $commandLine -match 'uvicorn\s+app\.main:app' -or
+            $commandLine -match 'vite[\\/]+bin[\\/]+vite\.js'
+        )
+
+        if ($isPointBenchProcess) {
+            $existingProcesses += $process
+        }
+    }
+
+    if ($existingProcesses.Count -eq 0) {
+        Write-LauncherLog 'No existing PointBench process found.'
+        return
+    }
+
+    $ids = ($existingProcesses | ForEach-Object { $_.ProcessId }) -join ', '
+    Write-LauncherLog "Stopping existing PointBench processes: $ids"
+    foreach ($process in $existingProcesses) {
+        try {
+            & taskkill /PID $($process.ProcessId) /T /F 2>$null
+        } catch {
+            Write-LauncherLog ("Failed to stop existing process PID={0}: {1}" -f $process.ProcessId, $_.Exception.Message)
         }
     }
 }
@@ -254,7 +305,7 @@ function Release-Port {
         $parts = $_ -split '\s+'
         if ($parts[-1] -match '^\d+$') {
             Write-LauncherLog "Killing existing process on port $Port. PID=$($parts[-1])"
-            & taskkill /PID $parts[-1] /F 2>$null
+            & taskkill /PID $($parts[-1]) /F 2>$null
         }
     }
 }
@@ -396,6 +447,7 @@ try {
         $pythonExe = 'python'
     }
 
+    Stop-ExistingPointBenchProcesses
     Run-Preflight
 
     Release-Port '8000'
