@@ -177,7 +177,7 @@ run_diag "backend-import-check" "$BACKEND_LOG" "$PROJECT_DIR/backend" \
   }
 
 run_diag "node-version" "$FRONTEND_LOG" "$PROJECT_DIR/frontend" node --version
-run_diag "npm-version" "$FRONTEND_LOG" "$PROJECT_DIR/frontend" npm --version
+run_diag "npm-version" "$FRONTEND_LOG" "$PROJECT_DIR/frontend" npm --version || true
 run_diag "frontend-package-check" "$FRONTEND_LOG" "$PROJECT_DIR/frontend" \
   npm --prefix "$PROJECT_DIR/frontend" ls vite @vitejs/plugin-react react react-dom --depth=0 || true
 run_diag "vite-direct-check" "$FRONTEND_LOG" "$PROJECT_DIR/frontend" \

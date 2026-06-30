@@ -431,8 +431,7 @@ function Run-Preflight {
         -FilePath 'cmd.exe' `
         -Arguments '/c npm --version' `
         -WorkingDirectory (Join-Path $root 'frontend') `
-        -LogPath $frontendLog `
-        -Required
+        -LogPath $frontendLog
 
     Invoke-DiagnosticCommand -Name 'frontend-package-check' `
         -FilePath 'cmd.exe' `

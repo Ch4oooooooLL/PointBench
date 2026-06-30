@@ -101,3 +101,28 @@ def test_preflight_fails_legacy_database_when_columns_are_missing(tmp_path, monk
 
     assert reporter.has_failures()
     assert any(item.status == "FAIL" and item.name == "Database schema" for item in reporter.results)
+
+
+def test_preflight_does_not_require_npm_when_runtime_assets_exist(tmp_path, monkeypatch) -> None:
+    frontend_dir = tmp_path / "frontend"
+    (frontend_dir / "node_modules" / "vite" / "bin").mkdir(parents=True)
+    for package in ["@vitejs/plugin-react", "react", "react-dom"]:
+        (frontend_dir / "node_modules" / package).mkdir(parents=True)
+    (frontend_dir / "package.json").write_text("{}", encoding="utf-8")
+    (frontend_dir / "node_modules" / "vite" / "bin" / "vite.js").write_text("", encoding="utf-8")
+
+    def fake_run_command(command, cwd=None):
+        if command == ["node", "--version"]:
+            return 0, "v24.16.0"
+        if command == ["npm", "--version"]:
+            return 127, "command not found: npm"
+        return 1, "unexpected command"
+
+    monkeypatch.setattr(preflight_check, "run_command", fake_run_command)
+
+    reporter = preflight_check.Reporter()
+    preflight_check.check_node(reporter, frontend_dir)
+
+    assert not reporter.has_failures()
+    assert any(item.status == "WARN" and item.name == "npm" for item in reporter.results)
+    assert any(item.status == "OK" and item.name == "Vite entry" for item in reporter.results)

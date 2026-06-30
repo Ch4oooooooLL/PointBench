@@ -213,7 +213,7 @@ def check_node(reporter: Reporter, frontend_dir: Path) -> None:
     if code == 0:
         reporter.ok("npm", output)
     else:
-        reporter.fail("npm", output)
+        reporter.warn("npm", f"{output}; npm is only needed for dependency installation, not runtime startup")
 
     package_json = frontend_dir / "package.json"
     node_modules = frontend_dir / "node_modules"
