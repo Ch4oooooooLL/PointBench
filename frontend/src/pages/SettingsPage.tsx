@@ -1,13 +1,15 @@
-import { Bug, LineChart, Save, ShieldAlert, Eye, type LucideIcon } from 'lucide-react';
-import { useState } from 'react';
+import { Bug, LineChart, Save, ShieldAlert, Eye, Calculator, type LucideIcon } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
+import { api } from '../api/client';
 
-type SettingsCategory = 'risk' | 'display' | 'chart' | 'debug';
+type SettingsCategory = 'risk' | 'display' | 'chart' | 'calc' | 'debug';
 
 const SETTINGS_CATEGORIES: Array<{ id: SettingsCategory; label: string; icon: LucideIcon }> = [
   { id: 'risk', label: '风险标识', icon: ShieldAlert },
   { id: 'display', label: '显示设置', icon: Eye },
   { id: 'chart', label: '图表显示', icon: LineChart },
+  { id: 'calc', label: '计算设置', icon: Calculator },
   { id: 'debug', label: '调试工具', icon: Bug },
 ];
 
@@ -26,6 +28,7 @@ export function SettingsPage() {
   } = useAppContext();
 
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>('risk');
+  const [stressFormula, setStressFormula] = useState('(max-min)*0.21');
   const [warnPercent, setWarnPercent] = useState(String(riskSettings.warnPercent));
   const [dangerPercent, setDangerPercent] = useState(String(riskSettings.dangerPercent));
   const [criticalPercent, setCriticalPercent] = useState(String(riskSettings.criticalPercent));
@@ -33,11 +36,23 @@ export function SettingsPage() {
   const [overviewExpandedHeight, setOverviewExpandedHeight] = useState(String(chartSettings.overviewExpandedHeight));
   const [expandedChartWidth, setExpandedChartWidth] = useState(String(chartSettings.expandedChartWidth));
   const [abnormalThreshold, setAbnormalThreshold] = useState(String(anomalySettings.thresholdPercent));
+
+  useEffect(() => {
+    api.get<{ stress_formula: string }>('/api/settings')
+      .then((data) => {
+        if (data && data.stress_formula) {
+          setStressFormula(data.stress_formula);
+        }
+      })
+      .catch((err) => {
+        console.error('获取计算公式失败:', err);
+      });
+  }, []);
   const [showPrompt, setShowPrompt] = useState(displaySettings.showPromptMessage);
   const [debugEnabled, setDebugEnabled] = useState(debugMode);
   const [message, setMessage] = useState('');
 
-  function save() {
+  async function save() {
     setRiskSettings({
       warnPercent: parseNumber(warnPercent, riskSettings.warnPercent),
       dangerPercent: parseNumber(dangerPercent, riskSettings.dangerPercent),
@@ -55,7 +70,15 @@ export function SettingsPage() {
       showPromptMessage: showPrompt,
     });
     setDebugMode(debugEnabled);
-    setMessage('设置已保存。');
+
+    try {
+      await api.put<{ stress_formula: string }>('/api/settings', {
+        stress_formula: stressFormula,
+      });
+      setMessage('设置已保存。应力计算公式已更新，并已重新计算所有历史测量记录。');
+    } catch (err) {
+      setMessage(`保存失败: ${(err as Error).message}`);
+    }
   }
 
   return (
@@ -133,6 +156,48 @@ export function SettingsPage() {
             <p>项目概览趋势图右上角的「仅异常」开关，筛选应变幅相对首次有效数据变化达到此阈值的点位。</p>
             <div className="settings-grid">
               <label>异常变化率阈值 %<input type="number" min="5" max="100" value={abnormalThreshold} onChange={(event) => setAbnormalThreshold(event.target.value)} /></label>
+            </div>
+          </div>
+        )}
+
+        {activeCategory === 'calc' && (
+          <div className="settings-section">
+            <h2>计算设置</h2>
+            <p>规定从应变值（Strain）到应力值（Stress）的计算方法。基于极大值和极小值应变变量进行公式计算，以得到最终应力大小。</p>
+            <div className="settings-form" style={{ maxWidth: 600 }}>
+              <div style={{ marginBottom: 15 }}>
+                <label style={{ display: 'block', marginBottom: 8, fontWeight: 'bold' }}>应力计算公式</label>
+                <input
+                  type="text"
+                  className="formula-input"
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    fontSize: '16px',
+                    fontFamily: 'monospace',
+                    borderRadius: '4px',
+                    border: '1px solid #ccc',
+                    boxSizing: 'border-box'
+                  }}
+                  value={stressFormula}
+                  onChange={(event) => setStressFormula(event.target.value)}
+                  placeholder="(max-min)*0.21"
+                />
+              </div>
+              <div style={{ fontSize: '13px', color: '#666', lineHeight: '1.6' }}>
+                <strong style={{ display: 'block', marginBottom: 4 }}>公式编写规则：</strong>
+                <ul style={{ paddingLeft: 20, margin: 0 }}>
+                  <li>乘号使用 <code style={{ background: '#eee', padding: '2px 4px', borderRadius: '3px' }}>*</code>，除号使用 <code style={{ background: '#eee', padding: '2px 4px', borderRadius: '3px' }}>/</code>，加号为 <code style={{ background: '#eee', padding: '2px 4px', borderRadius: '3px' }}>+</code>，减号为 <code style={{ background: '#eee', padding: '2px 4px', borderRadius: '3px' }}>-</code>。</li>
+                  <li>必须使用英文括号 <code style={{ background: '#eee', padding: '2px 4px', borderRadius: '3px' }}>()</code>。</li>
+                  <li>公式中有且仅支持两个变量：
+                    <ul style={{ paddingLeft: 20, margin: 0 }}>
+                      <li><code style={{ background: '#eee', padding: '2px 4px', borderRadius: '3px', fontWeight: 'bold' }}>max</code>：极值应变的极大值。</li>
+                      <li><code style={{ background: '#eee', padding: '2px 4px', borderRadius: '3px', fontWeight: 'bold' }}>min</code>：极值应变的极小值。</li>
+                    </ul>
+                  </li>
+                  <li>默认公式为：<code style={{ background: '#eef3fe', color: '#2b5adc', padding: '2px 6px', borderRadius: '3px', fontWeight: 'bold' }}>(max-min)*0.21</code></li>
+                </ul>
+              </div>
             </div>
           </div>
         )}

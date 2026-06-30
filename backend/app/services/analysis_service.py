@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import models
+from app.services.settings_service import get_stress_formula, safe_eval
 
 
 DEFAULT_ELASTIC_MODULUS_MPA = 206000.0
@@ -152,17 +153,40 @@ def compute_measurement_fields(record: models.MeasurementRecord, elastic_modulus
         record.stress_range_mpa = None
         return
 
-    modulus = elastic_modulus_mpa if elastic_modulus_mpa is not None else DEFAULT_ELASTIC_MODULUS_MPA
-    strain_to_stress = modulus * 1e-6
-
+    # 1. 基础应变字段计算
     record.mean_strain_ue = (record.max_strain_ue + record.min_strain_ue) / 2
     record.amplitude_strain_ue = (record.max_strain_ue - record.min_strain_ue) / 2
     record.range_strain_ue = record.max_strain_ue - record.min_strain_ue
-    record.stress_max_mpa = record.max_strain_ue * strain_to_stress
-    record.stress_min_mpa = record.min_strain_ue * strain_to_stress
-    record.stress_mean_mpa = record.mean_strain_ue * strain_to_stress
-    record.stress_amplitude_mpa = record.amplitude_strain_ue * strain_to_stress
-    record.stress_range_mpa = record.range_strain_ue * strain_to_stress
+
+    # 2. 尝试从全局设置获取公式计算应力幅值
+    formula = get_stress_formula()
+    variables = {
+        "max": record.max_strain_ue,
+        "min": record.min_strain_ue,
+    }
+
+    try:
+        stress_amp = safe_eval(formula, variables)
+    except Exception:
+        # 如果解析失败，则回退到原本的弹性模量计算方法
+        modulus = elastic_modulus_mpa if elastic_modulus_mpa is not None else DEFAULT_ELASTIC_MODULUS_MPA
+        strain_to_stress = modulus * 1e-6
+        stress_amp = record.amplitude_strain_ue * strain_to_stress
+
+    record.stress_amplitude_mpa = stress_amp
+    record.stress_range_mpa = stress_amp * 2
+
+    # 为了和其他应力字段保持等效换算关系，计算出等效 strain_to_stress
+    # 当 amplitude_strain_ue != 0 时，等效 strain_to_stress = stress_amplitude_mpa / amplitude_strain_ue
+    if record.amplitude_strain_ue and record.amplitude_strain_ue != 0:
+        equiv_strain_to_stress = record.stress_amplitude_mpa / record.amplitude_strain_ue
+    else:
+        modulus = elastic_modulus_mpa if elastic_modulus_mpa is not None else DEFAULT_ELASTIC_MODULUS_MPA
+        equiv_strain_to_stress = modulus * 1e-6
+
+    record.stress_max_mpa = record.max_strain_ue * equiv_strain_to_stress
+    record.stress_min_mpa = record.min_strain_ue * equiv_strain_to_stress
+    record.stress_mean_mpa = record.mean_strain_ue * equiv_strain_to_stress
 
 
 def is_manual_abnormal(record: models.MeasurementRecord) -> bool:

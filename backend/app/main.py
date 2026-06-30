@@ -21,6 +21,7 @@ from app.routers import (
     media_router,
     point_router,
     project_router,
+    settings_router,
 )
 
 
@@ -174,3 +175,4 @@ app.include_router(measurement_router.router)
 app.include_router(analysis_router.router)
 app.include_router(dewesoft_router.router)
 app.include_router(crack_router.router)
+app.include_router(settings_router.router)
