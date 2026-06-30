@@ -9,9 +9,10 @@ export function growthPercent(current?: number | null, initial?: number | null):
 }
 
 export function riskLevel(percent: number | null, settings: RiskSettings): RiskLevel {
-  if (percent == null || percent < settings.warnPercent) return 'normal';
-  if (percent >= settings.criticalPercent) return 'critical';
-  if (percent >= settings.dangerPercent) return 'danger';
+  const absolutePercent = percent == null ? null : Math.abs(percent);
+  if (absolutePercent == null || absolutePercent < settings.warnPercent) return 'normal';
+  if (absolutePercent >= settings.criticalPercent) return 'critical';
+  if (absolutePercent >= settings.dangerPercent) return 'danger';
   return 'warn';
 }
 

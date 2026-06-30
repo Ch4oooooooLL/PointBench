@@ -246,7 +246,7 @@ export function ProjectOverviewPage() {
                 <div
                   className={`toggle-switch${abnormalOnly ? ' active' : ''}`}
                   onClick={() => setAbnormalOnly((value) => !value)}
-                  title={abnormalOnly ? '显示全部点位' : `仅显示应变幅变化超过 ${threshold}% 的异常点位`}
+                  title={abnormalOnly ? '显示全部点位' : `仅显示应变幅相对首次有效数据变化达到 ${threshold}% 的异常点位`}
                   role="switch"
                   aria-checked={abnormalOnly}
                   tabIndex={0}
@@ -265,7 +265,7 @@ export function ProjectOverviewPage() {
                   </span>
                 </div>
                 <span className="toggle-switch-hint">
-                  筛选应变幅相比上一轮变化超过 {threshold}% 的点位
+                  筛选应变幅相对首次有效数据变化达到 {threshold}% 的点位
                 </span>
               </div>
             </div>

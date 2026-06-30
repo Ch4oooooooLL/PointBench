@@ -1,4 +1,5 @@
 import json
+import math
 from typing import Any
 
 from sqlalchemy import func, select
@@ -9,6 +10,7 @@ from app import models
 
 DEFAULT_ELASTIC_MODULUS_MPA = 206000.0
 AUTO_ABNORMAL_REASONS = (
+    "应变幅相对首次有效数据",
     "应变幅相对上一轮变化超过",
     "应变幅相对上一轮增长超过 20%",
     "连续 3 次应变幅上升",
@@ -47,14 +49,10 @@ def _get_stress_conversion(project: models.Project | None) -> float:
 
 
 def _format_percent(value: float) -> str:
+    if math.isinf(value):
+        return "无限大"
     percent = value * 100
     return str(int(percent)) if percent.is_integer() else f"{percent:.1f}".rstrip("0").rstrip(".")
-
-
-def _is_relative_change_over_threshold(previous: float, current: float, threshold: float) -> bool:
-    if previous == 0:
-        return False
-    return abs(current - previous) / abs(previous) > threshold
 
 
 def _relative_change_threshold(rules: dict) -> float:
@@ -62,7 +60,28 @@ def _relative_change_threshold(rules: dict) -> float:
         threshold = float(rules["relative_growth_warning"])
     except (KeyError, TypeError, ValueError):
         threshold = float(DEFAULT_ANOMALY_RULES["relative_growth_warning"])
+    if threshold > 1:
+        threshold = threshold / 100
     return max(threshold, 0)
+
+
+def _relative_change_ratio(current: float, initial: float) -> float:
+    if initial == 0:
+        if current == 0:
+            return 0
+        return math.inf if current > 0 else -math.inf
+    return (current - initial) / abs(initial)
+
+
+def _baseline_change_reason(change_ratio: float, threshold: float) -> str:
+    direction = "增大" if change_ratio >= 0 else "减小"
+    change_text = _format_percent(abs(change_ratio))
+    if not math.isinf(change_ratio):
+        change_text = f"{change_text}%"
+    return (
+        f"应变幅相对首次有效数据{direction} {change_text}，"
+        f"达到最低预警阈值 {_format_percent(threshold)}%"
+    )
 
 
 def _format_custom_fields(value: Any) -> str | None:
@@ -157,7 +176,6 @@ def refresh_point_abnormal_flags(db: Session, point_db_id: int) -> None:
     project = db.get(models.Project, point.project_db_id) if point else None
     rules = _get_anomaly_rules(project)
     relative_change_threshold = _relative_change_threshold(rules)
-    relative_change_reason = f"应变幅相对上一轮变化超过 {_format_percent(relative_change_threshold)}%"
 
     records = list(
         db.execute(
@@ -168,35 +186,29 @@ def refresh_point_abnormal_flags(db: Session, point_db_id: int) -> None:
         ).scalars()
     )
 
-    increasing_streak = 1
-    previous_amplitude: float | None = None
+    initial_amplitude: float | None = None
     for record in records:
         compute_measurement_fields(record)
         if record.max_strain_ue is None or record.min_strain_ue is None or record.amplitude_strain_ue is None:
-            previous_amplitude = record.amplitude_strain_ue
-            increasing_streak = 1
             continue
+
+        if initial_amplitude is None:
+            initial_amplitude = record.amplitude_strain_ue
+            if not is_manual_abnormal(record):
+                record.is_abnormal = False
+                record.abnormal_reason = None
+            continue
+
         if is_manual_abnormal(record):
-            previous_amplitude = record.amplitude_strain_ue
             continue
 
         reasons: list[str] = []
-        if previous_amplitude is not None:
-            if _is_relative_change_over_threshold(previous_amplitude, record.amplitude_strain_ue, relative_change_threshold):
-                reasons.append(relative_change_reason)
-            if record.amplitude_strain_ue > previous_amplitude:
-                increasing_streak += 1
-            else:
-                increasing_streak = 1
-        else:
-            increasing_streak = 1
-
-        if increasing_streak >= 3:
-            reasons.append("连续 3 次应变幅上升")
+        change_ratio = _relative_change_ratio(record.amplitude_strain_ue, initial_amplitude)
+        if abs(change_ratio) >= relative_change_threshold:
+            reasons.append(_baseline_change_reason(change_ratio, relative_change_threshold))
 
         record.is_abnormal = bool(reasons)
         record.abnormal_reason = "；".join(reasons) if reasons else None
-        previous_amplitude = record.amplitude_strain_ue
 
 
 def trend_for_point(db: Session, point_db_id: int) -> list[dict]:

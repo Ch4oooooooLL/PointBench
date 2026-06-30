@@ -20,6 +20,9 @@ interface Props {
   loading?: boolean;
 }
 
+type LegendLabelMode = 'point_id' | 'point_name';
+type LegendSortMode = 'source' | 'primary_asc' | 'primary_desc' | 'latest_desc';
+
 const palette = [
   '#0f766e',
   '#2563eb',
@@ -106,6 +109,42 @@ function formatNumber(value: number | null | undefined, digits = 1): string {
 function formatCycleCount(trend: TrendItem[]): string {
   const cycles = trend.map((item) => item.cycle_count).filter((value) => Number.isFinite(value));
   return cycles.length ? String(Math.max(...cycles)) : '-';
+}
+
+const naturalCollator = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' });
+
+function latestStressValue(trend: TrendItem[]): number | null {
+  return [...trend].reverse().find((item) => item.stress_amplitude_mpa != null)?.stress_amplitude_mpa ?? null;
+}
+
+function primaryLegendText(point: Point, labelMode: LegendLabelMode): string {
+  return labelMode === 'point_id' ? point.point_id : point.point_name;
+}
+
+function secondaryLegendText(point: Point, labelMode: LegendLabelMode): string {
+  return labelMode === 'point_id' ? point.point_name : point.point_id;
+}
+
+function sortTrendsForLegend(trends: PointTrend[], labelMode: LegendLabelMode, sortMode: LegendSortMode): PointTrend[] {
+  const indexed = trends.map((item, index) => ({ item, index }));
+  if (sortMode === 'source') return trends;
+  indexed.sort((left, right) => {
+    if (sortMode === 'latest_desc') {
+      const leftValue = latestStressValue(left.item.trend);
+      const rightValue = latestStressValue(right.item.trend);
+      if (leftValue != null && rightValue != null && leftValue !== rightValue) return rightValue - leftValue;
+      if (leftValue != null && rightValue == null) return -1;
+      if (leftValue == null && rightValue != null) return 1;
+    } else {
+      const primaryCompare = naturalCollator.compare(
+        primaryLegendText(left.item.point, labelMode),
+        primaryLegendText(right.item.point, labelMode),
+      );
+      if (primaryCompare !== 0) return sortMode === 'primary_asc' ? primaryCompare : -primaryCompare;
+    }
+    return left.index - right.index;
+  });
+  return indexed.map(({ item }) => item);
 }
 
 function buildPointTooltip(pointTrend: PointTrend, cracks: CrackRecord[], color: string): string {
@@ -531,20 +570,56 @@ function SideLegend({
   focusPointId,
   onFocus,
   maxHeight,
+  labelMode,
+  sortMode,
+  onLabelModeChange,
+  onSortModeChange,
   interactive = false,
 }: {
   trends: PointTrend[];
   focusPointId: number | null;
   onFocus?: (pointId: number | null) => void;
   maxHeight: number;
+  labelMode: LegendLabelMode;
+  sortMode: LegendSortMode;
+  onLabelModeChange: (mode: LegendLabelMode) => void;
+  onSortModeChange: (mode: LegendSortMode) => void;
   interactive?: boolean;
 }) {
   const navigate = useNavigate();
+  const primaryLabel = labelMode === 'point_id' ? '点位编号' : '点位名称';
 
   return (
     <div className="side-legend" aria-label="点位标注" style={{ maxHeight }}>
+      <div className="side-legend-controls">
+        <div className="legend-mode-toggle" role="group" aria-label="图例主显示字段">
+          <button
+            type="button"
+            className={labelMode === 'point_id' ? 'active' : ''}
+            onClick={() => onLabelModeChange('point_id')}
+          >
+            ID
+          </button>
+          <button
+            type="button"
+            className={labelMode === 'point_name' ? 'active' : ''}
+            onClick={() => onLabelModeChange('point_name')}
+          >
+            名称
+          </button>
+        </div>
+        <label className="legend-sort-select">
+          <span>排序</span>
+          <select value={sortMode} onChange={(event) => onSortModeChange(event.target.value as LegendSortMode)}>
+            <option value="source">默认顺序</option>
+            <option value="primary_asc">{primaryLabel}自然升序</option>
+            <option value="primary_desc">{primaryLabel}自然降序</option>
+            <option value="latest_desc">最新应力降序</option>
+          </select>
+        </label>
+      </div>
       {trends.map(({ point, trend }, index) => {
-        const latest = [...trend].reverse().find((item) => item.stress_amplitude_mpa != null);
+        const latest = latestStressValue(trend);
         const active = focusPointId === point.id;
         const dimmed = focusPointId != null && !active;
         return (
@@ -563,10 +638,10 @@ function SideLegend({
           >
             <span className="legend-dot" style={{ background: colorForIndex(index) }} />
             <span className="legend-text">
-              <strong>{point.point_id}</strong>
-              <small>{point.point_name}</small>
+              <strong>{primaryLegendText(point, labelMode)}</strong>
+              <small>{secondaryLegendText(point, labelMode)}</small>
             </span>
-            <span className="legend-value">{latest?.stress_amplitude_mpa?.toFixed(1) ?? '-'} MPa</span>
+            <span className="legend-value">{latest?.toFixed(1) ?? '-'} MPa</span>
           </button>
         );
       })}
@@ -587,7 +662,13 @@ export function MultiPointTrendChart({
   const navigate = useNavigate();
   const [expanded, setExpanded] = useState(false);
   const [focusPointId, setFocusPointId] = useState<number | null>(null);
+  const [legendLabelMode, setLegendLabelMode] = useState<LegendLabelMode>('point_id');
+  const [legendSortMode, setLegendSortMode] = useState<LegendSortMode>('source');
   const availableTrends = useMemo(() => trends.filter((item) => item.trend.length), [trends]);
+  const sortedTrends = useMemo(
+    () => sortTrendsForLegend(availableTrends, legendLabelMode, legendSortMode),
+    [availableTrends, legendLabelMode, legendSortMode],
+  );
 
   const handlePointClick = (pointId: number) => {
     navigate(`/points/${pointId}`);
@@ -629,7 +710,7 @@ export function MultiPointTrendChart({
           title={expandable ? '点击空白区域放大图表 · 点击曲线跳转点位详情' : '点击曲线跳转点位详情'}
         >
           <ChartCanvas
-            trends={availableTrends}
+            trends={sortedTrends}
             height={height}
             focusPointId={null}
             crackRecords={crackRecords}
@@ -638,7 +719,15 @@ export function MultiPointTrendChart({
             onChartClick={expandable ? () => setExpanded(true) : undefined}
           />
         </div>
-        <SideLegend trends={availableTrends} focusPointId={null} maxHeight={height} />
+        <SideLegend
+          trends={sortedTrends}
+          focusPointId={null}
+          maxHeight={height}
+          labelMode={legendLabelMode}
+          sortMode={legendSortMode}
+          onLabelModeChange={setLegendLabelMode}
+          onSortModeChange={setLegendSortMode}
+        />
       </div>
 
       {expanded && (
@@ -653,7 +742,7 @@ export function MultiPointTrendChart({
             </div>
             <div className="trend-chart-layout expanded">
               <ChartCanvas
-                trends={availableTrends}
+                trends={sortedTrends}
                 height={expandedHeight}
                 focusPointId={focusPointId}
                 crackRecords={crackRecords}
@@ -661,10 +750,14 @@ export function MultiPointTrendChart({
                 onPointClick={handlePointClick}
               />
               <SideLegend
-                trends={availableTrends}
+                trends={sortedTrends}
                 focusPointId={focusPointId}
                 onFocus={setFocusPointId}
                 maxHeight={expandedHeight}
+                labelMode={legendLabelMode}
+                sortMode={legendSortMode}
+                onLabelModeChange={setLegendLabelMode}
+                onSortModeChange={setLegendSortMode}
                 interactive
               />
             </div>

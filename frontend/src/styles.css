@@ -1218,6 +1218,57 @@ label {
   padding: 6px 0 6px 12px;
 }
 
+.side-legend-controls {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: grid;
+  gap: 8px;
+  padding: 0 0 10px;
+  margin-bottom: 4px;
+  background: var(--bg-surface);
+}
+
+.legend-mode-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  min-height: 34px;
+}
+
+.legend-mode-toggle button {
+  border: 1px solid var(--border-color);
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  transition: var(--transition-fast);
+}
+
+.legend-mode-toggle button:hover,
+.legend-mode-toggle button.active {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.legend-sort-select {
+  display: grid;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.legend-sort-select select {
+  min-height: 34px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
 .side-legend-item {
   width: 100%;
   border: 1px solid transparent;

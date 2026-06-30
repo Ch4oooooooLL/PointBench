@@ -77,7 +77,7 @@ export function SettingsPage() {
         {activeCategory === 'risk' && (
           <div className="settings-section">
             <h2>风险标识</h2>
-            <p>按当前值相对初始应力幅的增长百分比着色。</p>
+            <p>按当前值相对首次有效应力幅的变化百分比着色，增大或减小都会触发同一阈值。</p>
             <div className="settings-grid">
               <label>预警阈值 %<input type="number" value={warnPercent} onChange={(event) => setWarnPercent(event.target.value)} /></label>
               <label>危险阈值 %<input type="number" value={dangerPercent} onChange={(event) => setDangerPercent(event.target.value)} /></label>
@@ -102,7 +102,7 @@ export function SettingsPage() {
               <label>放大视图宽度 px<input type="number" min="720" max="1920" value={expandedChartWidth} onChange={(event) => setExpandedChartWidth(event.target.value)} /></label>
             </div>
             <h2 style={{ marginTop: 20 }}>异常筛选</h2>
-            <p>项目概览趋势图右上角的「仅异常」开关，筛选应变幅相比上一轮变化超过此阈值的点位。</p>
+            <p>项目概览趋势图右上角的「仅异常」开关，筛选应变幅相对首次有效数据变化达到此阈值的点位。</p>
             <div className="settings-grid">
               <label>异常变化率阈值 %<input type="number" min="5" max="100" value={abnormalThreshold} onChange={(event) => setAbnormalThreshold(event.target.value)} /></label>
             </div>
