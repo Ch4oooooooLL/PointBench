@@ -5,8 +5,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import models
-from app.database import get_db
+from app.database import AUTH_ENABLED, get_db
 from app.utils.auth_utils import (
+    anonymous_admin_user,
     create_access_token,
     hash_password,
     require_role,
@@ -47,6 +48,14 @@ class TokenResponse(BaseModel):
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
     """用户登录，返回 JWT Token。"""
+    if not AUTH_ENABLED:
+        user = anonymous_admin_user()
+        access_token = create_access_token(data={"sub": user.id, "role": user.role})
+        return TokenResponse(
+            access_token=access_token,
+            user=UserOut.model_validate(user),
+        )
+
     user = db.scalar(select(models.User).where(models.User.username == payload.username))
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="用户名或密码错误")

@@ -154,14 +154,28 @@ class TestProjectIdValidationAPI:
         proj_id = data["id"]
         client.delete(f"/api/projects/{proj_id}?permanent=true", headers=self._headers())
 
-    def test_create_project_without_auth_returns_401(self) -> None:
-        """未登录用户不能创建项目。"""
+    def test_create_project_without_auth_succeeds(self) -> None:
+        """认证默认关闭时，未登录用户也可以创建项目。"""
+        from uuid import uuid4
+
+        project_id = f"NOAUTH-{uuid4().hex[:8].upper()}"
         payload = {
-            "project_id": "NO-AUTH-TEST",
+            "project_id": project_id,
             "project_name": "No Auth",
         }
         response = client.post("/api/projects", json=payload)
-        assert response.status_code == 401, response.text
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["project_id"] == project_id
+        client.delete(f"/api/projects/{data['id']}?permanent=true")
+
+    def test_login_accepts_any_account_when_auth_disabled(self) -> None:
+        """认证默认关闭时，登录接口不校验真实账号。"""
+        response = client.post("/api/auth/login", json={"username": "anyone", "password": "anything"})
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["user"]["username"] == "anonymous"
+        assert data["user"]["role"] == "admin"
 
     def test_create_project_with_traversal_id_blocked(self) -> None:
         """路径穿越风格的 project_id 被拒绝。"""

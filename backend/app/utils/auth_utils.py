@@ -4,14 +4,13 @@ import os
 import secrets
 from datetime import datetime, timedelta
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import models
-from app.database import get_db
+from app.database import AUTH_ENABLED, get_db
 
 # ── 配置 ────────────────────────────────────────────────────────────────────
 SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "pointbench-dev-secret-change-in-production")
@@ -19,6 +18,18 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 8  # 8 小时
 
 security = HTTPBearer(auto_error=False)
+
+
+def anonymous_admin_user() -> models.User:
+    """认证关闭时使用的匿名管理员上下文。"""
+    return models.User(
+        id=0,
+        username="anonymous",
+        password_hash="",
+        role="admin",
+        display_name="免登录用户",
+        is_active=True,
+    )
 
 
 # ── 密码工具 ────────────────────────────────────────────────────────────────
@@ -73,6 +84,8 @@ def get_current_user(
     db: Session = Depends(get_db),
 ) -> models.User | None:
     """从 Bearer Token 解析当前用户。未登录返回 None。"""
+    if not AUTH_ENABLED:
+        return anonymous_admin_user()
     if credentials is None:
         return None
     payload = decode_access_token(credentials.credentials)
@@ -93,6 +106,8 @@ def get_current_user(
 
 def require_user(current_user: models.User | None = Depends(get_current_user)) -> models.User:
     """要求已登录，否则返回 401。"""
+    if not AUTH_ENABLED:
+        return anonymous_admin_user()
     if current_user is None:
         raise HTTPException(status_code=401, detail="请先登录")
     return current_user
@@ -102,6 +117,8 @@ def require_role(role: str):
     """返回一个依赖：要求当前用户具有指定角色。"""
 
     def dependency(current_user: models.User = Depends(require_user)) -> models.User:
+        if not AUTH_ENABLED:
+            return anonymous_admin_user()
         if current_user.role == "admin":
             return current_user
         if current_user.role == role:
