@@ -102,9 +102,9 @@ export function SettingsPage() {
               <label>放大视图宽度 px<input type="number" min="720" max="1920" value={expandedChartWidth} onChange={(event) => setExpandedChartWidth(event.target.value)} /></label>
             </div>
             <h2 style={{ marginTop: 20 }}>异常筛选</h2>
-            <p>项目概览趋势图右上角的「仅异常」开关，筛选应变幅相比上一轮增长超过此阈值的点位。</p>
+            <p>项目概览趋势图右上角的「仅异常」开关，筛选应变幅相比上一轮变化超过此阈值的点位。</p>
             <div className="settings-grid">
-              <label>异常增长率阈值 %<input type="number" min="5" max="100" value={abnormalThreshold} onChange={(event) => setAbnormalThreshold(event.target.value)} /></label>
+              <label>异常变化率阈值 %<input type="number" min="5" max="100" value={abnormalThreshold} onChange={(event) => setAbnormalThreshold(event.target.value)} /></label>
             </div>
           </div>
         )}

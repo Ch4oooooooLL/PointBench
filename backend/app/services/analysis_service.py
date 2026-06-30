@@ -7,10 +7,9 @@ from sqlalchemy.orm import Session
 from app import models
 
 
-import json
-
 DEFAULT_ELASTIC_MODULUS_MPA = 206000.0
 AUTO_ABNORMAL_REASONS = (
+    "应变幅相对上一轮变化超过",
     "应变幅相对上一轮增长超过 20%",
     "连续 3 次应变幅上升",
 )
@@ -19,7 +18,7 @@ AUTO_ABNORMAL_REASONS = (
 DEFAULT_ANOMALY_RULES: dict[str, float | int] = {
     "strain_amplitude_warning": 300,      # με — 应变幅绝对值警告
     "strain_amplitude_danger": 500,       # με — 应变幅绝对值危险
-    "relative_growth_warning": 0.2,       # 相对增长率警告阈值
+    "relative_growth_warning": 0.2,       # 相对变化率警告阈值（沿用历史字段名）
     "continuous_growth_count": 3,         # 连续增长次数触发
     "minimum_effective_growth": 50,       # με — 最小有效增长量
 }
@@ -45,6 +44,25 @@ def _get_stress_conversion(project: models.Project | None) -> float:
     if project and project.elastic_modulus_mpa is not None:
         modulus = project.elastic_modulus_mpa
     return modulus * 1e-6
+
+
+def _format_percent(value: float) -> str:
+    percent = value * 100
+    return str(int(percent)) if percent.is_integer() else f"{percent:.1f}".rstrip("0").rstrip(".")
+
+
+def _is_relative_change_over_threshold(previous: float, current: float, threshold: float) -> bool:
+    if previous == 0:
+        return False
+    return abs(current - previous) / abs(previous) > threshold
+
+
+def _relative_change_threshold(rules: dict) -> float:
+    try:
+        threshold = float(rules["relative_growth_warning"])
+    except (KeyError, TypeError, ValueError):
+        threshold = float(DEFAULT_ANOMALY_RULES["relative_growth_warning"])
+    return max(threshold, 0)
 
 
 def _format_custom_fields(value: Any) -> str | None:
@@ -135,6 +153,12 @@ def is_manual_abnormal(record: models.MeasurementRecord) -> bool:
 
 
 def refresh_point_abnormal_flags(db: Session, point_db_id: int) -> None:
+    point = db.get(models.TestPoint, point_db_id)
+    project = db.get(models.Project, point.project_db_id) if point else None
+    rules = _get_anomaly_rules(project)
+    relative_change_threshold = _relative_change_threshold(rules)
+    relative_change_reason = f"应变幅相对上一轮变化超过 {_format_percent(relative_change_threshold)}%"
+
     records = list(
         db.execute(
             select(models.MeasurementRecord)
@@ -158,8 +182,8 @@ def refresh_point_abnormal_flags(db: Session, point_db_id: int) -> None:
 
         reasons: list[str] = []
         if previous_amplitude is not None:
-            if previous_amplitude != 0 and record.amplitude_strain_ue > previous_amplitude * 1.2:
-                reasons.append("应变幅相对上一轮增长超过 20%")
+            if _is_relative_change_over_threshold(previous_amplitude, record.amplitude_strain_ue, relative_change_threshold):
+                reasons.append(relative_change_reason)
             if record.amplitude_strain_ue > previous_amplitude:
                 increasing_streak += 1
             else:

@@ -63,12 +63,12 @@ interface Summary {
   fastest_growth_points: SummaryPoint[];
 }
 
-function hasAbnormalGrowth(trend: TrendItem[], thresholdPercent: number): boolean {
+function hasAbnormalChange(trend: TrendItem[], thresholdPercent: number): boolean {
   const valid = trend.filter((item) => item.amplitude_strain_ue != null);
   for (let index = 1; index < valid.length; index += 1) {
     const previous = valid[index - 1].amplitude_strain_ue as number;
     const current = valid[index].amplitude_strain_ue as number;
-    if (previous !== 0 && (current - previous) / Math.abs(previous) > thresholdPercent / 100) {
+    if (previous !== 0 && Math.abs(current - previous) / Math.abs(previous) > thresholdPercent / 100) {
       return true;
     }
   }
@@ -144,11 +144,11 @@ export function ProjectOverviewPage() {
 
   const displayTrends = useMemo(() => {
     if (!abnormalOnly) return trends;
-    return trends.filter(({ trend }) => hasAbnormalGrowth(trend, threshold));
+    return trends.filter(({ trend }) => hasAbnormalChange(trend, threshold));
   }, [trends, abnormalOnly, threshold]);
 
   const abnormalTrendCount = useMemo(
-    () => trends.filter(({ trend }) => hasAbnormalGrowth(trend, threshold)).length,
+    () => trends.filter(({ trend }) => hasAbnormalChange(trend, threshold)).length,
     [trends, threshold],
   );
 
@@ -229,7 +229,7 @@ export function ProjectOverviewPage() {
                 <div
                   className={`toggle-switch${abnormalOnly ? ' active' : ''}`}
                   onClick={() => setAbnormalOnly((value) => !value)}
-                  title={abnormalOnly ? '显示全部点位' : `仅显示应变幅增长超过 ${threshold}% 的异常点位`}
+                  title={abnormalOnly ? '显示全部点位' : `仅显示应变幅变化超过 ${threshold}% 的异常点位`}
                   role="switch"
                   aria-checked={abnormalOnly}
                   tabIndex={0}
@@ -248,7 +248,7 @@ export function ProjectOverviewPage() {
                   </span>
                 </div>
                 <span className="toggle-switch-hint">
-                  筛选应变幅相比上一轮增长超过 {threshold}% 的点位
+                  筛选应变幅相比上一轮变化超过 {threshold}% 的点位
                 </span>
               </div>
             </div>

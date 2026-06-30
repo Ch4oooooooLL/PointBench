@@ -1209,7 +1209,7 @@ function formatDateTime(value: string | null | undefined): string {
 }
 
 function isAutoAbnormalReason(reason: string): boolean {
-  return reason.includes('连续') || reason.includes('相对上一轮') || reason.includes('增长超过');
+  return reason.includes('连续') || reason.includes('相对上一轮') || reason.includes('变化超过') || reason.includes('增长超过');
 }
 
 function firstStress(trend: TrendItem[]): number | null {
