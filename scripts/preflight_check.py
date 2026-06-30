@@ -324,14 +324,18 @@ def check_database(reporter: Reporter, project_root: Path, python_exe: str) -> N
 
     version = sqlite_alembic_version(db_path)
     if version is None:
-        reporter.fail(
+        reporter.warn(
             "Database migration state",
-            "existing PointBench tables have no alembic_version; this is likely an old create_all database",
+            "existing PointBench tables have no alembic_version; checking schema compatibility as a legacy database",
         )
     elif version not in revisions:
         reporter.fail("Database migration state", f"unknown Alembic revision in database: {version}")
     elif head and version != head:
-        reporter.fail("Database migration state", f"database revision {version} is not current head {head}")
+        reporter.warn(
+            "Database migration state",
+            f"database revision {version} is not current head {head}; startup migration will upgrade it",
+        )
+        return
     else:
         reporter.ok("Database migration state", f"current revision: {version}")
 
