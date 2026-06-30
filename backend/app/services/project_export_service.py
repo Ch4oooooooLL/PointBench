@@ -146,6 +146,33 @@ def _manifest_point(point: models.TestPoint, media_paths: dict[int, str]) -> dic
     }
 
 
+def _write_stress_change_sheet(
+    wb: Workbook,
+    points: list[models.TestPoint],
+    runs: list[models.TestRun],
+    records_by_run_point: dict[tuple[int, int], models.MeasurementRecord],
+) -> None:
+    stress_sheet = wb.create_sheet("应力变化情况")
+    stress_sheet.append(
+        ["点位编号", "点位名称", "部件", "方向"]
+        + [f"{run.cycle_count}次应力幅(MPa)" for run in runs]
+    )
+    for point in points:
+        stress_values = []
+        for run in runs:
+            record = records_by_run_point.get((run.id, point.id))
+            stress_values.append(record.stress_amplitude_mpa if record else None)
+        stress_sheet.append(
+            [
+                point.point_id,
+                point.point_name,
+                point.component,
+                point.direction,
+                *stress_values,
+            ]
+        )
+
+
 def _write_workbook(project: models.Project, points: list[models.TestPoint], runs: list[models.TestRun], records_by_run_point: dict[tuple[int, int], models.MeasurementRecord], cracks: list[models.CrackRecord], photo_paths: dict[int, str], crack_paths: dict[int, str], target: Path) -> None:
     wb = Workbook()
     summary = wb.active
@@ -178,6 +205,8 @@ def _write_workbook(project: models.Project, points: list[models.TestPoint], run
     crack_sheet.append(["点位编号", "点位名称", "循环次数", "轮次", "导出路径", "原文件名", "备注", "记录时间"])
     for crack in cracks:
         crack_sheet.append([crack.point.point_id, crack.point.point_name, crack.cycle_count, crack.run.run_name if crack.run else "", crack_paths.get(crack.id, ""), crack.filename, crack.remark, _iso(crack.created_at)])
+
+    _write_stress_change_sheet(wb, points, runs, records_by_run_point)
 
     used_titles: set[str] = set(wb.sheetnames)
     for run in runs:
