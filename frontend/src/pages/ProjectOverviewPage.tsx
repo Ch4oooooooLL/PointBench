@@ -8,6 +8,7 @@ import { ProjectSelector } from '../components/ProjectSelector';
 import { useAppContext } from '../context/AppContext';
 import { CrackRecord, Point, TrendItem } from '../types';
 import { hasTrendAnomaly } from '../utils/anomaly';
+import { loadVersionedProjectPage } from '../utils/versionedPageCache';
 
 type SummaryValue = string | number | null | undefined;
 
@@ -64,6 +65,13 @@ interface Summary {
   fastest_growth_points: SummaryPoint[];
 }
 
+interface ProjectOverviewCacheData {
+  points: Point[];
+  summary: Summary;
+  trends: PointTrend[];
+  crackRecords: CrackRecord[];
+}
+
 export function ProjectOverviewPage() {
   const { selectedProject, selectedProjectId, chartSettings, anomalySettings, debugMode } = useAppContext();
   const [points, setPoints] = useState<Point[]>([]);
@@ -93,24 +101,31 @@ export function ProjectOverviewPage() {
     setCrackRecords([]);
     setError('');
     setLoading(true);
-    Promise.all([
-      api.get<Point[]>(`/api/projects/${selectedProjectId}/points`),
-      api.get<Summary>(`/api/projects/${selectedProjectId}/analysis/summary`),
-      api.get<CrackRecord[]>(`/api/projects/${selectedProjectId}/crack-records`),
-    ])
-      .then(async ([pointData, summaryData, crackData]) => {
-        if (cancelled) return;
-        setPoints(pointData);
-        setSummary(summaryData);
-        setCrackRecords(crackData);
+    loadVersionedProjectPage<ProjectOverviewCacheData>({
+      cacheKey: `project-overview:${selectedProjectId}`,
+      projectId: selectedProjectId,
+      scope: 'overview',
+      loadFresh: async () => {
+        const [pointData, summaryData, crackData] = await Promise.all([
+          api.get<Point[]>(`/api/projects/${selectedProjectId}/points`),
+          api.get<Summary>(`/api/projects/${selectedProjectId}/analysis/summary`),
+          api.get<CrackRecord[]>(`/api/projects/${selectedProjectId}/crack-records`),
+        ]);
         const trendData = await Promise.all(
           pointData.map(async (point) => ({
             point,
             trend: await api.get<TrendItem[]>(`/api/points/${point.id}/trend`),
           })),
         );
+        return { points: pointData, summary: summaryData, trends: trendData, crackRecords: crackData };
+      },
+    })
+      .then(({ data }) => {
         if (cancelled) return;
-        setTrends(trendData);
+        setPoints(data.points);
+        setSummary(data.summary);
+        setCrackRecords(data.crackRecords);
+        setTrends(data.trends);
         setLoading(false);
       })
       .catch((err) => {

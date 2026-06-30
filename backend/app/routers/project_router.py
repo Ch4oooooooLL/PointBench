@@ -1,10 +1,11 @@
 import csv
+import hashlib
 import io
 import json
 import shutil
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import FileResponse
 from datetime import datetime
 
@@ -14,7 +15,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app import models
 from app.database import STORAGE_DIR, get_db
-from app.schemas import PointCreate, PointOut, ProjectCreate, ProjectOut, ProjectUpdate, TestRunCreate, TestRunOut
+from app.schemas import PointCreate, PointOut, ProjectCacheVersionOut, ProjectCreate, ProjectOut, ProjectUpdate, TestRunCreate, TestRunOut
 from app.services.dewesoft_service import delete_dewesoft_project_files
 from app.services.project_export_service import build_project_export_zip
 from app.utils.audit_utils import log_action
@@ -31,6 +32,121 @@ def project_out(db: Session, project: models.Project) -> ProjectOut:
     data = ProjectOut.model_validate(project)
     data.point_count = count
     return data
+
+
+def _normalize_version_value(value: object) -> str | int | None:
+    if isinstance(value, datetime):
+        return value.isoformat(timespec="microseconds")
+    return value  # type: ignore[return-value]
+
+
+def _cache_stat_values(db: Session, statement) -> list[str | int | None]:
+    row = db.execute(statement).one()
+    return [_normalize_version_value(value) for value in row]
+
+
+def project_cache_version(db: Session, project_id: int, scope: str) -> str:
+    project = db.get(models.Project, project_id)
+    if not project or project.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    scoped_stats: list[tuple[str, list[str | int | None]]] = [
+        (
+            "project",
+            [
+                project.id,
+                project.project_id,
+                _normalize_version_value(project.updated_at),
+                _normalize_version_value(project.deleted_at),
+            ],
+        ),
+        (
+            "points",
+            _cache_stat_values(
+                db,
+                select(
+                    func.count(models.TestPoint.id),
+                    func.max(models.TestPoint.id),
+                    func.max(models.TestPoint.updated_at),
+                    func.max(models.TestPoint.deleted_at),
+                ).where(models.TestPoint.project_db_id == project_id),
+            ),
+        ),
+        (
+            "test_runs",
+            _cache_stat_values(
+                db,
+                select(
+                    func.count(models.TestRun.id),
+                    func.max(models.TestRun.id),
+                    func.max(models.TestRun.created_at),
+                    func.max(models.TestRun.deleted_at),
+                ).where(models.TestRun.project_db_id == project_id),
+            ),
+        ),
+        (
+            "measurements",
+            _cache_stat_values(
+                db,
+                select(
+                    func.count(models.MeasurementRecord.id),
+                    func.max(models.MeasurementRecord.id),
+                    func.max(models.MeasurementRecord.updated_at),
+                    func.max(models.MeasurementRecord.deleted_at),
+                )
+                .join(models.TestPoint, models.MeasurementRecord.point_db_id == models.TestPoint.id)
+                .where(models.TestPoint.project_db_id == project_id),
+            ),
+        ),
+        (
+            "sensor_channels",
+            _cache_stat_values(
+                db,
+                select(func.count(models.SensorChannel.id), func.max(models.SensorChannel.id))
+                .join(models.TestPoint, models.SensorChannel.point_db_id == models.TestPoint.id)
+                .where(models.TestPoint.project_db_id == project_id),
+            ),
+        ),
+        (
+            "media_files",
+            _cache_stat_values(
+                db,
+                select(
+                    func.count(models.MediaFile.id),
+                    func.max(models.MediaFile.id),
+                    func.max(models.MediaFile.deleted_at),
+                ).where(models.MediaFile.project_db_id == project_id),
+            ),
+        ),
+        (
+            "cae_mappings",
+            _cache_stat_values(
+                db,
+                select(func.count(models.CaeMapping.id), func.max(models.CaeMapping.id))
+                .join(models.TestPoint, models.CaeMapping.point_db_id == models.TestPoint.id)
+                .where(models.TestPoint.project_db_id == project_id),
+            ),
+        ),
+    ]
+
+    if scope == "overview":
+        scoped_stats.append(
+            (
+                "crack_records",
+                _cache_stat_values(
+                    db,
+                    select(
+                        func.count(models.CrackRecord.id),
+                        func.max(models.CrackRecord.id),
+                        func.max(models.CrackRecord.updated_at),
+                        func.max(models.CrackRecord.deleted_at),
+                    ).where(models.CrackRecord.project_db_id == project_id),
+                ),
+            )
+        )
+
+    payload = json.dumps(scoped_stats, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 @router.get("", response_model=list[ProjectOut])
@@ -103,6 +219,15 @@ def download_delete_export(filename: str) -> FileResponse:
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="导出文件不存在")
     return FileResponse(path, filename=filename, media_type="application/zip")
+
+
+@router.get("/{project_id}/cache-version", response_model=ProjectCacheVersionOut)
+def get_project_cache_version(
+    project_id: int,
+    scope: str = Query(default="detail", pattern="^(detail|overview)$"),
+    db: Session = Depends(get_db),
+) -> ProjectCacheVersionOut:
+    return ProjectCacheVersionOut(project_db_id=project_id, scope=scope, version=project_cache_version(db, project_id, scope))
 
 
 @router.get("/{project_id}", response_model=ProjectOut)

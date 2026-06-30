@@ -5,6 +5,7 @@ import { api, mediaUrl } from '../api/client';
 import { StatusPill } from '../components/StatusPill';
 import { useAppContext } from '../context/AppContext';
 import { Point, Project } from '../types';
+import { loadVersionedProjectPage } from '../utils/versionedPageCache';
 
 interface ProjectForm {
   project_name: string;
@@ -14,6 +15,11 @@ interface ProjectForm {
   vehicle_or_product: string;
   test_stage: string;
   description: string;
+}
+
+interface ProjectDetailCacheData {
+  project: Project;
+  points: Point[];
 }
 
 function toProjectForm(project: Project | null): ProjectForm {
@@ -49,16 +55,30 @@ export function ProjectDetailPage() {
   const [error, setError] = useState('');
 
   const load = (): Promise<void> => {
+    if (!projectId) {
+      setProject(null);
+      setPoints([]);
+      setError('项目不存在');
+      return Promise.resolve();
+    }
     setLoading(true);
     setError('');
-    return Promise.all([
-      api.get<Project>(`/api/projects/${projectId}`),
-      api.get<Point[]>(`/api/projects/${projectId}/points`),
-    ])
-      .then(([projectData, pointsData]) => {
-        setProject(projectData);
-        setProjectForm(toProjectForm(projectData));
-        setPoints(pointsData);
+    return loadVersionedProjectPage<ProjectDetailCacheData>({
+      cacheKey: `project-detail:${projectId}`,
+      projectId,
+      scope: 'detail',
+      loadFresh: async () => {
+        const [projectData, pointsData] = await Promise.all([
+          api.get<Project>(`/api/projects/${projectId}`),
+          api.get<Point[]>(`/api/projects/${projectId}/points`),
+        ]);
+        return { project: projectData, points: pointsData };
+      },
+    })
+      .then(({ data }) => {
+        setProject(data.project);
+        setProjectForm(toProjectForm(data.project));
+        setPoints(data.points);
         setLoading(false);
       })
       .catch((err) => {

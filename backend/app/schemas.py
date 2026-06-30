@@ -219,6 +219,12 @@ class ProjectOut(BaseModel):
     point_count: int = 0
 
 
+class ProjectCacheVersionOut(BaseModel):
+    project_db_id: int
+    scope: str
+    version: str
+
+
 class ProjectCreate(BaseModel):
     project_id: str = Field(min_length=1, max_length=64, pattern=PROJECT_ID_PATTERN)
     project_name: str = Field(min_length=1)
