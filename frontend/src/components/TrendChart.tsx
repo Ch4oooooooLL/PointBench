@@ -1,6 +1,8 @@
 import * as echarts from 'echarts';
 import { useEffect, useRef } from 'react';
+import { useAppContext } from '../context/AppContext';
 import { TrendItem } from '../types';
+import { getTrendAnomalies } from '../utils/anomaly';
 
 interface Props {
   data: TrendItem[];
@@ -15,6 +17,7 @@ const labels: Record<Props['metric'], string> = {
 };
 
 export function TrendChart({ data, metric }: Props) {
+  const { anomalySettings } = useAppContext();
   const ref = useRef<HTMLDivElement | null>(null);
   const hasData = data.some((item) => item[metric] != null);
 
@@ -22,6 +25,8 @@ export function TrendChart({ data, metric }: Props) {
     if (!ref.current || !hasData) return;
     const chartDom = ref.current;
     const chart = echarts.init(chartDom);
+    const anomalies = getTrendAnomalies(data, anomalySettings.thresholdPercent)
+      .filter(({ item }) => item[metric] != null);
     chart.setOption({
       tooltip: { trigger: 'axis' },
       grid: { left: 52, right: 24, top: 32, bottom: 68 },
@@ -74,10 +79,12 @@ export function TrendChart({ data, metric }: Props) {
           symbolSize: 9,
           data: data.map((item) => item[metric] ?? null),
           markPoint: {
-            data: data
-              .map((item, index) => ({ item, index }))
-              .filter(({ item }) => item.is_abnormal && item[metric] != null)
-              .map(({ item, index }) => ({ name: '异常', coord: [index, item[metric] ?? 0], value: '异常' })),
+            data: anomalies.map(({ item, index, reason }) => ({
+              name: '异常',
+              coord: [index, item[metric] ?? 0],
+              value: '异常',
+              reason,
+            })),
           },
         },
       ],
@@ -98,7 +105,7 @@ export function TrendChart({ data, metric }: Props) {
       window.removeEventListener('resize', resize);
       chart.dispose();
     };
-  }, [data, metric, hasData]);
+  }, [data, metric, hasData, anomalySettings.thresholdPercent]);
 
   if (!hasData) return <div className="empty chart-empty">暂无趋势数据</div>;
   return (

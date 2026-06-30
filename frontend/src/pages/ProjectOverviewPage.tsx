@@ -7,6 +7,7 @@ import { MultiPointTrendChart, PointTrend } from '../components/MultiPointTrendC
 import { ProjectSelector } from '../components/ProjectSelector';
 import { useAppContext } from '../context/AppContext';
 import { CrackRecord, Point, TrendItem } from '../types';
+import { hasTrendAnomaly } from '../utils/anomaly';
 
 type SummaryValue = string | number | null | undefined;
 
@@ -61,18 +62,6 @@ interface Summary {
   abnormal_count: number;
   max_amplitude_points: SummaryPoint[];
   fastest_growth_points: SummaryPoint[];
-}
-
-function hasAbnormalChange(trend: TrendItem[], thresholdPercent: number): boolean {
-  const valid = trend.filter((item) => item.amplitude_strain_ue != null);
-  for (let index = 1; index < valid.length; index += 1) {
-    const previous = valid[index - 1].amplitude_strain_ue as number;
-    const current = valid[index].amplitude_strain_ue as number;
-    if (previous !== 0 && Math.abs(current - previous) / Math.abs(previous) > thresholdPercent / 100) {
-      return true;
-    }
-  }
-  return false;
 }
 
 export function ProjectOverviewPage() {
@@ -144,11 +133,11 @@ export function ProjectOverviewPage() {
 
   const displayTrends = useMemo(() => {
     if (!abnormalOnly) return trends;
-    return trends.filter(({ trend }) => hasAbnormalChange(trend, threshold));
+    return trends.filter(({ trend }) => hasTrendAnomaly(trend, threshold));
   }, [trends, abnormalOnly, threshold]);
 
   const abnormalTrendCount = useMemo(
-    () => trends.filter(({ trend }) => hasAbnormalChange(trend, threshold)).length,
+    () => trends.filter(({ trend }) => hasTrendAnomaly(trend, threshold)).length,
     [trends, threshold],
   );
 
