@@ -19,6 +19,10 @@ export interface AnomalySettings {
   thresholdPercent: number;
 }
 
+export interface DisplaySettings {
+  showPromptMessage: boolean;
+}
+
 interface AppContextValue {
   projects: Project[];
   isLoadingProjects: boolean;
@@ -33,6 +37,8 @@ interface AppContextValue {
   setChartSettings: (settings: ChartSettings) => void;
   anomalySettings: AnomalySettings;
   setAnomalySettings: (settings: AnomalySettings) => void;
+  displaySettings: DisplaySettings;
+  setDisplaySettings: (settings: DisplaySettings) => void;
   debugMode: boolean;
   setDebugMode: (enabled: boolean) => void;
 }
@@ -51,6 +57,10 @@ const DEFAULT_CHART: ChartSettings = {
 
 const DEFAULT_ANOMALY: AnomalySettings = {
   thresholdPercent: 20,
+};
+
+const DEFAULT_DISPLAY: DisplaySettings = {
+  showPromptMessage: true,
 };
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -96,12 +106,23 @@ function loadDebugMode(): boolean {
   return localStorage.getItem('debugMode') === 'true';
 }
 
+function loadDisplaySettings(): DisplaySettings {
+  const raw = localStorage.getItem('displaySettings');
+  if (!raw) return DEFAULT_DISPLAY;
+  try {
+    return { ...DEFAULT_DISPLAY, ...JSON.parse(raw) };
+  } catch {
+    return DEFAULT_DISPLAY;
+  }
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectIdState] = useState<number | null>(loadSelectedProjectId);
   const [riskSettings, setRiskSettingsState] = useState<RiskSettings>(loadRiskSettings);
   const [chartSettings, setChartSettingsState] = useState<ChartSettings>(loadChartSettings);
   const [anomalySettings, setAnomalySettingsState] = useState<AnomalySettings>(loadAnomalySettings);
+  const [displaySettings, setDisplaySettingsState] = useState<DisplaySettings>(loadDisplaySettings);
   const [debugMode, setDebugModeState] = useState<boolean>(loadDebugMode);
   const [isLoadingProjects, setIsLoadingProjects] = useState(false);
   const [projectsError, setProjectsError] = useState('');
@@ -158,6 +179,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('debugMode', String(enabled));
   };
 
+  const setDisplaySettings = (settings: DisplaySettings) => {
+    setDisplaySettingsState(settings);
+    localStorage.setItem('displaySettings', JSON.stringify(settings));
+  };
+
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedProjectId) ?? null,
     [projects, selectedProjectId],
@@ -179,6 +205,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setChartSettings,
         anomalySettings,
         setAnomalySettings,
+        displaySettings,
+        setDisplaySettings,
         debugMode,
         setDebugMode,
       }}

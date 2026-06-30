@@ -1,11 +1,17 @@
 import { ImagePlus, Pencil, Plus, Save, Trash2, Upload, X } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, mediaUrl } from '../api/client';
 import { StatusPill } from '../components/StatusPill';
 import { TrendChart } from '../components/TrendChart';
 import { useAppContext } from '../context/AppContext';
 import { Point, PointMeasurementRow, TrendItem } from '../types';
+import { getCookie, setCookie } from '../utils/cookie';
+
+const naturalCollator = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' });
+
+type LegendLabelMode = 'point_id' | 'point_name';
+type LegendSortMode = 'source' | 'primary_asc' | 'primary_desc' | 'latest_desc';
 
 type Metric = 'max_strain_ue' | 'min_strain_ue' | 'amplitude_strain_ue' | 'stress_amplitude_mpa';
 
@@ -86,7 +92,7 @@ function isSameValue(left: unknown, right: unknown): boolean {
 export function PointDetailPage() {
   const { pointId } = useParams();
   const navigate = useNavigate();
-  const { setSelectedProjectId } = useAppContext();
+  const { setSelectedProjectId, displaySettings } = useAppContext();
   const [searchParams, setSearchParams] = useSearchParams();
   const [point, setPoint] = useState<Point | null>(null);
   const [form, setForm] = useState<PointForm>(toPointForm(null));
@@ -99,6 +105,64 @@ export function PointDetailPage() {
   const [previewUrl, setPreviewUrl] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+
+  // 新增切换点位状态
+  const [pointsList, setPointsList] = useState<Point[]>([]);
+  const [isOpen, setIsOpen] = useState(false);
+  const [labelMode, setLabelMode] = useState<LegendLabelMode>('point_id');
+  const [sortMode, setSortMode] = useState<LegendSortMode>('source');
+  
+  // 提示和引导状态
+  const [showFirstTimeModal, setShowFirstTimeModal] = useState(false);
+  const [showPromptBanner, setShowPromptBanner] = useState(false);
+
+  useEffect(() => {
+    if (point?.project_db_id) {
+      api.get<Point[]>(`/api/projects/${point.project_db_id}/points`).then(setPointsList);
+    }
+  }, [point?.project_db_id]);
+
+  useEffect(() => {
+    if (pointId) {
+      const visited = getCookie('visited_point_detail');
+      if (!visited) {
+        setShowFirstTimeModal(true);
+      } else {
+        if (displaySettings.showPromptMessage) {
+          setShowPromptBanner(true);
+        }
+      }
+    }
+  }, [pointId, displaySettings.showPromptMessage]);
+
+  const handleCloseFirstTimeModal = () => {
+    setShowFirstTimeModal(false);
+    setCookie('visited_point_detail', 'true', 365);
+    if (displaySettings.showPromptMessage) {
+      setShowPromptBanner(true);
+    }
+  };
+
+  const sortedPoints = useMemo(() => {
+    const indexed = pointsList.map((item, index) => ({ item, index }));
+    if (sortMode === 'source') return pointsList;
+    indexed.sort((left, right) => {
+      if (sortMode === 'latest_desc') {
+        const leftValue = left.item.latest_measurement?.stress_amplitude_mpa ?? null;
+        const rightValue = right.item.latest_measurement?.stress_amplitude_mpa ?? null;
+        if (leftValue != null && rightValue != null && leftValue !== rightValue) return rightValue - leftValue;
+        if (leftValue != null && rightValue == null) return -1;
+        if (leftValue == null && rightValue != null) return 1;
+      } else {
+        const primaryLeft = labelMode === 'point_id' ? left.item.point_id : left.item.point_name;
+        const primaryRight = labelMode === 'point_id' ? right.item.point_id : right.item.point_name;
+        const primaryCompare = naturalCollator.compare(primaryLeft, primaryRight);
+        if (primaryCompare !== 0) return sortMode === 'primary_asc' ? primaryCompare : -primaryCompare;
+      }
+      return left.index - right.index;
+    });
+    return indexed.map(({ item }) => item);
+  }, [pointsList, labelMode, sortMode]);
 
   const load = () => {
     api.get<Point>(`/api/points/${pointId}`).then((data) => {
@@ -255,10 +319,88 @@ export function PointDetailPage() {
 
   return (
     <section className="point-detail-page">
+      {showPromptBanner && (
+        <div className="point-prompt-banner alert ok" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 0, padding: '10px 16px', borderRadius: 8 }}>
+          <span>💡 提示：您可以在页面左上角点击点位编号，直接在展开列表中切换查看其他点位。</span>
+          <button className="button" style={{ padding: '2px 8px', minHeight: 'auto', background: 'transparent', border: 'none', color: 'inherit' }} onClick={() => setShowPromptBanner(false)}>
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       <div className="page-head point-detail-head">
         <div>
-          <h1>{point.point_id} · {point.point_name}</h1>
-          <p>{point.component || '-'} · {point.direction || '-'} · {point.bridge_type || '-'}</p>
+          <div 
+            className={`point-detail-selector ${isOpen ? 'open' : ''}`}
+            onMouseEnter={() => setIsOpen(true)}
+            onMouseLeave={() => setIsOpen(false)}
+          >
+            <div className="point-selector-trigger">
+              <h1>{point.point_id} · {point.point_name}</h1>
+              <span className="dropdown-arrow">▼</span>
+            </div>
+            {isOpen && (
+              <div className="point-selector-dropdown" onMouseLeave={() => setIsOpen(false)}>
+                <div className="point-selector-controls">
+                  <div className="legend-mode-toggle" role="group" aria-label="图例主显示字段">
+                    <button
+                      type="button"
+                      className={labelMode === 'point_id' ? 'active' : ''}
+                      onClick={() => setLabelMode('point_id')}
+                    >
+                      ID
+                    </button>
+                    <button
+                      type="button"
+                      className={labelMode === 'point_name' ? 'active' : ''}
+                      onClick={() => setLabelMode('point_name')}
+                    >
+                      名称
+                    </button>
+                  </div>
+                  <label className="legend-sort-select">
+                    <span>排序</span>
+                    <select 
+                      value={sortMode} 
+                      onChange={(event) => setSortMode(event.target.value as LegendSortMode)}
+                      style={{ height: 26, fontSize: 12, borderRadius: 4, border: '1px solid var(--border-color)', padding: '0 4px' }}
+                    >
+                      <option value="source">默认顺序</option>
+                      <option value="primary_asc">{(labelMode === 'point_id' ? '点位编号' : '点位名称')}自然升序</option>
+                      <option value="primary_desc">{(labelMode === 'point_id' ? '点位编号' : '点位名称')}自然降序</option>
+                      <option value="latest_desc">最新应力降序</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="point-selector-list">
+                  {sortedPoints.map((p) => {
+                    const isActive = p.id === point.id;
+                    const latest = p.latest_measurement?.stress_amplitude_mpa;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className={`point-selector-item ${isActive ? 'active' : ''}`}
+                        onClick={() => {
+                          setIsOpen(false);
+                          navigate(`/points/${p.id}`);
+                        }}
+                      >
+                        <span className="point-text">
+                          <strong>{labelMode === 'point_id' ? p.point_id : p.point_name}</strong>
+                          <small>{labelMode === 'point_id' ? p.point_name : p.point_id}</small>
+                        </span>
+                        {latest != null && (
+                          <span className="point-val">{latest.toFixed(1)} MPa</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+          <p style={{ marginTop: 8 }}>{point.component || '-'} · {point.direction || '-'} · {point.bridge_type || '-'}</p>
         </div>
         <div className="actions">
           {editMode && <button className="button primary" disabled={busy} onClick={saveAll}><Save size={18} />保存</button>}
@@ -482,6 +624,21 @@ export function PointDetailPage() {
               <button className="button" onClick={() => setPreviewUrl('')}>关闭</button>
             </div>
             <img src={previewUrl} alt="图片预览" />
+          </div>
+        </div>
+      )}
+
+      {showFirstTimeModal && (
+        <div className="modal-backdrop" onClick={handleCloseFirstTimeModal} style={{ zIndex: 1000 }}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 400, padding: 24, borderRadius: 12, textAlign: 'center' }}>
+            <h2 style={{ marginBottom: 16 }}>💡 快速切换点位功能</h2>
+            <p style={{ lineHeight: 1.6, color: 'var(--text-main)', marginBottom: 20 }}>
+              为了方便您进行快捷查看，我们已在<b>点位详情页面的左上角</b>添加了点位切换悬浮窗！<br />
+              只需将鼠标移到左上角的点位编号及名称上，即可快速展开该项目下的所有点位进行滚动切换选择。
+            </p>
+            <button className="button primary" onClick={handleCloseFirstTimeModal} style={{ width: '100%' }}>
+              我知道了
+            </button>
           </div>
         </div>
       )}

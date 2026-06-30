@@ -1,17 +1,30 @@
-import { Bug, LineChart, Save, ShieldAlert, type LucideIcon } from 'lucide-react';
+import { Bug, LineChart, Save, ShieldAlert, Eye, type LucideIcon } from 'lucide-react';
 import { useState } from 'react';
 import { useAppContext } from '../context/AppContext';
 
-type SettingsCategory = 'risk' | 'chart' | 'debug';
+type SettingsCategory = 'risk' | 'display' | 'chart' | 'debug';
 
 const SETTINGS_CATEGORIES: Array<{ id: SettingsCategory; label: string; icon: LucideIcon }> = [
   { id: 'risk', label: '风险标识', icon: ShieldAlert },
+  { id: 'display', label: '显示设置', icon: Eye },
   { id: 'chart', label: '图表显示', icon: LineChart },
   { id: 'debug', label: '调试工具', icon: Bug },
 ];
 
 export function SettingsPage() {
-  const { riskSettings, setRiskSettings, chartSettings, setChartSettings, anomalySettings, setAnomalySettings, debugMode, setDebugMode } = useAppContext();
+  const { 
+    riskSettings, 
+    setRiskSettings, 
+    chartSettings, 
+    setChartSettings, 
+    anomalySettings, 
+    setAnomalySettings, 
+    displaySettings,
+    setDisplaySettings,
+    debugMode, 
+    setDebugMode 
+  } = useAppContext();
+
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>('risk');
   const [warnPercent, setWarnPercent] = useState(String(riskSettings.warnPercent));
   const [dangerPercent, setDangerPercent] = useState(String(riskSettings.dangerPercent));
@@ -20,6 +33,7 @@ export function SettingsPage() {
   const [overviewExpandedHeight, setOverviewExpandedHeight] = useState(String(chartSettings.overviewExpandedHeight));
   const [expandedChartWidth, setExpandedChartWidth] = useState(String(chartSettings.expandedChartWidth));
   const [abnormalThreshold, setAbnormalThreshold] = useState(String(anomalySettings.thresholdPercent));
+  const [showPrompt, setShowPrompt] = useState(displaySettings.showPromptMessage);
   const [debugEnabled, setDebugEnabled] = useState(debugMode);
   const [message, setMessage] = useState('');
 
@@ -36,6 +50,9 @@ export function SettingsPage() {
     });
     setAnomalySettings({
       thresholdPercent: clampNumber(Number(abnormalThreshold), 5, 100),
+    });
+    setDisplaySettings({
+      showPromptMessage: showPrompt,
     });
     setDebugMode(debugEnabled);
     setMessage('设置已保存。');
@@ -89,6 +106,17 @@ export function SettingsPage() {
               <span className="risk-badge danger">危险</span>
               <span className="risk-badge critical">严重</span>
             </div>
+          </div>
+        )}
+
+        {activeCategory === 'display' && (
+          <div className="settings-section">
+            <h2>显示设置</h2>
+            <p>配置页面的消息提醒和引导设置。</p>
+            <label className="toggle-row">
+              <input type="checkbox" checked={showPrompt} onChange={(event) => setShowPrompt(event.target.checked)} />
+              提示消息（在点位详情页显示左上角切换点位的提示框）
+            </label>
           </div>
         )}
 
