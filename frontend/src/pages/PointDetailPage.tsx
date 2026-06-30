@@ -143,6 +143,18 @@ export function PointDetailPage() {
     }
   };
 
+  useEffect(() => {
+    if (!isOpen) return;
+    function handleOutsideClick(event: MouseEvent) {
+      const target = event.target as HTMLElement;
+      if (!target.closest('.point-detail-selector')) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener('click', handleOutsideClick);
+    return () => document.removeEventListener('click', handleOutsideClick);
+  }, [isOpen]);
+
   const sortedPoints = useMemo(() => {
     const indexed = pointsList.map((item, index) => ({ item, index }));
     if (sortMode === 'source') return pointsList;
@@ -321,7 +333,7 @@ export function PointDetailPage() {
     <section className="point-detail-page">
       {showPromptBanner && (
         <div className="point-prompt-banner alert ok" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 0, padding: '10px 16px', borderRadius: 8 }}>
-          <span>💡 提示：您可以在页面左上角点击点位编号，直接在展开列表中切换查看其他点位。</span>
+          <span>💡 提示：点击页面左上角点位编号或名称，即可展开当前项目的点位列表并进行快速切换。</span>
           <button className="button" style={{ padding: '2px 8px', minHeight: 'auto', background: 'transparent', border: 'none', color: 'inherit' }} onClick={() => setShowPromptBanner(false)}>
             <X size={14} />
           </button>
@@ -332,15 +344,13 @@ export function PointDetailPage() {
         <div>
           <div 
             className={`point-detail-selector ${isOpen ? 'open' : ''}`}
-            onMouseEnter={() => setIsOpen(true)}
-            onMouseLeave={() => setIsOpen(false)}
           >
-            <div className="point-selector-trigger">
+            <div className="point-selector-trigger" onClick={() => setIsOpen(!isOpen)}>
               <h1>{point.point_id} · {point.point_name}</h1>
               <span className="dropdown-arrow">▼</span>
             </div>
             {isOpen && (
-              <div className="point-selector-dropdown" onMouseLeave={() => setIsOpen(false)}>
+              <div className="point-selector-dropdown">
                 <div className="point-selector-controls">
                   <div className="legend-mode-toggle" role="group" aria-label="图例主显示字段">
                     <button
@@ -631,10 +641,10 @@ export function PointDetailPage() {
       {showFirstTimeModal && (
         <div className="modal-backdrop" onClick={handleCloseFirstTimeModal} style={{ zIndex: 1000 }}>
           <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 400, padding: 24, borderRadius: 12, textAlign: 'center' }}>
-            <h2 style={{ marginBottom: 16 }}>💡 快速切换点位功能</h2>
+            <h2 style={{ marginBottom: 16 }}>💡 点位快速导航功能启用说明</h2>
             <p style={{ lineHeight: 1.6, color: 'var(--text-main)', marginBottom: 20 }}>
-              为了方便您进行快捷查看，我们已在<b>点位详情页面的左上角</b>添加了点位切换悬浮窗！<br />
-              只需将鼠标移到左上角的点位编号及名称上，即可快速展开该项目下的所有点位进行滚动切换选择。
+              为优化点位数据切换效率，系统已在详情页左上角集成“点位快速切换导航窗”。<br />
+              点击页面左上角的点位编号与名称，即可展开当前项目下属的所有测点列表，以供快速检索与详情切换。
             </p>
             <button className="button primary" onClick={handleCloseFirstTimeModal} style={{ width: '100%' }}>
               我知道了
