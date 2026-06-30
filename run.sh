@@ -9,6 +9,7 @@ LAUNCHER_LOG="$LOG_DIR/launcher.log"
 BACKEND_LOG="$LOG_DIR/backend.log"
 FRONTEND_LOG="$LOG_DIR/frontend.log"
 ERROR_LOG="$LOG_DIR/errors.log"
+PREFLIGHT_REPORT="$LOG_DIR/preflight-report.txt"
 
 mkdir -p "$LOG_DIR"
 printf '%s\n' "$LOG_DIR" > "$LOG_ROOT/latest-run.txt"
@@ -147,6 +148,7 @@ log_launcher "Starting PointBench shell launcher"
 log_launcher "Project root: $PROJECT_DIR"
 log_launcher "Log directory: $LOG_DIR"
 log_launcher "Error log: $ERROR_LOG"
+log_launcher "Preflight report: $PREFLIGHT_REPORT"
 log_launcher "Python executable: $PYTHON_EXE"
 log_launcher "PATH: $PATH"
 
@@ -155,6 +157,16 @@ log_launcher "PATH: $PATH"
 : > "$ERROR_LOG"
 
 stop_existing_project_processes
+
+run_diag "pointbench-preflight" "$LAUNCHER_LOG" "$PROJECT_DIR" \
+  "$PYTHON_EXE" "$PROJECT_DIR/scripts/preflight_check.py" \
+  --project-root "$PROJECT_DIR" \
+  --python "$PYTHON_EXE" \
+  --report "$PREFLIGHT_REPORT" \
+  || {
+    log_launcher "PointBench preflight failed. See $PREFLIGHT_REPORT"
+    exit 1
+  }
 
 run_diag "python-version" "$BACKEND_LOG" "$PROJECT_DIR/backend" "$PYTHON_EXE" --version
 run_diag "backend-import-check" "$BACKEND_LOG" "$PROJECT_DIR/backend" \

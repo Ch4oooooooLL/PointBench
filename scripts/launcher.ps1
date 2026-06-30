@@ -19,6 +19,7 @@ $launcherLog = Join-Path $logDir 'launcher.log'
 $backendLog = Join-Path $logDir 'backend.log'
 $frontendLog = Join-Path $logDir 'frontend.log'
 $errorLog = Join-Path $logDir 'errors.log'
+$preflightReport = Join-Path $logDir 'preflight-report.txt'
 $latestLogDirFile = Join-Path $logRoot 'latest-run.txt'
 
 $script:TextEncoding = New-Object System.Text.UTF8Encoding -ArgumentList $false
@@ -393,6 +394,7 @@ function Run-Preflight {
     Write-LauncherLog "Project root: $root"
     Write-LauncherLog "Log directory: $logDir"
     Write-LauncherLog "Error log: $errorLog"
+    Write-LauncherLog "Preflight report: $preflightReport"
     Write-LauncherLog "PowerShell: $($PSVersionTable.PSVersion)"
     Write-LauncherLog "PATH: $env:PATH"
     Write-LauncherLog "Python executable: $pythonExe"
@@ -402,6 +404,13 @@ function Run-Preflight {
         -Arguments '--version' `
         -WorkingDirectory (Join-Path $root 'backend') `
         -LogPath $backendLog `
+        -Required
+
+    Invoke-DiagnosticCommand -Name 'pointbench-preflight' `
+        -FilePath $pythonExe `
+        -Arguments ('"{0}" --project-root "{1}" --python "{2}" --report "{3}"' -f (Join-Path $root 'scripts\preflight_check.py'), $root, $pythonExe, $preflightReport) `
+        -WorkingDirectory $root `
+        -LogPath $launcherLog `
         -Required
 
     Invoke-DiagnosticCommand -Name 'backend-import-check' `
