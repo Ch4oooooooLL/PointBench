@@ -7,6 +7,7 @@ import { TrendChart } from '../components/TrendChart';
 import { useAppContext } from '../context/AppContext';
 import { Point, PointMeasurementRow, TrendItem } from '../types';
 import { getCookie, setCookie } from '../utils/cookie';
+import { calculateStressPreview, DEFAULT_STRESS_FORMULA } from '../utils/stressFormula';
 
 const naturalCollator = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' });
 
@@ -37,6 +38,8 @@ interface EditableMeasurementRow {
   cycle_count: string;
   max_strain_ue: string;
   min_strain_ue: string;
+  amplitude_strain_ue?: number | null;
+  stress_amplitude_mpa?: number | null;
   is_abnormal: boolean;
   abnormal_reason: string;
   remark: string;
@@ -67,6 +70,8 @@ function toEditableRows(rows: PointMeasurementRow[]): EditableMeasurementRow[] {
     cycle_count: String(row.cycle_count),
     max_strain_ue: row.max_strain_ue == null ? '' : String(row.max_strain_ue),
     min_strain_ue: row.min_strain_ue == null ? '' : String(row.min_strain_ue),
+    amplitude_strain_ue: row.amplitude_strain_ue,
+    stress_amplitude_mpa: row.stress_amplitude_mpa,
     is_abnormal: row.is_abnormal,
     abnormal_reason: row.abnormal_reason ?? '',
     remark: row.remark ?? '',
@@ -101,6 +106,7 @@ export function PointDetailPage() {
   const [deletedMeasurementIds, setDeletedMeasurementIds] = useState<number[]>([]);
   const [trend, setTrend] = useState<TrendItem[]>([]);
   const [metric, setMetric] = useState<Metric>('amplitude_strain_ue');
+  const [stressFormula, setStressFormula] = useState(DEFAULT_STRESS_FORMULA);
   const [editMode, setEditMode] = useState(searchParams.get('edit') === '1');
   const [previewUrl, setPreviewUrl] = useState('');
   const [message, setMessage] = useState('');
@@ -121,6 +127,12 @@ export function PointDetailPage() {
       api.get<Point[]>(`/api/projects/${point.project_db_id}/points`).then(setPointsList);
     }
   }, [point?.project_db_id]);
+
+  useEffect(() => {
+    api.get<{ stress_formula: string }>('/api/settings')
+      .then((data) => setStressFormula(data.stress_formula || DEFAULT_STRESS_FORMULA))
+      .catch(() => setStressFormula(DEFAULT_STRESS_FORMULA));
+  }, []);
 
   useEffect(() => {
     if (pointId) {
@@ -243,6 +255,8 @@ export function PointDetailPage() {
         cycle_count: '',
         max_strain_ue: '',
         min_strain_ue: '',
+        amplitude_strain_ue: null,
+        stress_amplitude_mpa: null,
         is_abnormal: false,
         abnormal_reason: '',
         remark: '',
@@ -605,7 +619,9 @@ export function PointDetailPage() {
               {rows.map((row) => {
                 const max = numberOrNull(row.max_strain_ue);
                 const min = numberOrNull(row.min_strain_ue);
-                const amplitude = max == null || min == null ? null : (max - min) / 2;
+                const preview = calculateStressPreview(max, min, stressFormula);
+                const amplitude = preview?.amplitude ?? null;
+                const stress = preview ? preview.stress ?? row.stress_amplitude_mpa ?? null : null;
                 return (
                   <tr key={row.localKey}>
                     <td>{editMode ? <input value={row.run_name} onChange={(e) => updateRow(row.localKey, { run_name: e.target.value })} /> : row.run_name}</td>
@@ -613,7 +629,7 @@ export function PointDetailPage() {
                     <td>{editMode ? <input type="number" value={row.max_strain_ue} onChange={(e) => updateRow(row.localKey, { max_strain_ue: e.target.value })} /> : row.max_strain_ue || '-'}</td>
                     <td>{editMode ? <input type="number" value={row.min_strain_ue} onChange={(e) => updateRow(row.localKey, { min_strain_ue: e.target.value })} /> : row.min_strain_ue || '-'}</td>
                     <td>{amplitude == null ? '-' : amplitude.toFixed(2)}</td>
-                    <td>{amplitude == null ? '-' : (amplitude * 0.206).toFixed(2)}</td>
+                    <td>{stress == null ? '-' : stress.toFixed(2)}</td>
                     <td>{editMode ? <input type="checkbox" checked={row.is_abnormal} onChange={(e) => updateRow(row.localKey, { is_abnormal: e.target.checked })} /> : <StatusPill value={row.is_abnormal} tone={row.is_abnormal ? 'danger' : 'ok'} />}</td>
                     <td>{editMode ? <input value={row.abnormal_reason} onChange={(e) => updateRow(row.localKey, { abnormal_reason: e.target.value })} /> : row.abnormal_reason || '-'}</td>
                     {editMode && <td><button className="icon-button danger-text" onClick={() => removeRow(row)} title="删除循环"><Trash2 size={16} /></button></td>}

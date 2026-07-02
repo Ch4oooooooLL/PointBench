@@ -7,6 +7,7 @@ import { TrendChart } from '../components/TrendChart';
 import { useAppContext, type RiskSettings } from '../context/AppContext';
 import { Point, PointMeasurementRow, Project, TestRun, TrendItem } from '../types';
 import { growthPercent, riskLevel, riskPercentText } from '../utils/risk';
+import { calculateStressPreview, DEFAULT_STRESS_FORMULA } from '../utils/stressFormula';
 
 export interface PointRow {
   point: Point;
@@ -45,6 +46,8 @@ interface EditableMeasurementRow {
   cycle_count: string;
   max_strain_ue: string;
   min_strain_ue: string;
+  amplitude_strain_ue?: number | null;
+  stress_amplitude_mpa?: number | null;
   is_abnormal: boolean;
   abnormal_reason: string;
   remark: string;
@@ -119,6 +122,8 @@ function toEditableRows(rows: PointMeasurementRow[]): EditableMeasurementRow[] {
     cycle_count: String(row.cycle_count),
     max_strain_ue: row.max_strain_ue == null ? '' : String(row.max_strain_ue),
     min_strain_ue: row.min_strain_ue == null ? '' : String(row.min_strain_ue),
+    amplitude_strain_ue: row.amplitude_strain_ue,
+    stress_amplitude_mpa: row.stress_amplitude_mpa,
     is_abnormal: row.is_abnormal,
     abnormal_reason: row.abnormal_reason ?? '',
     remark: row.remark ?? '',
@@ -606,6 +611,7 @@ export function PointRiskModal({
   const [busy, setBusy] = useState(false);
   const [activeTab, setActiveTab] = useState<PointEditTab>('main');
   const [pasteMediaType, setPasteMediaType] = useState<MediaType>('overall');
+  const [stressFormula, setStressFormula] = useState(DEFAULT_STRESS_FORMULA);
   const initial = firstStress(trend);
   const hasUnsavedChanges = editMode && (
     !isSameValue(form, toPointForm(point)) ||
@@ -624,6 +630,12 @@ export function PointRiskModal({
     setActiveTab('main');
     loadMeasurementRows(row.point.id);
   }, [row.point.id]);
+
+  useEffect(() => {
+    api.get<{ stress_formula: string }>('/api/settings')
+      .then((data) => setStressFormula(data.stress_formula || DEFAULT_STRESS_FORMULA))
+      .catch(() => setStressFormula(DEFAULT_STRESS_FORMULA));
+  }, []);
 
   useEffect(() => {
     if (!editMode || activeTab !== 'photos') return undefined;
@@ -672,6 +684,8 @@ export function PointRiskModal({
         cycle_count: '',
         max_strain_ue: '',
         min_strain_ue: '',
+        amplitude_strain_ue: null,
+        stress_amplitude_mpa: null,
         is_abnormal: false,
         abnormal_reason: '',
         remark: '',
@@ -885,7 +899,7 @@ export function PointRiskModal({
                   <h2>循环数据</h2>
                   <button className="button" onClick={addMeasurement}><Plus size={18} />新增循环</button>
                 </div>
-                <MeasurementTable measurements={measurements} initial={initial} riskSettings={riskSettings} updateMeasurement={updateMeasurement} removeMeasurement={removeMeasurement} />
+                <MeasurementTable measurements={measurements} initial={initial} riskSettings={riskSettings} stressFormula={stressFormula} updateMeasurement={updateMeasurement} removeMeasurement={removeMeasurement} />
               </div>
             )}
           </div>
@@ -981,12 +995,14 @@ function MeasurementTable({
   measurements,
   initial,
   riskSettings,
+  stressFormula,
   updateMeasurement,
   removeMeasurement,
 }: {
   measurements: EditableMeasurementRow[];
   initial: number | null;
   riskSettings: RiskSettings;
+  stressFormula: string;
   updateMeasurement: (localKey: string, patch: Partial<EditableMeasurementRow>) => void;
   removeMeasurement: (rowItem: EditableMeasurementRow) => void;
 }) {
@@ -1010,8 +1026,9 @@ function MeasurementTable({
           {measurements.map((item) => {
             const max = numberOrNull(item.max_strain_ue);
             const min = numberOrNull(item.min_strain_ue);
-            const amplitude = max == null || min == null ? null : (max - min) / 2;
-            const stress = amplitude == null ? null : amplitude * 0.206;
+            const preview = calculateStressPreview(max, min, stressFormula);
+            const amplitude = preview?.amplitude ?? null;
+            const stress = preview ? preview.stress ?? item.stress_amplitude_mpa ?? null : null;
             const percent = growthPercent(stress, initial);
             const level = riskLevel(percent, riskSettings);
             return (

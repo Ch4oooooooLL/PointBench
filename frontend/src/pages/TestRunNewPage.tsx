@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import ExcelJS from 'exceljs/dist/exceljs.min.js';
 import { api } from '../api/client';
 import { DewesoftImport, Point, TestRun, XlsxImportPreview, XlsxImportResult, XlsxImportStrategy, XlsxPreviewItem, XlsxRowStatus } from '../types';
+import { calculateStressPreview, DEFAULT_STRESS_FORMULA } from '../utils/stressFormula';
 
 interface RowState {
   max_strain_ue: string;
@@ -26,6 +27,7 @@ export function TestRunNewPage() {
   const [testTime, setTestTime] = useState('');
   const [remark, setRemark] = useState('');
   const [rows, setRows] = useState<Record<number, RowState>>({});
+  const [stressFormula, setStressFormula] = useState(DEFAULT_STRESS_FORMULA);
   const [importMessage, setImportMessage] = useState('');
   const [importBusy, setImportBusy] = useState(false);
   const [templateRunCount, setTemplateRunCount] = useState('10');
@@ -69,6 +71,12 @@ export function TestRunNewPage() {
     loadExistingRuns();
   }, [projectId]);
 
+  useEffect(() => {
+    api.get<{ stress_formula: string }>('/api/settings')
+      .then((data) => setStressFormula(data.stress_formula || DEFAULT_STRESS_FORMULA))
+      .catch(() => setStressFormula(DEFAULT_STRESS_FORMULA));
+  }, []);
+
   async function loadExistingRuns() {
     if (!projectId) return;
     try {
@@ -97,8 +105,7 @@ export function TestRunNewPage() {
     const max = Number(row.max_strain_ue);
     const min = Number(row.min_strain_ue);
     if (Number.isNaN(max) || Number.isNaN(min) || row.max_strain_ue === '' || row.min_strain_ue === '') return null;
-    const amplitude = (max - min) / 2;
-    return { amplitude, stress: amplitude * 0.206 };
+    return calculateStressPreview(max, min, stressFormula);
   }
 
   async function saveManual() {
@@ -1313,7 +1320,7 @@ function ManualEntryTable({
   points: Point[];
   rows: Record<number, RowState>;
   setRows: (rows: Record<number, RowState>) => void;
-  calc: (row: RowState) => { amplitude: number; stress: number } | null;
+  calc: (row: RowState) => { amplitude: number; stress: number | null } | null;
 }) {
   return (
     <div className="table-wrap">
@@ -1341,7 +1348,7 @@ function ManualEntryTable({
                 <td><input type="number" value={row?.max_strain_ue || ''} onChange={(e) => setRows({ ...rows, [point.id]: { ...row, max_strain_ue: e.target.value } })} /></td>
                 <td><input type="number" value={row?.min_strain_ue || ''} onChange={(e) => setRows({ ...rows, [point.id]: { ...row, min_strain_ue: e.target.value } })} /></td>
                 <td>{value?.amplitude.toFixed(2) || '-'}</td>
-                <td>{value?.stress.toFixed(2) || '-'}</td>
+                <td>{value?.stress == null ? '-' : value.stress.toFixed(2)}</td>
                 <td><input type="checkbox" checked={row?.is_abnormal || false} onChange={(e) => setRows({ ...rows, [point.id]: { ...row, is_abnormal: e.target.checked } })} /></td>
                 <td><input value={row?.remark || ''} onChange={(e) => setRows({ ...rows, [point.id]: { ...row, remark: e.target.value } })} /></td>
               </tr>
