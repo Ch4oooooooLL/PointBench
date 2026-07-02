@@ -35,7 +35,7 @@ export function SettingsPage() {
   const [overviewHeight, setOverviewHeight] = useState(String(chartSettings.overviewHeight));
   const [overviewExpandedHeight, setOverviewExpandedHeight] = useState(String(chartSettings.overviewExpandedHeight));
   const [expandedChartWidth, setExpandedChartWidth] = useState(String(chartSettings.expandedChartWidth));
-  const [abnormalThreshold, setAbnormalThreshold] = useState(String(anomalySettings.thresholdPercent));
+  const [abnormalRangeMpa, setAbnormalRangeMpa] = useState(String(anomalySettings.rangeMpa));
 
   useEffect(() => {
     api.get<{ stress_formula: string }>('/api/settings')
@@ -64,7 +64,7 @@ export function SettingsPage() {
       expandedChartWidth: clampNumber(Number(expandedChartWidth), 720, 1920),
     });
     setAnomalySettings({
-      thresholdPercent: clampNumber(Number(abnormalThreshold), 5, 100),
+      rangeMpa: clampNumber(Number(abnormalRangeMpa), 0, 1000),
     });
     setDisplaySettings({
       showPromptMessage: showPrompt,
@@ -117,7 +117,7 @@ export function SettingsPage() {
         {activeCategory === 'risk' && (
           <div className="settings-section">
             <h2>风险标识</h2>
-            <p>按当前值相对首次有效应力幅的变化百分比着色，增大或减小都会触发同一阈值。</p>
+            <p>按当前值相对首次有效应力幅的变化百分比着色。</p>
             <div className="settings-grid">
               <label>预警阈值 %<input type="number" value={warnPercent} onChange={(event) => setWarnPercent(event.target.value)} /></label>
               <label>危险阈值 %<input type="number" value={dangerPercent} onChange={(event) => setDangerPercent(event.target.value)} /></label>
@@ -153,9 +153,9 @@ export function SettingsPage() {
               <label>放大视图宽度 px<input type="number" min="720" max="1920" value={expandedChartWidth} onChange={(event) => setExpandedChartWidth(event.target.value)} /></label>
             </div>
             <h2 style={{ marginTop: 20 }}>异常筛选</h2>
-            <p>项目概览趋势图右上角的「仅异常」开关，筛选应变幅相对首次有效数据变化达到此阈值的点位。</p>
+            <p>项目概览趋势图右上角的「仅异常」开关，筛选历史应力幅超过初始值上下范围的点位。</p>
             <div className="settings-grid">
-              <label>异常变化率阈值 %<input type="number" min="5" max="100" value={abnormalThreshold} onChange={(event) => setAbnormalThreshold(event.target.value)} /></label>
+              <label>仅异常范围 MPa<input type="number" min="0" value={abnormalRangeMpa} onChange={(event) => setAbnormalRangeMpa(event.target.value)} /></label>
             </div>
           </div>
         )}

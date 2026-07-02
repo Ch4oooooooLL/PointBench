@@ -4,36 +4,19 @@ export interface TrendAnomaly {
   index: number;
   item: TrendItem;
   baseline: TrendItem;
-  changeRatio: number;
+  deltaMpa: number;
   reason: string;
 }
 
-function formatThreshold(thresholdPercent: number): string {
-  return Number.isInteger(thresholdPercent) ? String(thresholdPercent) : thresholdPercent.toFixed(1).replace(/\.0$/, '');
+function formatRange(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/\.?0+$/, '');
 }
 
-function thresholdRatio(thresholdPercent: number): number {
-  return Math.max(0, thresholdPercent) / 100;
-}
-
-function relativeChangeRatio(current: number, initial: number): number {
-  if (initial === 0) {
-    if (current === 0) return 0;
-    return current > 0 ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
-  }
-  return (current - initial) / Math.abs(initial);
-}
-
-function formatChangePercent(changeRatio: number): string {
-  if (!Number.isFinite(changeRatio)) return '无限大';
-  return `${(Math.abs(changeRatio) * 100).toFixed(1).replace(/\.0$/, '')}%`;
-}
-
-export function getTrendAnomalies(trend: TrendItem[], thresholdPercent: number): TrendAnomaly[] {
-  const threshold = thresholdRatio(thresholdPercent);
+export function getTrendAnomalies(trend: TrendItem[], rangeMpa: number): TrendAnomaly[] {
+  const range = Math.max(0, rangeMpa);
   const valid = trend
     .map((item, index) => ({ item, index }))
-    .filter(({ item }) => item.amplitude_strain_ue != null)
+    .filter(({ item }) => item.stress_amplitude_mpa != null)
     .sort((left, right) => {
       const cycleDiff = left.item.cycle_count - right.item.cycle_count;
       if (cycleDiff !== 0) return cycleDiff;
@@ -41,32 +24,32 @@ export function getTrendAnomalies(trend: TrendItem[], thresholdPercent: number):
     });
 
   const baseline = valid[0]?.item;
-  const initialAmplitude = baseline?.amplitude_strain_ue;
-  if (baseline == null || initialAmplitude == null) return [];
+  const initialStress = baseline?.stress_amplitude_mpa;
+  if (baseline == null || initialStress == null) return [];
 
   const anomalies: TrendAnomaly[] = [];
   for (let index = 1; index < valid.length; index += 1) {
     const current = valid[index].item;
-    const currentAmplitude = current.amplitude_strain_ue as number;
-    const changeRatio = relativeChangeRatio(currentAmplitude, initialAmplitude);
-    if (Math.abs(changeRatio) >= threshold) {
-      const direction = changeRatio >= 0 ? '增大' : '减小';
+    const currentStress = current.stress_amplitude_mpa as number;
+    const deltaMpa = currentStress - initialStress;
+    if (Math.abs(deltaMpa) > range) {
+      const direction = deltaMpa >= 0 ? '大于' : '小于';
       anomalies.push({
         index: valid[index].index,
         item: current,
         baseline,
-        changeRatio,
-        reason: `应变幅相对首次有效数据${direction} ${formatChangePercent(changeRatio)}，达到最低预警阈值 ${formatThreshold(thresholdPercent)}%`,
+        deltaMpa,
+        reason: `应力幅${direction}初始值 ${formatRange(Math.abs(deltaMpa))} MPa，超过设置范围 ${formatRange(range)} MPa`,
       });
     }
   }
   return anomalies;
 }
 
-export function hasTrendAnomaly(trend: TrendItem[], thresholdPercent: number): boolean {
-  return getTrendAnomalies(trend, thresholdPercent).length > 0;
+export function hasTrendAnomaly(trend: TrendItem[], rangeMpa: number): boolean {
+  return getTrendAnomalies(trend, rangeMpa).length > 0;
 }
 
-export function getTrendAnomalyIndexSet(trend: TrendItem[], thresholdPercent: number): Set<number> {
-  return new Set(getTrendAnomalies(trend, thresholdPercent).map((item) => item.index));
+export function getTrendAnomalyIndexSet(trend: TrendItem[], rangeMpa: number): Set<number> {
+  return new Set(getTrendAnomalies(trend, rangeMpa).map((item) => item.index));
 }

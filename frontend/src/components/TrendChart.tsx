@@ -25,7 +25,7 @@ export function TrendChart({ data, metric }: Props) {
     if (!ref.current || !hasData) return;
     const chartDom = ref.current;
     const chart = echarts.init(chartDom);
-    const anomalies = getTrendAnomalies(data, anomalySettings.thresholdPercent)
+    const anomalies = getTrendAnomalies(data, anomalySettings.rangeMpa)
       .filter(({ item }) => item[metric] != null);
     chart.setOption({
       tooltip: { trigger: 'axis' },
@@ -105,7 +105,7 @@ export function TrendChart({ data, metric }: Props) {
       window.removeEventListener('resize', resize);
       chart.dispose();
     };
-  }, [data, metric, hasData, anomalySettings.thresholdPercent]);
+  }, [data, metric, hasData, anomalySettings.rangeMpa]);
 
   if (!hasData) return <div className="empty chart-empty">暂无趋势数据</div>;
   return (

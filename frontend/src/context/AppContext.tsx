@@ -16,7 +16,7 @@ export interface ChartSettings {
 }
 
 export interface AnomalySettings {
-  thresholdPercent: number;
+  rangeMpa: number;
 }
 
 export interface DisplaySettings {
@@ -56,7 +56,7 @@ const DEFAULT_CHART: ChartSettings = {
 };
 
 const DEFAULT_ANOMALY: AnomalySettings = {
-  thresholdPercent: 20,
+  rangeMpa: 20,
 };
 
 const DEFAULT_DISPLAY: DisplaySettings = {
@@ -96,7 +96,12 @@ function loadAnomalySettings(): AnomalySettings {
   const raw = localStorage.getItem('anomalySettings');
   if (!raw) return DEFAULT_ANOMALY;
   try {
-    return { ...DEFAULT_ANOMALY, ...JSON.parse(raw) };
+    const parsed = JSON.parse(raw);
+    return {
+      ...DEFAULT_ANOMALY,
+      ...parsed,
+      rangeMpa: parsed.rangeMpa ?? parsed.thresholdPercent ?? DEFAULT_ANOMALY.rangeMpa,
+    };
   } catch {
     return DEFAULT_ANOMALY;
   }
