@@ -138,10 +138,20 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-if [[ -x "$PROJECT_DIR/backend/.venv/bin/python" ]]; then
+if [[ -x "$PROJECT_DIR/runtime/python/python.exe" ]]; then
+  PYTHON_EXE="$PROJECT_DIR/runtime/python/python.exe"
+  export PATH="$PROJECT_DIR/runtime/python:$PROJECT_DIR/runtime/python/Scripts:$PATH"
+elif [[ -x "$PROJECT_DIR/backend/.venv/bin/python" ]]; then
   PYTHON_EXE="$PROJECT_DIR/backend/.venv/bin/python"
 else
   PYTHON_EXE="${PYTHON:-python3}"
+fi
+
+if [[ -x "$PROJECT_DIR/runtime/node/node.exe" ]]; then
+  NODE_EXE="$PROJECT_DIR/runtime/node/node.exe"
+  export PATH="$PROJECT_DIR/runtime/node:$PATH"
+else
+  NODE_EXE="node"
 fi
 
 log_launcher "Starting PointBench shell launcher"
@@ -176,12 +186,12 @@ run_diag "backend-import-check" "$BACKEND_LOG" "$PROJECT_DIR/backend" \
     exit 1
   }
 
-run_diag "node-version" "$FRONTEND_LOG" "$PROJECT_DIR/frontend" node --version
+run_diag "node-version" "$FRONTEND_LOG" "$PROJECT_DIR/frontend" "$NODE_EXE" --version
 run_diag "npm-version" "$FRONTEND_LOG" "$PROJECT_DIR/frontend" npm --version || true
 run_diag "frontend-package-check" "$FRONTEND_LOG" "$PROJECT_DIR/frontend" \
   npm --prefix "$PROJECT_DIR/frontend" ls vite @vitejs/plugin-react react react-dom --depth=0 || true
 run_diag "vite-direct-check" "$FRONTEND_LOG" "$PROJECT_DIR/frontend" \
-  node ./node_modules/vite/bin/vite.js --version
+  "$NODE_EXE" ./node_modules/vite/bin/vite.js --version
 
 log_launcher "Starting backend on :8000"
 (
@@ -199,7 +209,7 @@ log_launcher "Backend PID=$BACKEND_PID"
 log_launcher "Starting frontend on :5173"
 (
   cd "$PROJECT_DIR/frontend"
-  NODE_OPTIONS="--trace-uncaught --trace-warnings" node ./node_modules/vite/bin/vite.js --host 0.0.0.0 --clearScreen false
+  NODE_OPTIONS="--trace-uncaught --trace-warnings" "$NODE_EXE" ./node_modules/vite/bin/vite.js --host 0.0.0.0 --clearScreen false
 ) > >(tee -a "$FRONTEND_LOG" | sed -u 's/^/[frontend] /') 2> >(tee -a "$FRONTEND_LOG" >&2 | sed -u 's/^/[frontend] /' >&2) &
 FRONTEND_PID=$!
 log_launcher "Frontend PID=$FRONTEND_PID"

@@ -421,38 +421,52 @@ function Run-Preflight {
         -Required
 
     Invoke-DiagnosticCommand -Name 'node-version' `
-        -FilePath 'cmd.exe' `
-        -Arguments '/c node --version' `
+        -FilePath $nodeExe `
+        -Arguments '--version' `
         -WorkingDirectory (Join-Path $root 'frontend') `
         -LogPath $frontendLog `
         -Required
 
     Invoke-DiagnosticCommand -Name 'npm-version' `
-        -FilePath 'cmd.exe' `
-        -Arguments '/c npm --version' `
+        -FilePath $npmExe `
+        -Arguments '--version' `
         -WorkingDirectory (Join-Path $root 'frontend') `
         -LogPath $frontendLog
 
     Invoke-DiagnosticCommand -Name 'frontend-package-check' `
-        -FilePath 'cmd.exe' `
-        -Arguments '/c npm ls vite @vitejs/plugin-react react react-dom --depth=0' `
+        -FilePath $npmExe `
+        -Arguments 'ls vite @vitejs/plugin-react react react-dom --depth=0' `
         -WorkingDirectory (Join-Path $root 'frontend') `
         -LogPath $frontendLog
 
     Invoke-DiagnosticCommand -Name 'vite-direct-check' `
-        -FilePath 'cmd.exe' `
-        -Arguments '/c node .\node_modules\vite\bin\vite.js --version' `
+        -FilePath $nodeExe `
+        -Arguments '.\node_modules\vite\bin\vite.js --version' `
         -WorkingDirectory (Join-Path $root 'frontend') `
         -LogPath $frontendLog `
         -Required
 }
 
 try {
+    $portablePython = Join-Path $root 'runtime\python\python.exe'
     $venvPython = Join-Path $root 'backend\.venv\Scripts\python.exe'
-    if (Test-Path $venvPython) {
+    if (Test-Path $portablePython) {
+        $pythonExe = $portablePython
+        $env:PATH = "$(Join-Path $root 'runtime\python');$(Join-Path $root 'runtime\python\Scripts');$env:PATH"
+    } elseif (Test-Path $venvPython) {
         $pythonExe = $venvPython
     } else {
         $pythonExe = 'python'
+    }
+
+    $portableNode = Join-Path $root 'runtime\node\node.exe'
+    if (Test-Path $portableNode) {
+        $nodeExe = $portableNode
+        $npmExe = Join-Path $root 'runtime\node\npm.cmd'
+        $env:PATH = "$(Join-Path $root 'runtime\node');$env:PATH"
+    } else {
+        $nodeExe = 'node'
+        $npmExe = 'npm'
     }
 
     Stop-ExistingPointBenchProcesses
@@ -490,8 +504,8 @@ try {
         'set NODE_OPTIONS=--trace-uncaught --trace-warnings',
         ('cd /d "{0}"' -f $frontendDir),
         ('echo cwd=%CD% >> "{0}"' -f $frontendLog),
-        ('echo command=node .\node_modules\vite\bin\vite.js --host 0.0.0.0 --clearScreen false >> "{0}"' -f $frontendLog),
-        ('node .\node_modules\vite\bin\vite.js --host 0.0.0.0 --clearScreen false >> "{0}" 2>&1' -f $frontendLog),
+        ('echo command="{0}" .\node_modules\vite\bin\vite.js --host 0.0.0.0 --clearScreen false >> "{1}"' -f $nodeExe, $frontendLog),
+        ('"{0}" .\node_modules\vite\bin\vite.js --host 0.0.0.0 --clearScreen false >> "{1}" 2>&1' -f $nodeExe, $frontendLog),
         ('echo frontend_exit_code=%ERRORLEVEL% >> "{0}"' -f $frontendLog),
         'exit /b %ERRORLEVEL%'
     )

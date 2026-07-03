@@ -22,6 +22,9 @@ storage/
 outputs/
 logs/
 
+# Portable runtime (downloaded, not source)
+runtime/
+
 # Offline dependency packages (large files)
 offline-install/installers/
 offline-install/pip-packages/
@@ -30,6 +33,7 @@ offline-install/node-modules.tar.gz
 
 # Generated
 test-point-web-code.zip
+test-point-web-portable-*.zip
 
 # IDE / other
 AGENTS.md
