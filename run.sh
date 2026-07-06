@@ -153,6 +153,7 @@ if [[ -x "$PROJECT_DIR/runtime/node/node.exe" ]]; then
 else
   NODE_EXE="node"
 fi
+export PYTHONPATH="$PROJECT_DIR/backend${PYTHONPATH:+:$PYTHONPATH}"
 
 log_launcher "Starting PointBench shell launcher"
 log_launcher "Project root: $PROJECT_DIR"
@@ -201,7 +202,7 @@ log_launcher "Starting backend on :8000"
     PYTHONFAULTHANDLER=1 \
     POINTBENCH_LOG_LEVEL=INFO \
     POINTBENCH_ERROR_LOG="$ERROR_LOG" \
-    "$PYTHON_EXE" -X faulthandler -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level info --access-log
+    "$PYTHON_EXE" -X faulthandler -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --log-level info --access-log
 ) > >(tee -a "$BACKEND_LOG" | sed -u 's/^/[backend] /') 2> >(tee -a "$BACKEND_LOG" >&2 | sed -u 's/^/[backend] /' >&2) &
 BACKEND_PID=$!
 log_launcher "Backend PID=$BACKEND_PID"
@@ -209,7 +210,7 @@ log_launcher "Backend PID=$BACKEND_PID"
 log_launcher "Starting frontend on :5173"
 (
   cd "$PROJECT_DIR/frontend"
-  NODE_OPTIONS="--trace-uncaught --trace-warnings" "$NODE_EXE" ./node_modules/vite/bin/vite.js --host 0.0.0.0 --clearScreen false
+  NODE_OPTIONS="--trace-uncaught --trace-warnings" "$NODE_EXE" ./node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5173 --clearScreen false
 ) > >(tee -a "$FRONTEND_LOG" | sed -u 's/^/[frontend] /') 2> >(tee -a "$FRONTEND_LOG" >&2 | sed -u 's/^/[frontend] /' >&2) &
 FRONTEND_PID=$!
 log_launcher "Frontend PID=$FRONTEND_PID"

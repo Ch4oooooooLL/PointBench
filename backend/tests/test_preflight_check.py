@@ -111,18 +111,40 @@ def test_preflight_does_not_require_npm_when_runtime_assets_exist(tmp_path, monk
     (frontend_dir / "package.json").write_text("{}", encoding="utf-8")
     (frontend_dir / "node_modules" / "vite" / "bin" / "vite.js").write_text("", encoding="utf-8")
 
-    def fake_run_command(command, cwd=None):
-        if command == ["node", "--version"]:
+    def fake_run_command(command, cwd=None, env=None):
+        if command == ["portable-node", "--version"]:
             return 0, "v24.16.0"
-        if command == ["npm", "--version"]:
+        if command == ["portable-npm", "--version"]:
             return 127, "command not found: npm"
         return 1, "unexpected command"
 
     monkeypatch.setattr(preflight_check, "run_command", fake_run_command)
 
     reporter = preflight_check.Reporter()
-    preflight_check.check_node(reporter, frontend_dir)
+    preflight_check.check_node(reporter, frontend_dir, "portable-node", "portable-npm")
 
     assert not reporter.has_failures()
     assert any(item.status == "WARN" and item.name == "npm" for item in reporter.results)
     assert any(item.status == "OK" and item.name == "Vite entry" for item in reporter.results)
+
+
+def test_backend_python_env_prepends_backend_to_pythonpath(tmp_path, monkeypatch) -> None:
+    root = _project_root(tmp_path)
+    monkeypatch.setenv("PYTHONPATH", "existing")
+
+    env = preflight_check.backend_python_env(root)
+
+    assert env["PYTHONPATH"].split(preflight_check.os.pathsep)[:2] == [str(root / "backend"), "existing"]
+
+
+def test_configure_backend_import_path_adds_backend_to_current_process(tmp_path, monkeypatch) -> None:
+    root = _project_root(tmp_path)
+    backend_dir = root / "backend"
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    monkeypatch.setattr(preflight_check.sys, "path", [])
+
+    actual = preflight_check.configure_backend_import_path(root)
+
+    assert actual == backend_dir
+    assert preflight_check.sys.path[0] == str(backend_dir)
+    assert preflight_check.os.environ["PYTHONPATH"] == str(backend_dir)

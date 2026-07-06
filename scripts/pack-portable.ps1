@@ -55,6 +55,34 @@ if (-not (Test-Path (Join-Path $root 'frontend\node_modules\vite\bin\vite.js')))
     exit 1
 }
 
+$requiredFiles = @(
+    'start.bat',
+    'run.bat',
+    'scripts\launcher.ps1',
+    'scripts\preflight_check.py',
+    'backend\requirements.txt',
+    'backend\alembic.ini',
+    'backend\app\__init__.py',
+    'backend\app\main.py',
+    'backend\app\database.py',
+    'backend\app\models.py',
+    'frontend\package.json',
+    'frontend\package-lock.json',
+    'frontend\node_modules\vite\bin\vite.js',
+    'runtime\python\python.exe',
+    'runtime\node\node.exe'
+)
+$missingRequiredFiles = @($requiredFiles | Where-Object { -not (Test-Path (Join-Path $root $_)) })
+if ($missingRequiredFiles.Count -gt 0) {
+    Write-Host ''
+    Write-Host '[ERROR] Portable package is incomplete. Missing required files:'
+    foreach ($item in $missingRequiredFiles) {
+        Write-Host "  - $item"
+    }
+    Write-Host ''
+    exit 1
+}
+
 $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $output = Join-Path $root "$OutputName-$timestamp.zip"
 
@@ -146,12 +174,65 @@ foreach ($f in $allFiles) {
         Write-Host "  Progress: $count/$total ($pct%)"
     }
 }
+
+$requiredDirectories = @(
+    'logs/',
+    'storage/',
+    'backend/storage/',
+    'backend/storage/imports/',
+    'backend/storage/projects/',
+    'backend/storage/dewesoft/',
+    'backend/storage/temp/',
+    'backend/storage/delete_exports/'
+)
+foreach ($dir in $requiredDirectories) {
+    try {
+        $null = $archive.CreateEntry($dir)
+    } catch {
+        Write-Host "  [WARN] Could not add directory entry $dir : $_"
+    }
+}
 $archive.Dispose()
 
 if (-not (Test-Path $output)) {
     Write-Host ''
     Write-Host '[ERROR] Failed to create zip file.'
     exit 1
+}
+
+$requiredEntries = @(
+    'start.bat',
+    'run.bat',
+    'scripts/launcher.ps1',
+    'scripts/preflight_check.py',
+    'backend/app/__init__.py',
+    'backend/app/main.py',
+    'backend/app/database.py',
+    'backend/app/models.py',
+    'backend/alembic.ini',
+    'frontend/package.json',
+    'frontend/node_modules/vite/bin/vite.js',
+    'runtime/python/python.exe',
+    'runtime/node/node.exe',
+    'logs/',
+    'storage/',
+    'backend/storage/'
+)
+$zip = [System.IO.Compression.ZipFile]::OpenRead($output)
+try {
+    $entryNames = @($zip.Entries | ForEach-Object { $_.FullName })
+    $missingEntries = @($requiredEntries | Where-Object { $entryNames -notcontains $_ })
+    if ($missingEntries.Count -gt 0) {
+        Write-Host ''
+        Write-Host '[ERROR] Zip verification failed. Missing entries:'
+        foreach ($item in $missingEntries) {
+            Write-Host "  - $item"
+        }
+        Write-Host ''
+        exit 1
+    }
+} finally {
+    $zip.Dispose()
 }
 
 $sizeMB = [math]::Round((Get-Item $output).Length / 1MB, 1)

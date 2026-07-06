@@ -1,14 +1,6 @@
 @echo off
 setlocal
-set "PROJECT_DIR=%~dp0"
-set "PROJECT_DIR=%PROJECT_DIR:~0,-1%"
-cd /d "%PROJECT_DIR%"
-title PointBench
-powershell -NoProfile -ExecutionPolicy Bypass -File "%PROJECT_DIR%\scripts\launcher.ps1" -ProjectDir "%PROJECT_DIR%" -ShowLogs
-set "EXIT_CODE=%ERRORLEVEL%"
-echo.
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$root='%PROJECT_DIR%'; $latest=Join-Path $root 'logs\latest-run.txt'; if (Test-Path $latest) { $dir=(Get-Content $latest -Raw).Trim(); Write-Host ''; Write-Host 'Latest logs:' $dir; foreach ($name in 'errors.log','launcher.log','backend.log','frontend.log') { $p=Join-Path $dir $name; if (Test-Path $p) { Write-Host ''; Write-Host ('===== ' + $name + ' tail ====='); Get-Content $p -Tail 80 } } }"
-echo.
-echo PointBench stopped. Exit code: %EXIT_CODE%
-pause
-exit /b %EXIT_CODE%
+
+rem Keep this legacy entry point aligned with the portable launcher.
+call "%~dp0start.bat"
+exit /b %ERRORLEVEL%

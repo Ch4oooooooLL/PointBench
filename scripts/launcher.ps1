@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory=$false)]
     [string]$ProjectDir,
 
     [switch]$ShowLogs
@@ -7,7 +7,14 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$root = $ProjectDir.TrimEnd('\', '/', '"', ' ')
+$scriptPath = $MyInvocation.MyCommand.Path
+$scriptDir = Split-Path -Parent $scriptPath
+if ([string]::IsNullOrWhiteSpace($ProjectDir)) {
+    $ProjectDir = Join-Path $scriptDir '..'
+}
+$root = [System.IO.Path]::GetFullPath($ProjectDir.TrimEnd('\', '/', '"', ' '))
+$backendDir = Join-Path $root 'backend'
+$frontendDir = Join-Path $root 'frontend'
 $logRoot = Join-Path $root 'logs'
 New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
 
@@ -392,17 +399,27 @@ function Wait-HttpReady {
 
 function Run-Preflight {
     Write-LauncherLog "Project root: $root"
+    Write-LauncherLog "Launcher script path: $scriptPath"
+    Write-LauncherLog "Current working directory: $(Get-Location)"
     Write-LauncherLog "Log directory: $logDir"
     Write-LauncherLog "Error log: $errorLog"
     Write-LauncherLog "Preflight report: $preflightReport"
     Write-LauncherLog "PowerShell: $($PSVersionTable.PSVersion)"
     Write-LauncherLog "PATH: $env:PATH"
+    Write-LauncherLog "PYTHONPATH: $env:PYTHONPATH"
     Write-LauncherLog "Python executable: $pythonExe"
+    Write-LauncherLog "Node executable: $nodeExe"
+    Write-LauncherLog "Backend dir: $backendDir Exists=$(Test-Path $backendDir)"
+    Write-LauncherLog "Backend app dir: $(Join-Path $backendDir 'app') Exists=$(Test-Path (Join-Path $backendDir 'app'))"
+    Write-LauncherLog "Backend app __init__.py: $(Join-Path $backendDir 'app\__init__.py') Exists=$(Test-Path (Join-Path $backendDir 'app\__init__.py'))"
+    Write-LauncherLog "Backend app database.py: $(Join-Path $backendDir 'app\database.py') Exists=$(Test-Path (Join-Path $backendDir 'app\database.py'))"
+    Write-LauncherLog "Frontend dir: $frontendDir Exists=$(Test-Path $frontendDir)"
+    Write-LauncherLog "Vite entry: $(Join-Path $frontendDir 'node_modules\vite\bin\vite.js') Exists=$(Test-Path (Join-Path $frontendDir 'node_modules\vite\bin\vite.js'))"
 
     Invoke-DiagnosticCommand -Name 'python-version' `
         -FilePath $pythonExe `
         -Arguments '--version' `
-        -WorkingDirectory (Join-Path $root 'backend') `
+        -WorkingDirectory $backendDir `
         -LogPath $backendLog `
         -Required
 
@@ -416,33 +433,33 @@ function Run-Preflight {
     Invoke-DiagnosticCommand -Name 'backend-import-check' `
         -FilePath $pythonExe `
         -Arguments '-c "import sys; print(sys.executable); import fastapi, uvicorn, sqlalchemy, alembic, jose; import app.main; print(''backend import ok'')"' `
-        -WorkingDirectory (Join-Path $root 'backend') `
+        -WorkingDirectory $backendDir `
         -LogPath $backendLog `
         -Required
 
     Invoke-DiagnosticCommand -Name 'node-version' `
         -FilePath $nodeExe `
         -Arguments '--version' `
-        -WorkingDirectory (Join-Path $root 'frontend') `
+        -WorkingDirectory $frontendDir `
         -LogPath $frontendLog `
         -Required
 
     Invoke-DiagnosticCommand -Name 'npm-version' `
         -FilePath $npmExe `
         -Arguments '--version' `
-        -WorkingDirectory (Join-Path $root 'frontend') `
+        -WorkingDirectory $frontendDir `
         -LogPath $frontendLog
 
     Invoke-DiagnosticCommand -Name 'frontend-package-check' `
         -FilePath $npmExe `
         -Arguments 'ls vite @vitejs/plugin-react react react-dom --depth=0' `
-        -WorkingDirectory (Join-Path $root 'frontend') `
+        -WorkingDirectory $frontendDir `
         -LogPath $frontendLog
 
     Invoke-DiagnosticCommand -Name 'vite-direct-check' `
         -FilePath $nodeExe `
         -Arguments '.\node_modules\vite\bin\vite.js --version' `
-        -WorkingDirectory (Join-Path $root 'frontend') `
+        -WorkingDirectory $frontendDir `
         -LogPath $frontendLog `
         -Required
 }
@@ -458,6 +475,7 @@ try {
     } else {
         $pythonExe = 'python'
     }
+    $env:PYTHONPATH = $backendDir
 
     $portableNode = Join-Path $root 'runtime\node\node.exe'
     if (Test-Path $portableNode) {
@@ -477,35 +495,37 @@ try {
 
     $backendCmd = Join-Path $logDir 'start-backend.cmd'
     $frontendCmd = Join-Path $logDir 'start-frontend.cmd'
-    $backendDir = Join-Path $root 'backend'
-    $frontendDir = Join-Path $root 'frontend'
 
-    Set-Content -Path $backendCmd -Encoding ASCII -Value @(
+    Set-TextFile -Path $backendCmd -Value @(
         '@echo off',
+        'chcp 65001 >nul',
         ('echo ===== backend process bootstrap ===== >> "{0}"' -f $backendLog),
         ('echo time=%DATE% %TIME% >> "{0}"' -f $backendLog),
         'set PYTHONUNBUFFERED=1',
         'set PYTHONIOENCODING=utf-8',
         'set PYTHONFAULTHANDLER=1',
+        ('set "PYTHONPATH={0}"' -f $backendDir),
         'set POINTBENCH_LOG_LEVEL=INFO',
         ('set POINTBENCH_ERROR_LOG={0}' -f $errorLog),
         ('cd /d "{0}"' -f $backendDir),
         ('echo cwd=%CD% >> "{0}"' -f $backendLog),
+        ('echo PYTHONPATH=%PYTHONPATH% >> "{0}"' -f $backendLog),
         ('echo python="{0}" >> "{1}"' -f $pythonExe, $backendLog),
-        ('echo command="{0}" -X faulthandler -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level info --access-log >> "{1}"' -f $pythonExe, $backendLog),
-        ('"{0}" -X faulthandler -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level info --access-log >> "{1}" 2>&1' -f $pythonExe, $backendLog),
+        ('echo command="{0}" -X faulthandler -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --log-level info --access-log >> "{1}"' -f $pythonExe, $backendLog),
+        ('"{0}" -X faulthandler -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --log-level info --access-log >> "{1}" 2>&1' -f $pythonExe, $backendLog),
         ('echo backend_exit_code=%ERRORLEVEL% >> "{0}"' -f $backendLog),
         'exit /b %ERRORLEVEL%'
     )
-    Set-Content -Path $frontendCmd -Encoding ASCII -Value @(
+    Set-TextFile -Path $frontendCmd -Value @(
         '@echo off',
+        'chcp 65001 >nul',
         ('echo ===== frontend process bootstrap ===== >> "{0}"' -f $frontendLog),
         ('echo time=%DATE% %TIME% >> "{0}"' -f $frontendLog),
         'set NODE_OPTIONS=--trace-uncaught --trace-warnings',
         ('cd /d "{0}"' -f $frontendDir),
         ('echo cwd=%CD% >> "{0}"' -f $frontendLog),
-        ('echo command="{0}" .\node_modules\vite\bin\vite.js --host 0.0.0.0 --clearScreen false >> "{1}"' -f $nodeExe, $frontendLog),
-        ('"{0}" .\node_modules\vite\bin\vite.js --host 0.0.0.0 --clearScreen false >> "{1}" 2>&1' -f $nodeExe, $frontendLog),
+        ('echo command="{0}" .\node_modules\vite\bin\vite.js --host 127.0.0.1 --port 5173 --clearScreen false >> "{1}"' -f $nodeExe, $frontendLog),
+        ('"{0}" .\node_modules\vite\bin\vite.js --host 127.0.0.1 --port 5173 --clearScreen false >> "{1}" 2>&1' -f $nodeExe, $frontendLog),
         ('echo frontend_exit_code=%ERRORLEVEL% >> "{0}"' -f $frontendLog),
         'exit /b %ERRORLEVEL%'
     )

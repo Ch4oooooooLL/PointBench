@@ -15,6 +15,7 @@ import shutil
 import socket
 import sqlite3
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -30,11 +31,11 @@ APP_TABLE_HINTS = {
 }
 
 REQUIRED_BACKEND_MODULES = [
-    "fastapi",
-    "uvicorn",
-    "sqlalchemy",
-    "alembic",
-    "jose",
+    ("fastapi", "fastapi"),
+    ("uvicorn", "uvicorn"),
+    ("sqlalchemy", "sqlalchemy"),
+    ("alembic", "alembic.config"),
+    ("python-jose", "jose"),
 ]
 
 REQUIRED_FRONTEND_PACKAGES = [
@@ -80,11 +81,16 @@ class Reporter:
         return "\n".join(lines)
 
 
-def run_command(command: list[str], cwd: Path | None = None) -> tuple[int, str]:
+def run_command(
+    command: list[str],
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+) -> tuple[int, str]:
     try:
         proc = subprocess.run(
             command,
             cwd=str(cwd) if cwd else None,
+            env=env,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -96,6 +102,27 @@ def run_command(command: list[str], cwd: Path | None = None) -> tuple[int, str]:
     except subprocess.TimeoutExpired:
         return 124, "command timed out"
     return proc.returncode, proc.stdout.strip()
+
+
+def backend_python_env(project_root: Path) -> dict[str, str]:
+    backend_dir = project_root / "backend"
+    env = os.environ.copy()
+    existing = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = str(backend_dir) if not existing else str(backend_dir) + os.pathsep + existing
+    return env
+
+
+def configure_backend_import_path(project_root: Path) -> Path:
+    backend_dir = project_root / "backend"
+    backend_path = str(backend_dir)
+    if backend_path not in sys.path:
+        sys.path.insert(0, backend_path)
+    existing = os.environ.get("PYTHONPATH")
+    if not existing:
+        os.environ["PYTHONPATH"] = backend_path
+    elif backend_path not in existing.split(os.pathsep):
+        os.environ["PYTHONPATH"] = backend_path + os.pathsep + existing
+    return backend_dir
 
 
 def sqlite_path_from_url(database_url: str, backend_dir: Path) -> Path | None:
@@ -172,7 +199,7 @@ def load_expected_schema(project_root: Path, python_exe: str) -> tuple[dict[str,
         "'schema': {table.name: list(table.columns.keys()) for table in Base.metadata.sorted_tables}"
         "}, ensure_ascii=False))"
     )
-    code, output = run_command([python_exe, "-c", schema_code], cwd=backend_dir)
+    code, output = run_command([python_exe, "-c", schema_code], cwd=backend_dir, env=backend_python_env(project_root))
     if code != 0:
         raise RuntimeError(output or "backend schema introspection failed")
     payload = json.loads(output)
@@ -180,7 +207,8 @@ def load_expected_schema(project_root: Path, python_exe: str) -> tuple[dict[str,
     return expected, payload["database_url"]
 
 
-def check_python(reporter: Reporter, python_exe: str, backend_dir: Path) -> None:
+def check_python(reporter: Reporter, python_exe: str, project_root: Path) -> None:
+    backend_dir = project_root / "backend"
     code, output = run_command([python_exe, "--version"])
     if code == 0:
         reporter.ok("Python", output)
@@ -189,31 +217,39 @@ def check_python(reporter: Reporter, python_exe: str, backend_dir: Path) -> None
         return
 
     import_code = (
-        "import importlib.util; "
+        "import importlib; "
         f"mods={REQUIRED_BACKEND_MODULES!r}; "
-        "missing=[m for m in mods if importlib.util.find_spec(m) is None]; "
+        "missing=[]; "
+        "\nfor display_name, import_name in mods:\n"
+        "    try:\n"
+        "        importlib.import_module(import_name)\n"
+        "    except Exception:\n"
+        "        missing.append(display_name)\n"
         "print('missing=' + ','.join(missing) if missing else 'all backend modules available'); "
         "raise SystemExit(1 if missing else 0)"
     )
-    code, output = run_command([python_exe, "-c", import_code], cwd=backend_dir)
+    code, output = run_command([python_exe, "-c", import_code], cwd=backend_dir, env=backend_python_env(project_root))
     if code == 0:
         reporter.ok("Backend dependencies", output)
     else:
         reporter.fail("Backend dependencies", output or "required Python packages are missing")
 
 
-def check_node(reporter: Reporter, frontend_dir: Path) -> None:
-    code, output = run_command(["node", "--version"], cwd=frontend_dir)
+def check_node(reporter: Reporter, frontend_dir: Path, node_exe: str, npm_exe: str | None = None) -> None:
+    code, output = run_command([node_exe, "--version"], cwd=frontend_dir)
     if code == 0:
         reporter.ok("Node.js", output)
     else:
-        reporter.fail("Node.js", output)
+        reporter.fail("Node.js", f"{node_exe}: {output}")
 
-    code, output = run_command(["npm", "--version"], cwd=frontend_dir)
-    if code == 0:
-        reporter.ok("npm", output)
+    if npm_exe:
+        code, output = run_command([npm_exe, "--version"], cwd=frontend_dir)
+        if code == 0:
+            reporter.ok("npm", output)
+        else:
+            reporter.warn("npm", f"{npm_exe}: {output}; npm is only needed for dependency installation, not runtime startup")
     else:
-        reporter.warn("npm", f"{output}; npm is only needed for dependency installation, not runtime startup")
+        reporter.warn("npm", "npm executable was not found; npm is only needed for dependency installation, not runtime startup")
 
     package_json = frontend_dir / "package.json"
     node_modules = frontend_dir / "node_modules"
@@ -241,9 +277,13 @@ def check_node(reporter: Reporter, frontend_dir: Path) -> None:
 
 def check_ports(reporter: Reporter) -> None:
     for port, label in [(8000, "Backend port"), (5173, "Frontend port")]:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.settimeout(0.5)
-            in_use = sock.connect_ex(("127.0.0.1", port)) == 0
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(0.5)
+                in_use = sock.connect_ex(("127.0.0.1", port)) == 0
+        except OSError as exc:
+            reporter.warn(label, f"could not inspect 127.0.0.1:{port}: {exc}")
+            continue
         if in_use:
             reporter.warn(label, f"127.0.0.1:{port} is already accepting connections")
         else:
@@ -370,6 +410,73 @@ def check_project_files(reporter: Reporter, project_root: Path) -> None:
         reporter.ok("Project files", "required backend/frontend manifest files exist")
 
 
+def check_runtime_layout(
+    reporter: Reporter,
+    project_root: Path,
+    backend_dir: Path,
+    frontend_dir: Path,
+    python_exe: str,
+    node_exe: str,
+) -> None:
+    reporter.ok("Launcher script path", str(Path(__file__).resolve()))
+    reporter.ok("Current working directory", str(Path.cwd()))
+    reporter.ok("Python executable", python_exe)
+    reporter.ok("Python version detail", sys.version.replace("\n", " "))
+    reporter.ok("Python sys.path", json.dumps(sys.path, ensure_ascii=False))
+    reporter.ok("PYTHONPATH", os.environ.get("PYTHONPATH", ""))
+    reporter.ok("Backend directory", f"{backend_dir} exists={backend_dir.exists()}")
+
+    backend_required = [
+        backend_dir / "app",
+        backend_dir / "app" / "__init__.py",
+        backend_dir / "app" / "main.py",
+        backend_dir / "app" / "database.py",
+        backend_dir / "app" / "models.py",
+        backend_dir / "alembic",
+        backend_dir / "alembic.ini",
+        backend_dir / "requirements.txt",
+    ]
+    missing_backend = [str(path) for path in backend_required if not path.exists()]
+    if missing_backend:
+        reporter.fail("Backend layout", "missing: " + ", ".join(missing_backend))
+    else:
+        reporter.ok("Backend layout", "backend/app, Alembic files, and requirements.txt are present")
+
+    reporter.ok("Frontend directory", f"{frontend_dir} exists={frontend_dir.exists()}")
+    reporter.ok("Node executable", node_exe)
+    frontend_required = [
+        frontend_dir / "package.json",
+        frontend_dir / "node_modules",
+        frontend_dir / "node_modules" / "vite" / "bin" / "vite.js",
+    ]
+    missing_frontend = [str(path) for path in frontend_required if not path.exists()]
+    if missing_frontend:
+        reporter.fail("Frontend layout", "missing: " + ", ".join(missing_frontend))
+    else:
+        reporter.ok("Frontend layout", "package.json, node_modules, and Vite entry are present")
+
+    logs_dir = project_root / "logs"
+    try:
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        probe = logs_dir / ".preflight-write-test"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+        reporter.ok("Logs directory", f"writable: {logs_dir}")
+    except OSError as exc:
+        reporter.fail("Logs directory", f"not writable: {logs_dir} ({exc})")
+
+
+def find_node_executables(project_root: Path) -> tuple[str, str | None]:
+    portable_node = project_root / "runtime" / "node" / "node.exe"
+    portable_npm = project_root / "runtime" / "node" / "npm.cmd"
+    if portable_node.exists() and (os.name == "nt" or os.access(portable_node, os.X_OK)):
+        return str(portable_node), str(portable_npm) if portable_npm.exists() else None
+
+    node = shutil.which("node") or "node"
+    npm = shutil.which("npm")
+    return node, npm
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run PointBench startup preflight checks.")
     parser.add_argument("--project-root", default=Path(__file__).resolve().parents[1])
@@ -378,17 +485,22 @@ def main() -> int:
     args = parser.parse_args()
 
     project_root = Path(args.project_root).resolve()
-    backend_dir = project_root / "backend"
+    backend_dir = configure_backend_import_path(project_root)
     frontend_dir = project_root / "frontend"
     python_exe = args.python or os.environ.get("PYTHON") or str(backend_dir / ".venv" / "bin" / "python")
-    if not Path(python_exe).exists() and shutil.which(python_exe) is None:
+    python_path = Path(python_exe)
+    if python_path.exists():
+        python_exe = str(python_path if python_path.is_absolute() else (Path.cwd() / python_path).absolute())
+    elif shutil.which(python_exe) is None:
         python_exe = "python3"
+    node_exe, npm_exe = find_node_executables(project_root)
 
     reporter = Reporter()
     reporter.ok("Project root", str(project_root))
+    check_runtime_layout(reporter, project_root, backend_dir, frontend_dir, python_exe, node_exe)
     check_project_files(reporter, project_root)
-    check_python(reporter, python_exe, backend_dir)
-    check_node(reporter, frontend_dir)
+    check_python(reporter, python_exe, project_root)
+    check_node(reporter, frontend_dir, node_exe, npm_exe)
     check_ports(reporter)
     check_storage(reporter, backend_dir)
     check_database(reporter, project_root, python_exe)
