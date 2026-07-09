@@ -409,6 +409,7 @@ function Run-Preflight {
     Write-LauncherLog "PYTHONPATH: $env:PYTHONPATH"
     Write-LauncherLog "Python executable: $pythonExe"
     Write-LauncherLog "Node executable: $nodeExe"
+    Write-LauncherLog "npm executable: $npmExe"
     Write-LauncherLog "Backend dir: $backendDir Exists=$(Test-Path $backendDir)"
     Write-LauncherLog "Backend app dir: $(Join-Path $backendDir 'app') Exists=$(Test-Path (Join-Path $backendDir 'app'))"
     Write-LauncherLog "Backend app __init__.py: $(Join-Path $backendDir 'app\__init__.py') Exists=$(Test-Path (Join-Path $backendDir 'app\__init__.py'))"
@@ -444,17 +445,25 @@ function Run-Preflight {
         -LogPath $frontendLog `
         -Required
 
-    Invoke-DiagnosticCommand -Name 'npm-version' `
-        -FilePath $npmExe `
-        -Arguments '--version' `
-        -WorkingDirectory $frontendDir `
-        -LogPath $frontendLog
+    if ($npmExe) {
+        Invoke-DiagnosticCommand -Name 'npm-version' `
+            -FilePath $npmExe `
+            -Arguments '--version' `
+            -WorkingDirectory $frontendDir `
+            -LogPath $frontendLog
+    } else {
+        Add-TextLine -Path $frontendLog -Value ''
+        Add-TextLine -Path $frontendLog -Value '===== diagnostic: npm-version ====='
+        Add-TextLine -Path $frontendLog -Value 'portable npm was not found; startup does not require npm'
+        Write-LauncherLog 'Portable npm was not found; startup does not require npm.'
+    }
 
     Invoke-DiagnosticCommand -Name 'frontend-package-check' `
-        -FilePath $npmExe `
-        -Arguments 'ls vite @vitejs/plugin-react react react-dom --depth=0' `
+        -FilePath $nodeExe `
+        -Arguments '-e "for (const p of [''vite'',''@vitejs/plugin-react'',''react'',''react-dom'']) require.resolve(p, { paths: [process.cwd()] }); console.log(''frontend packages ok'')"' `
         -WorkingDirectory $frontendDir `
-        -LogPath $frontendLog
+        -LogPath $frontendLog `
+        -Required
 
     Invoke-DiagnosticCommand -Name 'vite-direct-check' `
         -FilePath $nodeExe `
@@ -474,15 +483,12 @@ try {
     $env:PYTHONPATH = $backendDir
 
     $portableNode = Join-Path $root 'runtime\node\node.exe'
-    $portableNpm = Join-Path $root 'runtime\node\npm.cmd'
     if (-not (Test-Path $portableNode)) {
         throw "Portable Node.js is missing: $portableNode. Use a complete PointBench portable package with runtime\node unpacked."
     }
-    if (-not (Test-Path $portableNpm)) {
-        throw "Portable npm is missing: $portableNpm. Use a complete PointBench portable package with runtime\node unpacked."
-    }
     $nodeExe = $portableNode
-    $npmExe = $portableNpm
+    $portableNpm = Join-Path $root 'runtime\node\npm.cmd'
+    $npmExe = if (Test-Path $portableNpm) { $portableNpm } else { $null }
     $env:PATH = "$(Join-Path $root 'runtime\node');$env:PATH"
 
     $viteEntry = Join-Path $frontendDir 'node_modules\vite\bin\vite.js'

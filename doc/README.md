@@ -37,14 +37,6 @@ start.bat
 run.bat
 ```
 
-### Linux / macOS 启动
-
-若便携包包含对应平台的 `runtime/`，执行：
-
-```bash
-./run.sh
-```
-
 默认地址：
 
 | 服务 | 地址 |
@@ -63,13 +55,9 @@ scripts\pack-portable.bat
 
 打包脚本会验证项目内解包依赖是否完整，并排除安装器、首次运行依赖安装脚本、缓存、日志和运行数据。
 
-### 生成示例数据
+### 示例数据
 
-```bash
-python scripts/create_sample_zip.py
-```
-
-输出文件：
+仓库的 `sample_data/` 目录保留了可直接导入的示例数据：
 
 | 文件 | 说明 |
 | ---- | ---- |
