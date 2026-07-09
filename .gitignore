@@ -28,6 +28,7 @@ runtime/
 # Generated
 test-point-web-code.zip
 test-point-web-portable-*.zip
+PointBench-portable-*.zip
 .offline-build/
 
 # IDE / other

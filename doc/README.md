@@ -55,6 +55,14 @@ scripts\pack-portable.bat
 
 打包脚本会验证项目内解包依赖是否完整，并排除安装器、首次运行依赖安装脚本、缓存、日志和运行数据。
 
+如需在 Linux 上生成 Windows 便携版 zip，执行：
+
+```bash
+scripts/pack-windows-portable.sh
+```
+
+该脚本会检查 Windows 版 `runtime/python`、`runtime/node`，并在需要时临时生成 Windows 目标的 `frontend/node_modules` 后再打包。
+
 ### 示例数据
 
 仓库的 `sample_data/` 目录保留了可直接导入的示例数据：

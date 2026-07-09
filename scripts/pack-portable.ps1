@@ -107,13 +107,14 @@ function Test-SkipRelativePath {
     if ($path -match '^runtime\\get-pip\.py$') { return $true }
     if ($path -match '^offline-install(\\|$)') { return $true }
     if ($path -match '^installers(\\|$)') { return $true }
+    if ($path -match '^(PointBench-portable|test-point-web-portable)-.*\.zip$') { return $true }
+    if ($path -eq 'offline-install.zip') { return $true }
 
     if ($fileName -like '*.pyc') { return $true }
     if ($fileName -like '*.pyo') { return $true }
     if ($fileName -like '*.db') { return $true }
     if ($fileName -like '*.db-journal') { return $true }
     if ($fileName -like '*.db-wal') { return $true }
-    if ($fileName -like '*.zip') { return $true }
     if ($fileName -like '*.tar.gz') { return $true }
     if ($fileName -like '*.tar.xz') { return $true }
     if ($fileName -eq 'python-embed.zip') { return $true }
@@ -309,7 +310,7 @@ $forbiddenEntryPatterns = @(
     '__pycache__/',
     '\.pyc$',
     '\.db$',
-    '\.zip$'
+    '^(PointBench-portable|test-point-web-portable)-.*\.zip$'
 )
 
 $zip = [System.IO.Compression.ZipFile]::OpenRead($output)
