@@ -61,7 +61,11 @@ scripts\pack-portable.bat
 scripts/pack-windows-portable.sh
 ```
 
-该脚本会检查 Windows 版 `runtime/python`、`runtime/node`，并在需要时临时生成 Windows 目标的 `frontend/node_modules` 后再打包。
+该脚本会自动下载 Windows embeddable Python、Windows Node.js，下载并解包后端 Python wheels，并在需要时临时生成 Windows 目标的 `frontend/node_modules` 后再打包。若项目内已有完整 `runtime/` 和 Windows 版前端依赖，默认会复用；需要强制重新下载可执行：
+
+```bash
+scripts/pack-windows-portable.sh --runtime refresh --frontend prepare
+```
 
 ### 示例数据
 
