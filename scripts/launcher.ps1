@@ -433,7 +433,7 @@ function Run-Preflight {
 
     Invoke-DiagnosticCommand -Name 'backend-import-check' `
         -FilePath $pythonExe `
-        -Arguments '-c "import sys; print(sys.executable); import fastapi, uvicorn, sqlalchemy, alembic, jose; import app.main; print(''backend import ok'')"' `
+        -Arguments ('-c "import sys; sys.path.insert(0, r''{0}''); print(sys.executable); import fastapi, uvicorn, sqlalchemy, alembic, jose; import app.main; print(''backend import ok'')"' -f $backendDir) `
         -WorkingDirectory $backendDir `
         -LogPath $backendLog `
         -Required
@@ -503,7 +503,15 @@ try {
     Release-Port '5173'
 
     $backendCmd = Join-Path $logDir 'start-backend.cmd'
+    $backendPy = Join-Path $logDir 'start-backend.py'
     $frontendCmd = Join-Path $logDir 'start-frontend.cmd'
+
+    Set-TextFile -Path $backendPy -Value @(
+        'import sys',
+        ('sys.path.insert(0, r"{0}")' -f $backendDir),
+        'import uvicorn',
+        'uvicorn.run("app.main:app", host="127.0.0.1", port=8000, log_level="info", access_log=True)'
+    )
 
     Set-TextFile -Path $backendCmd -Value @(
         '@echo off',
@@ -520,8 +528,8 @@ try {
         ('echo cwd=%CD% >> "{0}"' -f $backendLog),
         ('echo PYTHONPATH=%PYTHONPATH% >> "{0}"' -f $backendLog),
         ('echo python="{0}" >> "{1}"' -f $pythonExe, $backendLog),
-        ('echo command="{0}" -X faulthandler -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --log-level info --access-log >> "{1}"' -f $pythonExe, $backendLog),
-        ('"{0}" -X faulthandler -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --log-level info --access-log >> "{1}" 2>&1' -f $pythonExe, $backendLog),
+        ('echo command="{0}" -X faulthandler "{1}" >> "{2}"' -f $pythonExe, $backendPy, $backendLog),
+        ('"{0}" -X faulthandler "{1}" >> "{2}" 2>&1' -f $pythonExe, $backendPy, $backendLog),
         ('echo backend_exit_code=%ERRORLEVEL% >> "{0}"' -f $backendLog),
         'exit /b %ERRORLEVEL%'
     )

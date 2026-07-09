@@ -192,7 +192,8 @@ def looks_like_app_db(db_path: Path) -> bool:
 def load_expected_schema(project_root: Path, python_exe: str) -> tuple[dict[str, set[str]], str | None]:
     backend_dir = project_root / "backend"
     schema_code = (
-        "import json; "
+        "import json, sys; "
+        f"sys.path.insert(0, {str(backend_dir)!r}); "
         "import app.models; "
         "from app.database import Base, DATABASE_URL; "
         "print(json.dumps({"
