@@ -11,31 +11,59 @@
 
 ---
 
-## 快速开始
+## 快速开始（便携版）
 
-### 1. 运行后端
+本项目按便携版发布和使用。完整包解压后应自带以下依赖目录：
 
-```bash
-cd backend
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
+| 路径 | 说明 |
+| ---- | ---- |
+| `runtime/python/` | 便携 Python 与后端 Python 依赖 |
+| `runtime/node/` | 便携 Node.js |
+| `frontend/node_modules/` | 前端依赖 |
+
+启动脚本只使用项目解包后的依赖，不会回退到系统 Python、系统 Node.js 或本机虚拟环境。若上述目录缺失，请重新获取完整便携包。
+
+### Windows 启动
+
+双击根目录：
+
+```text
+start.bat
 ```
 
-后端默认地址：`http://127.0.0.1:8000`，API 文档：`http://127.0.0.1:8000/docs`
+或在命令行执行：
 
-### 2. 运行前端
-
-```bash
-cd frontend
-npm install
-npm run dev
+```bat
+run.bat
 ```
 
-前端默认地址：`http://127.0.0.1:5173`
+### Linux / macOS 启动
 
-### 3. 生成示例数据
+若便携包包含对应平台的 `runtime/`，执行：
+
+```bash
+./run.sh
+```
+
+默认地址：
+
+| 服务 | 地址 |
+| ---- | ---- |
+| 前端 | `http://127.0.0.1:5173` |
+| 后端 API | `http://127.0.0.1:8000` |
+| API 文档 | `http://127.0.0.1:8000/docs` |
+
+### 生成便携包
+
+在已经准备好 `runtime/` 和 `frontend/node_modules/` 的项目目录中执行：
+
+```bat
+scripts\pack-portable.bat
+```
+
+打包脚本会验证项目内解包依赖是否完整，并排除安装器、首次运行依赖安装脚本、缓存、日志和运行数据。
+
+### 生成示例数据
 
 ```bash
 python scripts/create_sample_zip.py

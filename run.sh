@@ -138,20 +138,45 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-if [[ -x "$PROJECT_DIR/runtime/python/python.exe" ]]; then
-  PYTHON_EXE="$PROJECT_DIR/runtime/python/python.exe"
-  export PATH="$PROJECT_DIR/runtime/python:$PROJECT_DIR/runtime/python/Scripts:$PATH"
-elif [[ -x "$PROJECT_DIR/backend/.venv/bin/python" ]]; then
-  PYTHON_EXE="$PROJECT_DIR/backend/.venv/bin/python"
-else
-  PYTHON_EXE="${PYTHON:-python3}"
+PYTHON_CANDIDATES=(
+  "$PROJECT_DIR/runtime/python/bin/python"
+  "$PROJECT_DIR/runtime/python/python"
+  "$PROJECT_DIR/runtime/python/python.exe"
+)
+PYTHON_EXE=""
+for candidate in "${PYTHON_CANDIDATES[@]}"; do
+  if [[ -x "$candidate" ]]; then
+    PYTHON_EXE="$candidate"
+    break
+  fi
+done
+if [[ -z "$PYTHON_EXE" ]]; then
+  log_launcher "Portable Python is missing under runtime/python. Use a complete PointBench portable package."
+  exit 1
 fi
+export PATH="$PROJECT_DIR/runtime/python:$PROJECT_DIR/runtime/python/bin:$PROJECT_DIR/runtime/python/Scripts:$PATH"
 
-if [[ -x "$PROJECT_DIR/runtime/node/node.exe" ]]; then
-  NODE_EXE="$PROJECT_DIR/runtime/node/node.exe"
-  export PATH="$PROJECT_DIR/runtime/node:$PATH"
-else
-  NODE_EXE="node"
+NODE_CANDIDATES=(
+  "$PROJECT_DIR/runtime/node/bin/node"
+  "$PROJECT_DIR/runtime/node/node"
+  "$PROJECT_DIR/runtime/node/node.exe"
+)
+NODE_EXE=""
+for candidate in "${NODE_CANDIDATES[@]}"; do
+  if [[ -x "$candidate" ]]; then
+    NODE_EXE="$candidate"
+    break
+  fi
+done
+if [[ -z "$NODE_EXE" ]]; then
+  log_launcher "Portable Node.js is missing under runtime/node. Use a complete PointBench portable package."
+  exit 1
+fi
+export PATH="$PROJECT_DIR/runtime/node:$PROJECT_DIR/runtime/node/bin:$PATH"
+
+if [[ ! -f "$PROJECT_DIR/frontend/node_modules/vite/bin/vite.js" ]]; then
+  log_launcher "Frontend dependencies are missing: frontend/node_modules/vite/bin/vite.js. Use a complete portable package."
+  exit 1
 fi
 export PYTHONPATH="$PROJECT_DIR/backend${PYTHONPATH:+:$PYTHONPATH}"
 
@@ -188,9 +213,20 @@ run_diag "backend-import-check" "$BACKEND_LOG" "$PROJECT_DIR/backend" \
   }
 
 run_diag "node-version" "$FRONTEND_LOG" "$PROJECT_DIR/frontend" "$NODE_EXE" --version
-run_diag "npm-version" "$FRONTEND_LOG" "$PROJECT_DIR/frontend" npm --version || true
+NPM_EXE=""
+for candidate in "$PROJECT_DIR/runtime/node/bin/npm" "$PROJECT_DIR/runtime/node/npm" "$PROJECT_DIR/runtime/node/npm.cmd"; do
+  if [[ -x "$candidate" ]]; then
+    NPM_EXE="$candidate"
+    break
+  fi
+done
+if [[ -n "$NPM_EXE" ]]; then
+  run_diag "npm-version" "$FRONTEND_LOG" "$PROJECT_DIR/frontend" "$NPM_EXE" --version || true
+else
+  log_launcher "Portable npm was not found; continuing because runtime startup uses node directly."
+fi
 run_diag "frontend-package-check" "$FRONTEND_LOG" "$PROJECT_DIR/frontend" \
-  npm --prefix "$PROJECT_DIR/frontend" ls vite @vitejs/plugin-react react react-dom --depth=0 || true
+  "$NODE_EXE" -e "for (const p of ['vite','@vitejs/plugin-react','react','react-dom']) require.resolve(p + '/package.json', { paths: [process.cwd()] }); console.log('frontend packages ok')" || true
 run_diag "vite-direct-check" "$FRONTEND_LOG" "$PROJECT_DIR/frontend" \
   "$NODE_EXE" ./node_modules/vite/bin/vite.js --version
 

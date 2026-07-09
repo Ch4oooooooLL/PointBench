@@ -20,13 +20,15 @@ if (Test-Path $output) {
 }
 
 Write-Host "  Packing source files..."
-Write-Host "  (skipping: node_modules, .venv, storage, outputs, caches)"
+Write-Host "  (skipping: runtime, node_modules, .venv, storage, outputs, caches)"
 Write-Host ""
 
 # Exclusion patterns (match against full path)
 $exclude = @(
     '*\node_modules\*',
     '*\node_modules',
+    '*\runtime\*',
+    '*\runtime',
     '*.venv*',
     '*\__pycache__\*',
     '*.pyc',
@@ -96,7 +98,6 @@ Write-Host "  Included: all source code under:"
 Write-Host "    backend\"
 Write-Host "    frontend\"
 Write-Host "    doc\"
-Write-Host "    offline-install\"
 Write-Host "    scripts\"
 Write-Host "    sample_data\"
 Write-Host "    + root .bat, .gitignore"
@@ -104,6 +105,7 @@ Write-Host ""
 Write-Host "  Excluded:"
 Write-Host "    node_modules\"
 Write-Host "    .venv\"
+Write-Host "    runtime\"
 Write-Host "    installers\  /  pip-packages\"
 Write-Host "    node-modules.zip"
 Write-Host "    storage\  /  outputs\"

@@ -25,17 +25,16 @@ logs/
 # Portable runtime (downloaded, not source)
 runtime/
 
-# Offline dependency packages (large files)
-offline-install/installers/
-offline-install/pip-packages/
-offline-install/node-modules.zip
-offline-install/node-modules.tar.gz
-
 # Generated
 test-point-web-code.zip
 test-point-web-portable-*.zip
+.offline-build/
 
 # IDE / other
 AGENTS.md
 .codex_spreadsheet_work/
 offline-install.zip
+
+# Irrelevant / generated
+backend/package-lock.json
+sample_data/TEST-ALL-FEATURES_*

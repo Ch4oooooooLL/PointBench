@@ -466,25 +466,28 @@ function Run-Preflight {
 
 try {
     $portablePython = Join-Path $root 'runtime\python\python.exe'
-    $venvPython = Join-Path $root 'backend\.venv\Scripts\python.exe'
-    if (Test-Path $portablePython) {
-        $pythonExe = $portablePython
-        $env:PATH = "$(Join-Path $root 'runtime\python');$(Join-Path $root 'runtime\python\Scripts');$env:PATH"
-    } elseif (Test-Path $venvPython) {
-        $pythonExe = $venvPython
-    } else {
-        $pythonExe = 'python'
+    if (-not (Test-Path $portablePython)) {
+        throw "Portable Python is missing: $portablePython. Use a complete PointBench portable package with runtime\python unpacked."
     }
+    $pythonExe = $portablePython
+    $env:PATH = "$(Join-Path $root 'runtime\python');$(Join-Path $root 'runtime\python\Scripts');$env:PATH"
     $env:PYTHONPATH = $backendDir
 
     $portableNode = Join-Path $root 'runtime\node\node.exe'
-    if (Test-Path $portableNode) {
-        $nodeExe = $portableNode
-        $npmExe = Join-Path $root 'runtime\node\npm.cmd'
-        $env:PATH = "$(Join-Path $root 'runtime\node');$env:PATH"
-    } else {
-        $nodeExe = 'node'
-        $npmExe = 'npm'
+    $portableNpm = Join-Path $root 'runtime\node\npm.cmd'
+    if (-not (Test-Path $portableNode)) {
+        throw "Portable Node.js is missing: $portableNode. Use a complete PointBench portable package with runtime\node unpacked."
+    }
+    if (-not (Test-Path $portableNpm)) {
+        throw "Portable npm is missing: $portableNpm. Use a complete PointBench portable package with runtime\node unpacked."
+    }
+    $nodeExe = $portableNode
+    $npmExe = $portableNpm
+    $env:PATH = "$(Join-Path $root 'runtime\node');$env:PATH"
+
+    $viteEntry = Join-Path $frontendDir 'node_modules\vite\bin\vite.js'
+    if (-not (Test-Path $viteEntry)) {
+        throw "Frontend dependencies are missing: $viteEntry. Use a complete PointBench portable package with frontend\node_modules unpacked."
     }
 
     Stop-ExistingPointBenchProcesses

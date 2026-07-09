@@ -9,9 +9,9 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # ============================================================
-#  Pack portable distribution zip
-#  Includes runtime/, backend/, frontend/node_modules,
-#  scripts/, sample_data/, doc/, start.bat
+#  Pack portable distribution zip.
+#  The package must already contain unpacked runtime dependencies under
+#  runtime/ and frontend/node_modules. No installer/bootstrap files are used.
 # ============================================================
 
 if (-not $ProjectDir) {
@@ -25,8 +25,7 @@ if (-not (Test-Path $runtimeDir)) {
     Write-Host ''
     Write-Host "[ERROR] runtime\ directory not found."
     Write-Host ''
-    Write-Host "  You must run setup-portable.bat first on an internet-connected PC"
-    Write-Host "  to download and set up the portable runtimes."
+    Write-Host "  The portable package must include unpacked runtime dependencies."
     Write-Host ''
     exit 1
 }
@@ -34,7 +33,7 @@ if (-not (Test-Path $runtimeDir)) {
 if (-not (Test-Path (Join-Path $runtimeDir 'python\python.exe'))) {
     Write-Host ''
     Write-Host "[ERROR] Portable Python not found: runtime\python\python.exe"
-    Write-Host "  Run setup-portable.bat first."
+    Write-Host "  Use a complete portable package with runtime\python unpacked."
     Write-Host ''
     exit 1
 }
@@ -42,7 +41,7 @@ if (-not (Test-Path (Join-Path $runtimeDir 'python\python.exe'))) {
 if (-not (Test-Path (Join-Path $runtimeDir 'node\node.exe'))) {
     Write-Host ''
     Write-Host "[ERROR] Portable Node.js not found: runtime\node\node.exe"
-    Write-Host "  Run setup-portable.bat first."
+    Write-Host "  Use a complete portable package with runtime\node unpacked."
     Write-Host ''
     exit 1
 }
@@ -50,7 +49,25 @@ if (-not (Test-Path (Join-Path $runtimeDir 'node\node.exe'))) {
 if (-not (Test-Path (Join-Path $root 'frontend\node_modules\vite\bin\vite.js'))) {
     Write-Host ''
     Write-Host "[ERROR] Frontend dependencies not found: frontend\node_modules\vite\bin\vite.js"
-    Write-Host "  Run setup-portable.bat first to install frontend dependencies."
+    Write-Host "  Use a complete portable package with frontend\node_modules unpacked."
+    Write-Host ''
+    exit 1
+}
+
+Write-Host '  Verifying unpacked runtime dependencies...'
+& (Join-Path $runtimeDir 'python\python.exe') -c "import fastapi, uvicorn, sqlalchemy; import alembic.config; import jose; import pandas, numpy, openpyxl; print('  [OK] Python runtime dependencies verified')"
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ''
+    Write-Host '[ERROR] Portable Python dependencies are incomplete.'
+    Write-Host '  Rebuild runtime\python before packaging; the portable launcher will not install dependencies.'
+    Write-Host ''
+    exit 1
+}
+& (Join-Path $runtimeDir 'node\node.exe') (Join-Path $root 'frontend\node_modules\vite\bin\vite.js') --version
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ''
+    Write-Host '[ERROR] Frontend node_modules are incomplete.'
+    Write-Host '  Rebuild frontend\node_modules before packaging; the portable launcher will not install dependencies.'
     Write-Host ''
     exit 1
 }
@@ -128,6 +145,9 @@ $exclude = @(
     '*\backend\.venv\*',
     '*\backend\.venv',
     '*\get-pip.py',
+    '*\runtime\install-deps.bat',
+    '*\runtime\pip-packages\*',
+    '*\runtime\pip-packages',
     '*\python-embed.zip',
     '*\nodejs.zip',
     '*\node-temp\*',
@@ -135,7 +155,7 @@ $exclude = @(
 )
 
 Write-Host '  Collecting files...'
-Write-Host '  (excluding: .git, __pycache__, .pyc, .db, storage, outputs, logs, dist, caches)'
+Write-Host '  (excluding: .git, installer/bootstrap files, caches, storage, outputs, logs, dist)'
 Write-Host ''
 
 $allFiles = @(Get-ChildItem -Path $root -Recurse -Force -File -ErrorAction SilentlyContinue | Where-Object {
@@ -246,7 +266,7 @@ Write-Host "  Output:  $output"
 Write-Host "  Size:    ${sizeMB} MB"
 Write-Host ''
 Write-Host '  Included in this zip:'
-Write-Host '    runtime\              — portable Python + Node.js + all deps'
+Write-Host '    runtime\              — unpacked portable Python + Node.js + Python deps'
 Write-Host '    backend\              — Python source code'
 Write-Host '    frontend\             — React source + node_modules'
 Write-Host '    scripts\              — launcher and utility scripts'
@@ -258,8 +278,8 @@ Write-Host '  Excluded:'
 Write-Host '    .git\                 — version control'
 Write-Host '    __pycache__\, .pyc    — bytecode cache'
 Write-Host '    storage\, outputs\    — runtime data'
+Write-Host '    installer/bootstrap files — offline-install\, get-pip.py, install-deps.bat'
 Write-Host '    logs\                 — log files'
-Write-Host '    offline-install\      — old offline install scripts'
 Write-Host '    dist\                 — build artifacts'
 Write-Host ''
 Write-Host '  How to use on the offline PC:'

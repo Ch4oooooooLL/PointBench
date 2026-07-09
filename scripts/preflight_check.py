@@ -11,7 +11,6 @@ import argparse
 import json
 import os
 import re
-import shutil
 import socket
 import sqlite3
 import subprocess
@@ -99,6 +98,8 @@ def run_command(
         )
     except FileNotFoundError:
         return 127, f"command not found: {command[0]}"
+    except OSError as exc:
+        return 126, f"cannot execute {command[0]}: {exc}"
     except subprocess.TimeoutExpired:
         return 124, "command timed out"
     return proc.returncode, proc.stdout.strip()
@@ -247,9 +248,9 @@ def check_node(reporter: Reporter, frontend_dir: Path, node_exe: str, npm_exe: s
         if code == 0:
             reporter.ok("npm", output)
         else:
-            reporter.warn("npm", f"{npm_exe}: {output}; npm is only needed for dependency installation, not runtime startup")
+            reporter.warn("npm", f"{npm_exe}: {output}; npm is not needed for portable runtime startup")
     else:
-        reporter.warn("npm", "npm executable was not found; npm is only needed for dependency installation, not runtime startup")
+        reporter.warn("npm", "npm executable was not found; npm is not needed for portable runtime startup")
 
     package_json = frontend_dir / "package.json"
     node_modules = frontend_dir / "node_modules"
@@ -257,7 +258,7 @@ def check_node(reporter: Reporter, frontend_dir: Path, node_exe: str, npm_exe: s
         reporter.fail("Frontend project", f"missing {package_json}")
         return
     if not node_modules.exists():
-        reporter.fail("Frontend dependencies", "missing frontend/node_modules; run npm install")
+        reporter.fail("Frontend dependencies", "missing frontend/node_modules; use a complete portable package with unpacked dependencies")
         return
 
     missing_packages = [
@@ -466,15 +467,28 @@ def check_runtime_layout(
         reporter.fail("Logs directory", f"not writable: {logs_dir} ({exc})")
 
 
-def find_node_executables(project_root: Path) -> tuple[str, str | None]:
-    portable_node = project_root / "runtime" / "node" / "node.exe"
-    portable_npm = project_root / "runtime" / "node" / "npm.cmd"
-    if portable_node.exists() and (os.name == "nt" or os.access(portable_node, os.X_OK)):
-        return str(portable_node), str(portable_npm) if portable_npm.exists() else None
+def find_portable_python(project_root: Path) -> str:
+    candidates = [
+        project_root / "runtime" / "python" / "python.exe",
+        project_root / "runtime" / "python" / "bin" / "python",
+        project_root / "runtime" / "python" / "python",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return str(candidates[0])
 
-    node = shutil.which("node") or "node"
-    npm = shutil.which("npm")
-    return node, npm
+
+def find_node_executables(project_root: Path) -> tuple[str, str | None]:
+    candidates = [
+        (project_root / "runtime" / "node" / "node.exe", project_root / "runtime" / "node" / "npm.cmd"),
+        (project_root / "runtime" / "node" / "bin" / "node", project_root / "runtime" / "node" / "bin" / "npm"),
+        (project_root / "runtime" / "node" / "node", project_root / "runtime" / "node" / "npm"),
+    ]
+    for node_path, npm_path in candidates:
+        if node_path.exists():
+            return str(node_path), str(npm_path) if npm_path.exists() else None
+    return str(candidates[0][0]), None
 
 
 def main() -> int:
@@ -487,12 +501,10 @@ def main() -> int:
     project_root = Path(args.project_root).resolve()
     backend_dir = configure_backend_import_path(project_root)
     frontend_dir = project_root / "frontend"
-    python_exe = args.python or os.environ.get("PYTHON") or str(backend_dir / ".venv" / "bin" / "python")
+    python_exe = args.python or find_portable_python(project_root)
     python_path = Path(python_exe)
     if python_path.exists():
         python_exe = str(python_path if python_path.is_absolute() else (Path.cwd() / python_path).absolute())
-    elif shutil.which(python_exe) is None:
-        python_exe = "python3"
     node_exe, npm_exe = find_node_executables(project_root)
 
     reporter = Reporter()
