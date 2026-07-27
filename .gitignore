@@ -29,6 +29,7 @@ runtime/
 test-point-web-code.zip
 test-point-web-portable-*.zip
 PointBench-portable-*.zip
+dist/
 .offline-build/
 
 # IDE / other

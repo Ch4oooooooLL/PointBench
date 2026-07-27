@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUTPUT_DIR=""
-OUTPUT_NAME="PointBench-portable"
+OUTPUT_NAME="PointBench"
 PYTHON_VERSION="3.14.6"
 NODE_VERSION="v24.16.0"
 RUNTIME_MODE="auto"
@@ -17,19 +17,19 @@ usage() {
   cat <<'USAGE'
 Usage: scripts/pack-windows-portable.sh [options]
 
-Create a Windows portable PointBench zip from Linux.
+Create split Windows portable PointBench artifacts from Linux.
 
 By default, the script:
   1. Reuses existing runtime/ only when it is complete.
   2. Otherwise downloads Windows embeddable Python and portable Node.js.
   3. Downloads Windows Python wheels and unpacks them into runtime/python.
   4. Prepares Windows target frontend/node_modules when needed.
-  5. Creates a portable-only zip. No installer is generated.
+  5. Creates a code-only zip and an unpacked dependency directory.
 
 Options:
   --project-dir DIR       Project root. Defaults to this repository root.
   --output-dir DIR        Output directory. Defaults to project root.
-  --output-name NAME      Zip name prefix. Defaults to PointBench-portable.
+  --output-name NAME      Artifact name prefix. Defaults to PointBench.
   --python-version VER    Windows embeddable Python version. Defaults to 3.14.6.
   --node-version VER      Windows Node.js version. Defaults to v24.16.0.
   --runtime auto          Reuse complete project runtime, otherwise download. Default.
@@ -38,7 +38,7 @@ Options:
   --frontend auto         Reuse current node_modules if Windows deps exist, otherwise prepare. Default.
   --frontend current      Require current frontend/node_modules to contain Windows deps.
   --frontend prepare      Always prepare Windows node_modules in a temporary directory.
-  --dry-run               Validate inputs/tools and print planned actions without downloading or zipping.
+  --dry-run               Validate inputs/tools and print planned actions without downloading or packaging.
   --keep-build            Keep temporary build directory for inspection.
   -h, --help              Show this help.
 USAGE
@@ -208,9 +208,17 @@ runtime_python_deps_ok() {
 
 configure_embeddable_python() {
   local python_dir="$1"
-  local pth_file
+  local pth_file stdlib_zip
   pth_file="$(find "$python_dir" -maxdepth 1 -name 'python*._pth' | head -n 1)"
   [[ -n "$pth_file" && -f "$pth_file" ]] || fail "Could not find python*._pth in $python_dir"
+
+  # Embeddable Python normally imports the standard library from python3xx.zip.
+  # Expand it because deployed dependencies must not contain or use archives.
+  stdlib_zip="$(find "$python_dir" -maxdepth 1 -name 'python*.zip' | head -n 1)"
+  [[ -n "$stdlib_zip" && -f "$stdlib_zip" ]] || fail "Could not find the embeddable Python standard-library zip"
+  mkdir -p "$python_dir/Lib"
+  unzip -qo "$stdlib_zip" -d "$python_dir/Lib"
+  rm -f "$stdlib_zip"
 
   python3 - "$pth_file" <<'PY'
 import sys
@@ -222,6 +230,8 @@ updated = []
 seen_site = False
 seen_lib_site = False
 for line in lines:
+    if line.strip().startswith("python") and line.strip().endswith(".zip"):
+        line = "Lib"
     if line.strip() == "#import site":
         line = "import site"
     if line.strip() == "import site":
@@ -231,6 +241,8 @@ for line in lines:
     updated.append(line)
 if not seen_lib_site:
     updated.append("Lib/site-packages")
+if "Lib" not in updated:
+    updated.append("Lib")
 if not seen_site:
     updated.append("import site")
 path.write_text("\n".join(updated) + "\n", encoding="utf-8")
@@ -362,6 +374,12 @@ require_file "scripts/launcher.ps1"
 require_file "scripts/preflight_check.py"
 require_file "scripts/pack-portable.bat"
 require_file "scripts/pack-portable.ps1"
+require_file "scripts/pack-code.bat"
+require_file "scripts/pack-code.ps1"
+require_file "scripts/pack-dependencies.bat"
+require_file "scripts/pack-dependencies.ps1"
+require_file "scripts/setup-portable-deps.bat"
+require_file "scripts/setup-portable-deps.ps1"
 require_file "scripts/pack-windows-portable.sh"
 require_file "backend/requirements.txt"
 require_file "backend/alembic.ini"
@@ -435,7 +453,7 @@ esac
 [[ -f "$FRONTEND_NODE_MODULES/vite/bin/vite.js" ]] || fail "Selected frontend node_modules is missing vite/bin/vite.js"
 
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
-OUTPUT="$OUTPUT_DIR/${OUTPUT_NAME}-${TIMESTAMP}.zip"
+OUTPUT="$OUTPUT_DIR/${OUTPUT_NAME}-code-${TIMESTAMP}.zip"
 export POINTBENCH_PACK_PROJECT_DIR="$PROJECT_DIR"
 export POINTBENCH_PACK_OUTPUT="$OUTPUT"
 export POINTBENCH_PACK_RUNTIME_DIR="$RUNTIME_DIR_FOR_PACKAGE"
@@ -476,12 +494,6 @@ required_entries = {
     "backend/app/database.py",
     "backend/alembic.ini",
     "frontend/package.json",
-    "frontend/node_modules/vite/bin/vite.js",
-    "frontend/node_modules/@esbuild/win32-x64/package.json",
-    "frontend/node_modules/@rollup/rollup-win32-x64-msvc/package.json",
-    "runtime/python/python.exe",
-    "runtime/python/Lib/site-packages/fastapi/__init__.py",
-    "runtime/node/node.exe",
     "logs/",
     "backend/storage/",
 }
@@ -564,28 +576,6 @@ with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compressleve
             add_file(archive, source, relative)
             files_added += 1
 
-    for source in runtime_dir.rglob("*"):
-        if not source.is_file():
-            continue
-        relative = source.relative_to(runtime_dir).as_posix()
-        if "__pycache__/" in relative or relative.endswith((".pyc", ".pyo")):
-            continue
-        if relative in {"get-pip.py", "install-deps.bat", "setup-env.bat"}:
-            continue
-        if relative.startswith(("pip-packages/", "node-temp/")):
-            continue
-        add_file(archive, source, f"runtime/{relative}")
-        files_added += 1
-
-    for source in frontend_node_modules.rglob("*"):
-        if not source.is_file():
-            continue
-        relative = source.relative_to(frontend_node_modules).as_posix()
-        if "__pycache__/" in relative or relative.endswith((".pyc", ".pyo")):
-            continue
-        add_file(archive, source, f"frontend/node_modules/{relative}")
-        files_added += 1
-
     for directory in [
         "logs/",
         "backend/storage/",
@@ -622,3 +612,33 @@ print(f"[OK] Created {output}")
 print(f"[OK] Files: {files_added}")
 print(f"[OK] Size: {size_mb:.1f} MB")
 PY
+
+DEPENDENCY_OUTPUT="$OUTPUT_DIR/${OUTPUT_NAME}-dependencies-windows-x64"
+case "$DEPENDENCY_OUTPUT" in
+  "$OUTPUT_DIR"/*) ;;
+  *) fail "Refusing to replace a dependency directory outside the output directory" ;;
+esac
+rm -rf "$DEPENDENCY_OUTPUT"
+mkdir -p "$DEPENDENCY_OUTPUT/frontend"
+cp -a "$RUNTIME_DIR_FOR_PACKAGE" "$DEPENDENCY_OUTPUT/runtime"
+cp -a "$FRONTEND_NODE_MODULES" "$DEPENDENCY_OUTPUT/frontend/node_modules"
+cat > "$DEPENDENCY_OUTPUT/DEPENDENCIES.txt" <<'EOF'
+PointBench portable dependencies
+Platform: Windows x64
+Format: unpacked directory (no compressed archives)
+Merge this directory into the extracted PointBench code directory.
+EOF
+
+if find "$DEPENDENCY_OUTPUT" -type f \( \
+  -iname '*.zip' -o -iname '*.whl' -o -iname '*.7z' -o -iname '*.rar' -o \
+  -iname '*.tar' -o -iname '*.tgz' -o -iname '*.gz' -o -iname '*.xz' -o -iname '*.bz2' \
+\) -print -quit | grep -q .; then
+  find "$DEPENDENCY_OUTPUT" -type f \( \
+    -iname '*.zip' -o -iname '*.whl' -o -iname '*.7z' -o -iname '*.rar' -o \
+    -iname '*.tar' -o -iname '*.tgz' -o -iname '*.gz' -o -iname '*.xz' -o -iname '*.bz2' \
+  \) -print
+  fail "Unpacked dependency directory contains compressed archives"
+fi
+
+ok "Created code package: $OUTPUT"
+ok "Created unpacked dependency directory: $DEPENDENCY_OUTPUT"
