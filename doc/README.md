@@ -177,13 +177,15 @@ run_name,cycle_count,test_time,point_id,point_name,max_strain_ue,min_strain_ue,r
 | 平均应变 `mean_strain_ue` | `(max_strain_ue + min_strain_ue) / 2` |
 | 应变幅 `amplitude_strain_ue` | `(max_strain_ue - min_strain_ue) / 2` |
 | 应变范围 `range_strain_ue` | `max_strain_ue - min_strain_ue` |
-| 应力 `stress_mpa` | `0.206 × strain_ue` |
+| 应力幅 `stress_amplitude_mpa` | 按自定义公式计算（变量 `max` / `min`），默认 `(max-min)*0.21` |
+
+> **说明**：应力换算已改为可配置的自定义公式，默认公式为 `(max-min)*0.21`（变量 `max`、`min` 分别对应最大 / 最小应变）。可在页面左下角「设置」中修改，公式通过 `PUT /api/settings` 保存为全局配置；公式解析失败时回退到弹性模量换算（默认弹性模量 206000 MPa）。
 
 ### 异常规则
 
 | 规则 | 触发条件 |
 | ---- | -------- |
-| 变化异常 | 当前点位应变幅相对上一轮变化超过 20% |
+| 变化异常 | 当前点位应变幅相对首次有效数据（baseline）变化超过 20%（默认阈值，可按项目配置） |
 | 趋势异常 | 当前点位连续 3 次应变幅上升 |
 | 空值处理 | 最大 / 最小应变为空时不参与判断 |
 | 手动覆盖 | 用户手动标记异常时保留人工标记原因 |
@@ -194,26 +196,75 @@ run_name,cycle_count,test_time,point_id,point_name,max_strain_ue,min_strain_ue,r
 
 | 方法 | 路径 | 说明 |
 | ---- | ---- | ---- |
+| **导入** | | |
 | `POST` | `/api/import/preview` | 导入预览 |
+| `POST` | `/api/import/preview-folder` | 文件夹导入预览 |
 | `POST` | `/api/import/confirm` | 确认导入 |
+| **项目** | | |
 | `GET` | `/api/projects` | 项目列表 |
+| `POST` | `/api/projects` | 创建项目 |
 | `GET` | `/api/projects/{id}` | 项目详情 |
+| `PUT` | `/api/projects/{id}` | 更新项目 |
 | `DELETE` | `/api/projects/{id}` | 删除项目 |
+| `GET` | `/api/projects/{id}/cache-version` | 项目缓存版本 |
+| `GET` | `/api/projects/delete-exports/{filename}` | 下载已删除项目的导出文件 |
 | `GET` | `/api/projects/{id}/points` | 项目点位列表 |
+| `POST` | `/api/projects/{id}/points` | 创建点位 |
+| **点位与媒体** | | |
 | `GET` | `/api/points/{id}` | 点位详情 |
 | `PUT` | `/api/points/{id}` | 更新点位 |
+| `DELETE` | `/api/points/{id}` | 删除点位 |
+| `POST` | `/api/points/{id}/media` | 上传点位媒体 |
+| `DELETE` | `/api/points/{id}/media/{media_id}` | 删除点位媒体 |
 | `GET` | `/api/media/{id}` | 获取媒体文件 |
+| **测试轮次** | | |
 | `POST` | `/api/projects/{id}/test-runs` | 创建测试轮次 |
 | `GET` | `/api/projects/{id}/test-runs` | 测试轮次列表 |
 | `GET` | `/api/test-runs/{id}` | 测试轮次详情 |
+| `PUT` | `/api/test-runs/{id}` | 更新测试轮次 |
 | `DELETE` | `/api/test-runs/{id}` | 删除测试轮次 |
+| **测量记录** | | |
 | `POST` | `/api/test-runs/{id}/measurements` | 创建测量记录 |
 | `GET` | `/api/test-runs/{id}/measurements` | 测量记录列表 |
 | `GET` | `/api/points/{id}/measurements` | 点位测量记录 |
 | `PUT` | `/api/measurements/{id}` | 更新测量记录 |
 | `DELETE` | `/api/measurements/{id}` | 删除测量记录 |
+| `POST` | `/api/projects/{id}/measurements/import-xlsx` | XLSX 批量导入 |
+| `POST` | `/api/projects/{id}/measurements/import-xlsx/preview` | XLSX 导入预览 |
+| `POST` | `/api/projects/{id}/measurements/import-xlsx/confirm` | XLSX 导入确认 |
+| `GET` | `/api/points/{id}/measurement-rows` | 点位测量记录行（含文件名） |
+| `POST` | `/api/points/{id}/measurement-rows` | 创建测量记录行 |
+| `PUT` | `/api/points/{id}/measurement-rows/{measurement_id}` | 更新测量记录行 |
+| `PUT` | `/api/points/{id}/measurement-rows` | 批量更新测量记录行 |
+| `DELETE` | `/api/points/{id}/measurement-rows/{measurement_id}` | 删除测量记录行 |
+| **趋势与分析** | | |
 | `GET` | `/api/points/{id}/trend` | 点位趋势数据 |
+| `GET` | `/api/projects/{id}/trends` | 项目点位趋势 |
 | `GET` | `/api/projects/{id}/analysis/abnormal-points` | 异常点位分析 |
 | `GET` | `/api/projects/{id}/analysis/summary` | 项目分析摘要 |
+| **导出** | | |
 | `GET` | `/api/projects/{id}/export.json` | 导出 JSON |
 | `GET` | `/api/projects/{id}/export.csv` | 导出 CSV |
+| `GET` | `/api/projects/{id}/export.zip` | 导出 ZIP 包 |
+| **Dewesoft 导入** | | |
+| `POST` | `/api/projects/{id}/imports` | 提交 Dewesoft 导入 |
+| `GET` | `/api/projects/{id}/imports` | Dewesoft 导入记录列表 |
+| `GET` | `/api/imports/{import_id}` | Dewesoft 导入记录详情 |
+| `DELETE` | `/api/imports/{import_id}` | 删除 Dewesoft 导入记录 |
+| **裂纹记录** | | |
+| `GET` | `/api/projects/{id}/crack-records` | 裂纹记录列表 |
+| `POST` | `/api/projects/{id}/crack-records` | 创建裂纹记录 |
+| `PUT` | `/api/crack-records/{record_id}` | 更新裂纹记录 |
+| `DELETE` | `/api/crack-records/{record_id}` | 删除裂纹记录 |
+| `GET` | `/api/crack-records/{record_id}/image` | 获取裂纹照片 |
+| **设置与系统** | | |
+| `GET` | `/api/settings` | 获取全局设置（应力公式） |
+| `PUT` | `/api/settings` | 更新全局设置 |
+| `GET` | `/api/health` | 健康检查 |
+| `POST` | `/api/client-logs` | 前端日志上报 |
+| **认证（需开启权限系统）** | | |
+| `POST` | `/api/auth/login` | 登录 |
+| `GET` | `/api/auth/me` | 当前用户信息 |
+| `POST` | `/api/auth/register` | 注册用户 |
+| `GET` | `/api/auth/users` | 用户列表 |
+| `PUT` | `/api/auth/users/{user_id}/role` | 修改用户角色 |

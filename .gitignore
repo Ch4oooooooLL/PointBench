@@ -3,6 +3,7 @@ backend/.venv/
 backend/test_point.db
 *.pyc
 __pycache__/
+.pytest_cache/
 
 # Frontend
 frontend/node_modules/
@@ -27,6 +28,7 @@ runtime/
 
 # Generated
 test-point-web-code.zip
+test-point-web-portable-*.xlsx
 test-point-web-portable-*.zip
 PointBench-portable-*.zip
 dist/
