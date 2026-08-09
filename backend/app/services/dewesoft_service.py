@@ -1,10 +1,11 @@
 import csv
 import json
+import math
 import re
 import shutil
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -40,7 +41,7 @@ def _unique_upload_path(target_dir: Path, filename: str) -> Path:
     if not target.exists():
         return target
     path = Path(filename)
-    return target_dir / f"{path.stem}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}{path.suffix}"
+    return target_dir / f"{path.stem}_{datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}{path.suffix}"
 
 
 async def save_dewesoft_upload(project: models.Project, upload: UploadFile) -> Path:
@@ -342,7 +343,7 @@ def _to_float(value: Any) -> float | None:
     if value is None:
         return None
     if isinstance(value, (int, float)):
-        return float(value)
+        return _finite_or_none(value)
     text = str(value).strip()
     if not text:
         return None
@@ -350,9 +351,16 @@ def _to_float(value: Any) -> float | None:
     if "," in text and "." not in text:
         text = text.replace(",", ".")
     try:
-        return float(text)
+        return _finite_or_none(float(text))
     except ValueError:
         return None
+
+
+def _finite_or_none(value: float) -> float | None:
+    """将 inf/nan 视为无效数值，返回 None。"""
+    if not math.isfinite(value):
+        return None
+    return value
 
 
 def _to_datetime(value: Any) -> datetime | None:
@@ -451,6 +459,8 @@ def import_dewesoft_file(db: Session, project_id: int, cycle_count: int, run_nam
         matched = 0
         unmatched = 0
         created_points: list[models.TestPoint] = []
+        # 批量导入场景：缓存项目弹性模量，避免每行重复查询
+        project_modulus = project.elastic_modulus_mpa if project.elastic_modulus_mpa is not None else None
         for channel in channels:
             window_values = _window_values(channel, stable_start, stable_end)
             min_value = min(window_values) if window_values else None
@@ -499,7 +509,7 @@ def import_dewesoft_file(db: Session, project_id: int, cycle_count: int, run_nam
                 # 校验数值一致性（来自统计窗口的 min/max 理应 min <= max）
                 if record.max_strain_ue is not None and record.min_strain_ue is not None and record.max_strain_ue < record.min_strain_ue:
                     record.max_strain_ue, record.min_strain_ue = record.min_strain_ue, record.max_strain_ue
-                compute_measurement_fields(record)
+                compute_measurement_fields(record, elastic_modulus_mpa=project_modulus)
                 db.add(record)
                 db.flush()
                 measurement_id = record.id
@@ -535,9 +545,29 @@ def import_dewesoft_file(db: Session, project_id: int, cycle_count: int, run_nam
             refresh_point_abnormal_flags(db, point.id)
         db.commit()
     except Exception as exc:
-        import_job.status = "failed"
-        import_job.message = str(exc)
+        # 回滚整个事务，撤销本次导入产生的 TestRun/TestPoint/MeasurementRecord 等半成品数据，
+        # 避免把这些部分写入一并提交成脏数据。
+        db.rollback()
+        # 在新的干净事务中重新登记导入任务并标记失败（原 import_job 引用在 rollback 后已失效，
+        # 需重新 add 并 flush 以获取新 id）
+        failed_job = models.DewesoftImport(
+            project_db_id=project_id,
+            cycle_count=cycle_count,
+            run_name=run_name_value,
+            filename=original_filename or upload_path.name,
+            stored_path=str(upload_path.relative_to(Path(__file__).resolve().parents[2])),
+            status="failed",
+            message=str(exc),
+        )
+        db.add(failed_job)
+        db.flush()
         db.commit()
+        db.refresh(failed_job)
+        return db.execute(
+            select(models.DewesoftImport)
+            .options(selectinload(models.DewesoftImport.channels))
+            .where(models.DewesoftImport.id == failed_job.id)
+        ).scalar_one()
     db.refresh(import_job)
     return db.execute(
         select(models.DewesoftImport)

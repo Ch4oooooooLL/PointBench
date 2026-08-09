@@ -1,5 +1,6 @@
 import logging
 import time
+from contextlib import asynccontextmanager
 from typing import Any
 from uuid import uuid4
 
@@ -28,7 +29,22 @@ from app.routers import (
 configure_logging()
 logger = logging.getLogger("app.main")
 
-app = FastAPI(title="实验点位数据管理与分析系统", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """FastAPI 生命周期：启动时初始化数据库。"""
+    logger.info("Backend startup begin database_url=%s storage_dir=%s", DATABASE_URL, STORAGE_DIR)
+    try:
+        init_db()
+    except Exception:
+        logger.exception("Backend startup failed during database initialization")
+        raise
+    configure_logging()
+    logger.info("Backend startup completed")
+    yield
+
+
+app = FastAPI(title="实验点位数据管理与分析系统", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -117,21 +133,29 @@ async def log_http_exception(request: Request, exc: StarletteHTTPException) -> J
     )
 
 
-@app.on_event("startup")
-def startup() -> None:
-    logger.info("Backend startup begin database_url=%s storage_dir=%s", DATABASE_URL, STORAGE_DIR)
-    try:
-        init_db()
-    except Exception:
-        logger.exception("Backend startup failed during database initialization")
-        raise
-    configure_logging()
-    logger.info("Backend startup completed")
-
-
 @app.get("/api/health")
 def health() -> dict:
     return {"ok": True}
+
+
+def _sanitize_log_text(value: str | None, max_length: int = 2000) -> str | None:
+    """截断文本并去除换行符，防止日志注入与超长日志刷屏。"""
+    if value is None:
+        return None
+    # 去除换行符（\r / \n），避免伪造日志行；再按长度截断
+    value = " ".join(value.splitlines())
+    return value[:max_length]
+
+
+def _sanitize_log_details(details: Any) -> Any:
+    """递归清理 details 中的字符串字段：截断长度并去除换行符。"""
+    if isinstance(details, dict):
+        return {key: _sanitize_log_details(value) for key, value in details.items()}
+    if isinstance(details, list):
+        return [_sanitize_log_details(value) for value in details]
+    if isinstance(details, str):
+        return _sanitize_log_text(details)
+    return details
 
 
 @app.post("/api/client-logs", status_code=204)
@@ -145,20 +169,24 @@ async def collect_client_log(payload: ClientLogPayload, request: Request) -> Res
         "critical": logging.CRITICAL,
     }
     level = level_map.get(payload.level.lower(), logging.ERROR)
+    # 日志字段防护：message/stack/details 截断到 2000 字符并去除换行符
+    message = _sanitize_log_text(payload.message)
+    stack = _sanitize_log_text(payload.stack)
+    details = _sanitize_log_details(payload.details)
     logger.log(
         level,
-        "Client log level=%s message=%r url=%s source=%s line=%s col=%s client=%s user_agent=%s stack=%s component_stack=%s details=%s",
+        "Client log level=%s message=%r url=%s source=%s line=%s col=%s client=%s user_agent=%s stack=%s component_stack=%s details=%r",
         payload.level,
-        payload.message,
+        message,
         payload.url,
         payload.source,
         payload.lineno,
         payload.colno,
         request.client.host if request.client else None,
         payload.user_agent,
-        payload.stack,
+        stack,
         payload.component_stack,
-        payload.details,
+        details,
     )
     return Response(status_code=204)
 

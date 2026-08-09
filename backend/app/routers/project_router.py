@@ -5,9 +5,9 @@ import json
 import shutil
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -25,6 +25,18 @@ from app.utils.path_utils import safe_project_dir
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 DELETE_EXPORT_DIR = STORAGE_DIR / "delete_exports"
+
+
+def _request_client_info(request: Request) -> dict:
+    """提取客户端 IP 与 User-Agent，用于审计日志。"""
+    client = request.client
+    client_ip = client.host if client else None
+    if client_ip and request.headers.get("x-forwarded-for"):
+        client_ip = request.headers.get("x-forwarded-for").split(",")[0].strip()
+    return {
+        "client_ip": client_ip,
+        "user_agent": (request.headers.get("user-agent") or None),
+    }
 
 
 def project_out(db: Session, project: models.Project) -> ProjectOut:
@@ -162,6 +174,7 @@ def list_projects(db: Session = Depends(get_db)) -> list[ProjectOut]:
 @router.post("", response_model=ProjectOut)
 def create_project(
     payload: ProjectCreate,
+    request: Request,
     db: Session = Depends(get_db),
     _admin: models.User = Depends(require_role("admin")),
 ) -> ProjectOut:
@@ -186,10 +199,22 @@ def create_project(
         raw_manifest_json=json.dumps({"source": "manual"}, ensure_ascii=False),
     )
     db.add(project)
+    # 审计日志必须在 commit 之前加入 session，否则 session 关闭时审计记录会被回滚丢弃
+    client_info = _request_client_info(request)
+    log_action(
+        db,
+        "create",
+        "project",
+        project.project_id,
+        project.project_id,
+        f"创建项目 {project.project_name}",
+        user_id=_admin.username,
+        client_ip=client_info["client_ip"],
+        user_agent=client_info["user_agent"],
+    )
     db.commit()
     db.refresh(project)
     safe_project_dir(project.project_id).mkdir(parents=True, exist_ok=True)
-    log_action(db, "create", "project", project.project_id, project.project_id, f"创建项目 {project.project_name}", user_id=_admin.username)
     return project_out(db, project)
 
 
@@ -200,7 +225,7 @@ def build_delete_export(db: Session, project_id: int) -> dict:
         raise HTTPException(status_code=404, detail="项目不存在") from exc
 
     DELETE_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    timestamp = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y%m%d%H%M%S")
     filename = f"deleted_project_{project_id}_{timestamp}_{uuid.uuid4().hex[:8]}.zip"
     target = DELETE_EXPORT_DIR / filename
     shutil.move(str(zip_path), target)
@@ -239,15 +264,29 @@ def get_project(project_id: int, db: Session = Depends(get_db)) -> ProjectOut:
 
 
 @router.put("/{project_id}", response_model=ProjectOut)
-def update_project(project_id: int, payload: ProjectUpdate, db: Session = Depends(get_db)) -> ProjectOut:
+def update_project(project_id: int, payload: ProjectUpdate, request: Request, db: Session = Depends(get_db)) -> ProjectOut:
     project = db.get(models.Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
     data = payload.model_dump(exclude_unset=True)
     if "project_name" in data and not data["project_name"]:
         raise HTTPException(status_code=400, detail="项目名称不能为空")
+    before = project_out(db, project).model_dump()
     for field, value in data.items():
         setattr(project, field, value)
+    client_info = _request_client_info(request)
+    log_action(
+        db,
+        "update",
+        "project",
+        project.project_id,
+        project.project_id,
+        f"更新项目 {project.project_name}",
+        before=before,
+        after=project_out(db, project).model_dump(),
+        client_ip=client_info["client_ip"],
+        user_agent=client_info["user_agent"],
+    )
     db.commit()
     db.refresh(project)
     return project_out(db, project)
@@ -256,6 +295,7 @@ def update_project(project_id: int, payload: ProjectUpdate, db: Session = Depend
 @router.delete("/{project_id}")
 def delete_project(
     project_id: int,
+    request: Request,
     permanent: bool = True,
     db: Session = Depends(get_db),
 ) -> dict:
@@ -265,34 +305,61 @@ def delete_project(
         raise HTTPException(status_code=404, detail="项目不存在")
 
     delete_export = build_delete_export(db, project_id)
+    client_info = _request_client_info(request)
 
     if permanent:
-        project_storage = safe_project_dir(project.project_id)
+        # 先执行 DB 删除并 commit，成功后再删除物理文件；DB 失败则保留文件
+        project_id_value = project.project_id
+        project_name_value = project.project_name
+        db.delete(project)
+        log_action(
+            db,
+            "delete_permanent",
+            "project",
+            project_id_value,
+            project_id_value,
+            f"永久删除项目 {project_name_value}",
+            user_id=None,
+            client_ip=client_info["client_ip"],
+            user_agent=client_info["user_agent"],
+        )
+        db.commit()
+        project_storage = safe_project_dir(project_id_value)
         if project_storage.exists():
             shutil.rmtree(project_storage)
-        delete_dewesoft_project_files(project.project_id)
-        db.delete(project)
-        log_action(db, "delete_permanent", "project", project.project_id, project.project_id, f"永久删除项目 {project.project_name}")
-        db.commit()
+        delete_dewesoft_project_files(project_id_value)
         return {"ok": True, "action": "permanently_deleted", **delete_export}
 
     # 软删除：标记项目及其关联数据
-    project.deleted_at = datetime.utcnow()
+    now_value = datetime.now(timezone.utc).replace(tzinfo=None)
+    project.deleted_at = now_value
     for point in project.points:
-        point.deleted_at = datetime.utcnow()
+        point.deleted_at = now_value
         for media in point.media_files:
-            media.deleted_at = datetime.utcnow()
+            media.deleted_at = now_value
         for crack in point.crack_records:
-            crack.deleted_at = datetime.utcnow()
+            crack.deleted_at = now_value
     for run in project.test_runs:
-        run.deleted_at = datetime.utcnow()
+        run.deleted_at = now_value
         for measurement in run.measurements:
-            measurement.deleted_at = datetime.utcnow()
+            measurement.deleted_at = now_value
     for media in project.media_files:
-        media.deleted_at = datetime.utcnow()
+        media.deleted_at = now_value
     for crack in project.crack_records:
-        crack.deleted_at = datetime.utcnow()
-    log_action(db, "delete_soft", "project", project.project_id, project.project_id, f"软删除项目 {project.project_name}")
+        crack.deleted_at = now_value
+    # 注：DewesoftImport 模型未定义 deleted_at 字段（非软删除 Mixin），
+    # 软删除时无法标记，后续恢复/查询时需按项目维度过滤（本次范围外）。
+    log_action(
+        db,
+        "delete_soft",
+        "project",
+        project.project_id,
+        project.project_id,
+        f"软删除项目 {project.project_name}",
+        user_id=None,
+        client_ip=client_info["client_ip"],
+        user_agent=client_info["user_agent"],
+    )
     db.commit()
     return {"ok": True, "action": "soft_deleted", "message": "项目已移至回收站，可联系管理员恢复", **delete_export}
 
@@ -300,7 +367,7 @@ def delete_project(
 @router.get("/{project_id}/points")
 def list_project_points(project_id: int, db: Session = Depends(get_db)) -> list[dict]:
     project = db.get(models.Project, project_id)
-    if not project:
+    if not project or project.deleted_at is not None:
         raise HTTPException(status_code=404, detail="项目不存在")
     points = db.execute(
         select(models.TestPoint)
@@ -449,6 +516,9 @@ def create_test_run(project_id: int, payload: TestRunCreate, db: Session = Depen
 
 @router.get("/{project_id}/test-runs", response_model=list[TestRunOut])
 def list_test_runs(project_id: int, db: Session = Depends(get_db)) -> list[TestRunOut]:
+    project = db.get(models.Project, project_id)
+    if not project or project.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="项目不存在")
     runs = db.execute(
         select(models.TestRun).where(models.TestRun.project_db_id == project_id).order_by(models.TestRun.cycle_count, models.TestRun.id)
     ).scalars()
@@ -458,7 +528,7 @@ def list_test_runs(project_id: int, db: Session = Depends(get_db)) -> list[TestR
 @router.get("/{project_id}/export.json")
 def export_project_json(project_id: int, db: Session = Depends(get_db)) -> Response:
     project = db.get(models.Project, project_id)
-    if not project:
+    if not project or project.deleted_at is not None:
         raise HTTPException(status_code=404, detail="项目不存在")
     data = {
         "project": project_out(db, project).model_dump(mode="json"),
@@ -475,7 +545,7 @@ def export_project_json(project_id: int, db: Session = Depends(get_db)) -> Respo
 @router.get("/{project_id}/export.csv")
 def export_project_csv(project_id: int, db: Session = Depends(get_db)) -> Response:
     project = db.get(models.Project, project_id)
-    if not project:
+    if not project or project.deleted_at is not None:
         raise HTTPException(status_code=404, detail="项目不存在")
     output = io.StringIO()
     writer = csv.writer(output)
@@ -526,6 +596,9 @@ def export_project_csv(project_id: int, db: Session = Depends(get_db)) -> Respon
 
 @router.get("/{project_id}/export.zip")
 def export_project_zip(project_id: int, db: Session = Depends(get_db)) -> FileResponse:
+    project = db.get(models.Project, project_id)
+    if not project or project.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="项目不存在")
     try:
         zip_path, zip_name = build_project_export_zip(db, project_id)
     except ValueError as exc:

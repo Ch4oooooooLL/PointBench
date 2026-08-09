@@ -41,12 +41,31 @@ def _get_anomaly_rules(project: models.Project | None) -> dict:
     return dict(DEFAULT_ANOMALY_RULES)
 
 
-def _get_stress_conversion(project: models.Project | None) -> float:
+def _resolve_elastic_modulus(record: models.MeasurementRecord, elastic_modulus_mpa: float | None) -> float:
+    """解析本次计算使用的弹性模量（MPa）。
+
+    优先级：显式传入的参数 > 记录关联项目配置 > 默认值。
+    批量调用场景（如 XLSX confirm、Dewesoft 导入）应在调用处缓存并显式传入项目弹性模量，
+    避免 N+1 查询；单条调用可依赖此处的懒加载回退。
+    """
+    if elastic_modulus_mpa is not None:
+        return elastic_modulus_mpa
+    try:
+        run = getattr(record, "run", None)
+        project = getattr(run, "project", None)
+        if project is None:
+            point = getattr(record, "point", None)
+            project = getattr(point, "project", None)
+        if project is not None and project.elastic_modulus_mpa is not None:
+            return project.elastic_modulus_mpa
+    except Exception:
+        pass
+    return DEFAULT_ELASTIC_MODULUS_MPA
+
+
+def _get_stress_conversion(record: models.MeasurementRecord, elastic_modulus_mpa: float | None = None) -> float:
     """根据项目配置的弹性模量计算应变→应力换算系数（με → MPa）。"""
-    modulus = DEFAULT_ELASTIC_MODULUS_MPA
-    if project and project.elastic_modulus_mpa is not None:
-        modulus = project.elastic_modulus_mpa
-    return modulus * 1e-6
+    return _resolve_elastic_modulus(record, elastic_modulus_mpa) * 1e-6
 
 
 def _format_percent(value: float) -> str:
@@ -169,8 +188,7 @@ def compute_measurement_fields(record: models.MeasurementRecord, elastic_modulus
         stress_amp = safe_eval(formula, variables)
     except Exception:
         # 如果解析失败，则回退到原本的弹性模量计算方法
-        modulus = elastic_modulus_mpa if elastic_modulus_mpa is not None else DEFAULT_ELASTIC_MODULUS_MPA
-        strain_to_stress = modulus * 1e-6
+        strain_to_stress = _get_stress_conversion(record, elastic_modulus_mpa)
         stress_amp = record.amplitude_strain_ue * strain_to_stress
 
     record.stress_amplitude_mpa = stress_amp
@@ -181,8 +199,7 @@ def compute_measurement_fields(record: models.MeasurementRecord, elastic_modulus
     if record.amplitude_strain_ue and record.amplitude_strain_ue != 0:
         equiv_strain_to_stress = record.stress_amplitude_mpa / record.amplitude_strain_ue
     else:
-        modulus = elastic_modulus_mpa if elastic_modulus_mpa is not None else DEFAULT_ELASTIC_MODULUS_MPA
-        equiv_strain_to_stress = modulus * 1e-6
+        equiv_strain_to_stress = _get_stress_conversion(record, elastic_modulus_mpa)
 
     record.stress_max_mpa = record.max_strain_ue * equiv_strain_to_stress
     record.stress_min_mpa = record.min_strain_ue * equiv_strain_to_stress

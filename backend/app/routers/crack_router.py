@@ -19,10 +19,39 @@ router = APIRouter(prefix="/api", tags=["crack-records"])
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
+# 允许的图片扩展名白名单（裂纹记录上传的是图片）
+ALLOWED_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+# 单个上传文件大小上限：20MB
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+
 
 def _safe_filename(filename: str) -> str:
     name = Path(filename).name.strip() or "crack-image"
-    return re.sub(r"[^A-Za-z0-9._-]+", "_", name)
+    name = re.sub(r"[^A-Za-z0-9._-]+", "_", name)
+    # 扩展名白名单校验：仅允许图片格式
+    suffix = Path(name).suffix.lower()
+    if suffix not in ALLOWED_IMAGE_SUFFIXES:
+        raise HTTPException(status_code=400, detail="只支持 .png/.jpg/.jpeg/.gif/.webp 格式的图片")
+    return name
+
+
+def _validate_image_upload(file: UploadFile, content: bytes) -> None:
+    """上传图片安全校验：大小限制 + magic bytes 文件类型校验。
+
+    只信任内容实际字节，不信任客户端声明的 content_type。
+    """
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=400, detail="图片大小不能超过 20MB")
+    magic = content[:16]
+    is_valid = (
+        magic.startswith(b"\x89PNG\r\n\x1a\n")
+        or magic.startswith(b"\xff\xd8\xff")
+        or magic.startswith(b"GIF87a")
+        or magic.startswith(b"GIF89a")
+        or (magic.startswith(b"RIFF") and magic[8:12] == b"WEBP")
+    )
+    if not is_valid:
+        raise HTTPException(status_code=400, detail="文件内容不是有效的图片（PNG/JPEG/GIF/WEBP）")
 
 
 def _relative_to_backend(path: Path) -> str:
@@ -107,13 +136,16 @@ async def create_project_crack_record(
     if file.content_type and not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="只支持上传图片文件")
 
+    content = await file.read()
+    # 大小限制 + magic bytes 校验（基于实际字节，不信任客户端声明的 content_type）
+    _validate_image_upload(file, content)
+
     safe_name = _safe_filename(file.filename)
     target_dir = safe_project_dir(project.project_id) / "cracks" / str(point.id)
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / f"{uuid.uuid4().hex[:10]}_{safe_name}"
     with target.open("wb") as output:
-        while chunk := await file.read(1024 * 1024):
-            output.write(chunk)
+        output.write(content)
 
     record = models.CrackRecord(
         project_db_id=project_id,
@@ -165,14 +197,16 @@ async def update_crack_record(
 
     old_stored_path = resolve_stored_path(record.stored_path)
     if file and file.filename:
+        content = await file.read()
+        # 大小限制 + magic bytes 校验（基于实际字节，不信任客户端声明的 content_type）
+        _validate_image_upload(file, content)
         safe_name = _safe_filename(file.filename)
         project = db.get(models.Project, record.project_db_id)
         target_dir = safe_project_dir(project.project_id) / "cracks" / str(point.id)
         target_dir.mkdir(parents=True, exist_ok=True)
         target = target_dir / f"{uuid.uuid4().hex[:10]}_{safe_name}"
         with target.open("wb") as output:
-            while chunk := await file.read(1024 * 1024):
-                output.write(chunk)
+            output.write(content)
         record.stored_path = _relative_to_backend(target)
         record.filename = safe_name
         record.content_type = file.content_type
@@ -194,7 +228,8 @@ def get_crack_record_image(record_id: int, db: Session = Depends(get_db)) -> Fil
     record = db.get(models.CrackRecord, record_id)
     if not record:
         raise HTTPException(status_code=404, detail="裂纹记录不存在")
-    path = BACKEND_ROOT / record.stored_path
+    # 与 media_router 保持一致：先做根目录包含校验，防止 stored_path 越界读取
+    path = resolve_stored_path(record.stored_path)
     if not path.exists():
         raise HTTPException(status_code=404, detail="裂纹图片不存在")
     return FileResponse(path, filename=record.filename, media_type=record.content_type or "application/octet-stream")

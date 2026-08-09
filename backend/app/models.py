@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -7,7 +7,8 @@ from app.database import Base
 
 
 def now() -> datetime:
-    return datetime.utcnow()
+    """返回当前 UTC 时间的 naive 表示（SQLite 统一存 naive UTC，兼容原 utcnow 语义）。"""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class SoftDeleteMixin:

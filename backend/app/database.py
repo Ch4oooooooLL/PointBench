@@ -3,7 +3,7 @@ import os
 from collections.abc import Generator
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 
@@ -34,6 +34,23 @@ if IS_SQLITE:
 
 engine = create_engine(DATABASE_URL, **engine_kwargs)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+
+
+# SQLite 连接级安全与并发配置：仅对 SQLite 生效
+#   PRAGMA foreign_keys=ON       —— 启用外键约束，保证级联删除等行为
+#   PRAGMA journal_mode=WAL      —— 启用 WAL 日志模式，提升读写并发
+#   PRAGMA busy_timeout=5000     —— 锁等待超时 5 秒，避免并发写入直接报错
+if IS_SQLITE:
+
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragma(dbapi_connection, connection_record) -> None:
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA busy_timeout=5000")
+        finally:
+            cursor.close()
 
 
 def init_storage() -> None:

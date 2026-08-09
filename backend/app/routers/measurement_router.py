@@ -1,4 +1,6 @@
 import json
+import math
+import re
 import uuid
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
@@ -54,14 +56,22 @@ def _validate_strain_consistency(max_strain: float | None, min_strain: float | N
             raise HTTPException(status_code=400, detail="最大应变不能小于最小应变")
 
 
-def apply_measurement_payload(record: models.MeasurementRecord, payload: MeasurementCreate | MeasurementUpdate) -> None:
+def apply_measurement_payload(
+    record: models.MeasurementRecord,
+    payload: MeasurementCreate | MeasurementUpdate,
+    elastic_modulus_mpa: float | None = None,
+) -> None:
     data = payload.model_dump(exclude_unset=True)
     for field, value in data.items():
         setattr(record, field, value)
     # 校验数值一致性
     _validate_strain_consistency(record.max_strain_ue, record.min_strain_ue)
-    compute_measurement_fields(record)
-    if data.get("is_abnormal") is True:
+    compute_measurement_fields(record, elastic_modulus_mpa=elastic_modulus_mpa)
+    # 显式传 is_abnormal=false 时清空异常原因，避免残留历史异常说明
+    if data.get("is_abnormal") is False:
+        record.is_abnormal = False
+        record.abnormal_reason = None
+    elif data.get("is_abnormal") is True:
         record.is_abnormal = True
         record.abnormal_reason = data.get("abnormal_reason") or "人工标记异常"
 
@@ -77,9 +87,13 @@ def _cell_number(value: Any, row_number: int, field: str) -> float | None:
     if text == "":
         return None
     try:
-        return float(text)
+        parsed = float(text)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"第 {row_number} 行 {field} 不是数字: {text}") from exc
+    # inf/nan 属于非有限数值，按无效值处理
+    if not math.isfinite(parsed):
+        return None
+    return parsed
 
 
 def _parse_xlsx_rows(file_bytes: bytes) -> list[dict[str, Any]]:
@@ -140,6 +154,7 @@ def _create_or_update_measurement(
     max_strain_ue: float | None,
     min_strain_ue: float | None,
     remark: str | None,
+    elastic_modulus_mpa: float | None = None,
 ) -> models.MeasurementRecord:
     record = db.scalar(
         select(models.MeasurementRecord).where(
@@ -153,7 +168,7 @@ def _create_or_update_measurement(
     record.min_strain_ue = min_strain_ue
     record.remark = remark
     _validate_strain_consistency(record.max_strain_ue, record.min_strain_ue)
-    compute_measurement_fields(record)
+    compute_measurement_fields(record, elastic_modulus_mpa=elastic_modulus_mpa)
     db.add(record)
     return record
 
@@ -183,6 +198,8 @@ def _upsert_point_measurement_row(
     measurement_id: int | None = None,
 ) -> models.MeasurementRecord:
     data = payload.model_dump(exclude_unset=True)
+    # 缓存项目弹性模量，保证新计算的应力使用项目配置值（单条请求仅一次懒加载）
+    modulus = point.project.elastic_modulus_mpa if point.project and point.project.elastic_modulus_mpa is not None else None
     if measurement_id is None:
         if data.get("cycle_count") is None:
             raise HTTPException(status_code=400, detail="循环次数不能为空")
@@ -207,7 +224,7 @@ def _upsert_point_measurement_row(
         )
         if not record:
             record = models.MeasurementRecord(run_id=run.id, point_db_id=point.id)
-        apply_measurement_payload(record, _measurement_payload_from_row(payload))
+        apply_measurement_payload(record, _measurement_payload_from_row(payload), elastic_modulus_mpa=modulus)
         db.add(record)
         db.flush()
         return record
@@ -229,6 +246,8 @@ def _upsert_point_measurement_row(
             if not target_run and "run_name" not in data:
                 target_run = _find_run_by_cycle(db, point.project_db_id, next_cycle_count)
             if not target_run:
+                # 预检 cycle_count 唯一性，避免与其他轮次冲突触发 IntegrityError → 500
+                _ensure_cycle_unique(db, point.project_db_id, next_cycle_count, exclude_run_id=record.run_id)
                 target_run = models.TestRun(
                     project_db_id=point.project_db_id,
                     run_name=next_run_name,
@@ -247,7 +266,7 @@ def _upsert_point_measurement_row(
             if existing:
                 raise HTTPException(status_code=400, detail="目标循环次数下已存在该点位的测量记录，请先编辑或删除已有记录")
             record.run = target_run
-    apply_measurement_payload(record, _measurement_payload_from_row(payload))
+    apply_measurement_payload(record, _measurement_payload_from_row(payload), elastic_modulus_mpa=modulus)
     db.flush()
     return record
 
@@ -279,6 +298,21 @@ def _find_run_by_cycle(db: Session, project_id: int, cycle_count: int) -> models
     )
 
 
+def _ensure_cycle_unique(db: Session, project_id: int, cycle_count: int, exclude_run_id: int | None = None) -> None:
+    """预检同项目下 cycle_count 唯一性，冲突时返回 409 而非触发数据库 IntegrityError 500。
+
+    TestRun 唯一约束: (project_db_id, cycle_count) = uq_project_cycle。
+    """
+    query = select(models.TestRun.id).where(
+        models.TestRun.project_db_id == project_id,
+        models.TestRun.cycle_count == cycle_count,
+    )
+    if exclude_run_id is not None:
+        query = query.where(models.TestRun.id != exclude_run_id)
+    if db.scalar(query) is not None:
+        raise HTTPException(status_code=409, detail=f"循环次数 {cycle_count} 的测试轮次已存在，请使用不同的循环次数")
+
+
 @router.get("/api/test-runs/{run_id}", response_model=TestRunOut)
 def get_test_run(run_id: int, db: Session = Depends(get_db)) -> TestRunOut:
     run = db.get(models.TestRun, run_id)
@@ -299,6 +333,7 @@ def update_test_run(run_id: int, payload: TestRunUpdate, db: Session = Depends(g
             raise HTTPException(status_code=400, detail="测试轮次名称不能为空")
         run.run_name = run_name
     if "cycle_count" in data and data["cycle_count"] is not None:
+        _ensure_cycle_unique(db, run.project_db_id, data["cycle_count"], exclude_run_id=run.id)
         run.cycle_count = data["cycle_count"]
     if "test_time" in data:
         run.test_time = data["test_time"]
@@ -340,7 +375,8 @@ def create_measurements(run_id: int, payload: MeasurementBatchCreate, db: Sessio
             )
         )
         record = existing or models.MeasurementRecord(run_id=run_id, point_db_id=item.point_db_id)
-        apply_measurement_payload(record, item)
+        modulus = point.project.elastic_modulus_mpa if point.project and point.project.elastic_modulus_mpa is not None else None
+        apply_measurement_payload(record, item, elastic_modulus_mpa=modulus)
         db.add(record)
         created.append(record)
     db.flush()
@@ -407,6 +443,7 @@ async def import_project_measurements_xlsx(
             created_runs += 1
         for row in group_rows:
             point = point_by_id[row["point_id"]]
+            modulus = point.project.elastic_modulus_mpa if point.project and point.project.elastic_modulus_mpa is not None else None
             record = _create_or_update_measurement(
                 db,
                 run.id,
@@ -414,6 +451,7 @@ async def import_project_measurements_xlsx(
                 row["max_strain_ue"],
                 row["min_strain_ue"],
                 row["remark"],
+                elastic_modulus_mpa=modulus,
             )
             measurement_count += 1
             affected_point_ids.add(record.point_db_id)
@@ -648,12 +686,24 @@ def _parse_xlsx_rows_lenient(file_bytes: bytes) -> tuple[list[dict[str, Any]], l
                 try:
                     max_strain = float(max_strain_text)
                 except ValueError:
+                    max_strain = None
                     row_errors.append(XlsxImportRowError(row=row_number, field="max_strain_ue", message=f"最大应变不是有效数字: {max_strain_text}", severity="error"))
+                else:
+                    # inf/nan 属于非有限数值，按无效处理
+                    if not math.isfinite(max_strain):
+                        row_errors.append(XlsxImportRowError(row=row_number, field="max_strain_ue", message=f"最大应变不是有限数值: {max_strain_text}", severity="error"))
+                        max_strain = None
             if has_min:
                 try:
                     min_strain = float(min_strain_text)
                 except ValueError:
+                    min_strain = None
                     row_errors.append(XlsxImportRowError(row=row_number, field="min_strain_ue", message=f"最小应变不是有效数字: {min_strain_text}", severity="error"))
+                else:
+                    # inf/nan 属于非有限数值，按无效处理
+                    if not math.isfinite(min_strain):
+                        row_errors.append(XlsxImportRowError(row=row_number, field="min_strain_ue", message=f"最小应变不是有限数值: {min_strain_text}", severity="error"))
+                        min_strain = None
 
             # 如果两个都成功解析，检查一致性
             if max_strain is not None and min_strain is not None:
@@ -1002,6 +1052,10 @@ def confirm_xlsx_import(
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
 
+    # 校验 preview_id 格式，防止路径穿越（服务端生成格式为 XLSX- + 12 位十六进制）
+    if not re.fullmatch(r"^[A-Za-z0-9_-]{1,64}$", payload.preview_id or ""):
+        raise HTTPException(status_code=400, detail="非法的预检标识")
+
     # 从临时文件读取 preview 阶段保存的数据
     temp_path = XLSX_TEMP_DIR / f"{payload.preview_id}.json"
     if not temp_path.exists():
@@ -1075,6 +1129,9 @@ def confirm_xlsx_import(
 
     # ── 按 cycle_count 分组的 run 缓存 ──
     run_cache: dict[int, models.TestRun] = {}
+
+    # 批量导入场景：缓存项目弹性模量，避免逐行重复查询
+    project_modulus = project.elastic_modulus_mpa if project.elastic_modulus_mpa is not None else None
 
     def _get_or_create_run(cycle_count: int) -> tuple[models.TestRun, bool]:
         """按 project_db_id + cycle_count 查找或创建 TestRun。
@@ -1179,7 +1236,7 @@ def confirm_xlsx_import(
                 remark=remark,
             )
             _validate_strain_consistency(record.max_strain_ue, record.min_strain_ue)
-            compute_measurement_fields(record)
+            compute_measurement_fields(record, elastic_modulus_mpa=project_modulus)
             db.add(record)
             created_measurements += 1
             affected_point_ids.add(point.id)
@@ -1194,7 +1251,7 @@ def confirm_xlsx_import(
                     remark=remark,
                 )
                 _validate_strain_consistency(record.max_strain_ue, record.min_strain_ue)
-                compute_measurement_fields(record)
+                compute_measurement_fields(record, elastic_modulus_mpa=project_modulus)
                 db.add(record)
                 created_measurements += 1
             else:
@@ -1210,7 +1267,7 @@ def confirm_xlsx_import(
                     changed = True
                 if changed:
                     _validate_strain_consistency(existing.max_strain_ue, existing.min_strain_ue)
-                    compute_measurement_fields(existing)
+                    compute_measurement_fields(existing, elastic_modulus_mpa=project_modulus)
                     filled_missing += 1
                     affected_point_ids.add(point.id)
                 else:
@@ -1226,7 +1283,7 @@ def confirm_xlsx_import(
                     remark=remark,
                 )
                 _validate_strain_consistency(record.max_strain_ue, record.min_strain_ue)
-                compute_measurement_fields(record)
+                compute_measurement_fields(record, elastic_modulus_mpa=project_modulus)
                 db.add(record)
                 created_measurements += 1
             else:
@@ -1237,7 +1294,7 @@ def confirm_xlsx_import(
                 if remark is not None:
                     existing.remark = remark
                 _validate_strain_consistency(existing.max_strain_ue, existing.min_strain_ue)
-                compute_measurement_fields(existing)
+                compute_measurement_fields(existing, elastic_modulus_mpa=project_modulus)
                 updated_measurements += 1
                 affected_point_ids.add(point.id)
 
@@ -1251,7 +1308,7 @@ def confirm_xlsx_import(
                 remark=remark,
             )
             _validate_strain_consistency(record.max_strain_ue, record.min_strain_ue)
-            compute_measurement_fields(record)
+            compute_measurement_fields(record, elastic_modulus_mpa=project_modulus)
             db.add(record)
             created_measurements += 1
             affected_point_ids.add(point.id)

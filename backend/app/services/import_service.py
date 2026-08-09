@@ -407,7 +407,6 @@ def _confirm_backup_import(db: Session, temporary_import_id: str, temp_dir: Path
     if backup.get("format") != "pointprocess_project_backup":
         raise HTTPException(status_code=400, detail="PointProcess backup format is invalid")
 
-    project_data = backup.get("project") or {}
     project_id = (project_data.get("project_id") or "").strip()
     project_name = (project_data.get("project_name") or "").strip()
     if not project_id or not project_name:
@@ -418,6 +417,25 @@ def _confirm_backup_import(db: Session, temporary_import_id: str, temp_dir: Path
 
     project_root = safe_project_dir(project_id)
     project_root.mkdir(parents=True, exist_ok=True)
+    try:
+        return _confirm_backup_import_inner(db, temporary_import_id, temp_dir, extract_dir, project_root, backup)
+    except Exception:
+        # 导入失败时清理本次已复制的物理文件，避免遗留孤儿数据
+        shutil.rmtree(project_root, ignore_errors=True)
+        raise
+
+
+def _confirm_backup_import_inner(
+    db: Session,
+    temporary_import_id: str,
+    temp_dir: Path,
+    extract_dir: Path,
+    project_root: Path,
+    backup: dict,
+) -> models.Project:
+    project_data = backup.get("project") or {}
+    project_id = (project_data.get("project_id") or "").strip()
+    project_name = (project_data.get("project_name") or "").strip()
     project = models.Project(
         project_id=project_id,
         project_name=project_name,
@@ -489,6 +507,8 @@ def _confirm_backup_import(db: Session, temporary_import_id: str, temp_dir: Path
     run_by_old_id: dict[int, models.TestRun] = {}
     run_by_cycle: dict[int, models.TestRun] = {}
     measurement_by_old_id: dict[int, models.MeasurementRecord] = {}
+    # 批量导入场景：缓存项目弹性模量，避免逐条查询
+    project_modulus = project.elastic_modulus_mpa if project.elastic_modulus_mpa is not None else None
     for run_data in backup.get("test_runs", []):
         run = models.TestRun(
             project_db_id=project.id,
@@ -515,7 +535,7 @@ def _confirm_backup_import(db: Session, temporary_import_id: str, temp_dir: Path
                 abnormal_reason=measurement_data.get("abnormal_reason"),
                 remark=measurement_data.get("remark"),
             )
-            compute_measurement_fields(record)
+            compute_measurement_fields(record, elastic_modulus_mpa=project_modulus)
             db.add(record)
             db.flush()
             if measurement_data.get("id") is not None:
@@ -614,8 +634,16 @@ def _confirm_backup_import(db: Session, temporary_import_id: str, temp_dir: Path
 def confirm_import(db: Session, temporary_import_id: str) -> models.Project:
     temp_dir = _preview_path(temporary_import_id)
     extract_dir = temp_dir / "extract"
-    if (extract_dir / BACKUP_FILENAME).exists():
-        return _confirm_backup_import(db, temporary_import_id, temp_dir, extract_dir)
+    try:
+        if (extract_dir / BACKUP_FILENAME).exists():
+            return _confirm_backup_import(db, temporary_import_id, temp_dir, extract_dir)
+        return _confirm_manifest_import(db, temporary_import_id, temp_dir, extract_dir)
+    finally:
+        # 导入流程结束后清理临时目录（解压内容、上传的 zip 均不再需要）
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def _confirm_manifest_import(db: Session, temporary_import_id: str, temp_dir: Path, extract_dir: Path) -> models.Project:
     manifest_path = extract_dir / "manifest.json"
     if not manifest_path.exists():
         raise HTTPException(status_code=404, detail="临时导入不存在或已失效，请重新预览")
@@ -631,87 +659,99 @@ def confirm_import(db: Session, temporary_import_id: str) -> models.Project:
     project_root = safe_project_dir(manifest.project.project_id)
     project_root.mkdir(parents=True, exist_ok=True)
 
-    zip_files = list(temp_dir.glob("*.zip"))
-    if zip_files:
-        imports_target = STORAGE_DIR / "imports" / f"{temporary_import_id}_{zip_files[0].name}"
-        shutil.copy2(zip_files[0], imports_target)
-    else:
-        imports_target = temp_dir
+    imports_target: Path | None = None
+    try:
+        zip_files = list(temp_dir.glob("*.zip"))
+        if zip_files:
+            # imports/ 目录作为导入记录的原始 zip 备份，供 ImportJob.zip_stored_path 引用留档
+            imports_target = STORAGE_DIR / "imports" / f"{temporary_import_id}_{zip_files[0].name}"
+            shutil.copy2(zip_files[0], imports_target)
+        else:
+            imports_target = temp_dir
 
-    project = models.Project(
-        project_id=manifest.project.project_id,
-        project_name=manifest.project.project_name,
-        test_object=manifest.project.test_object,
-        test_type=manifest.project.test_type,
-        department=manifest.project.department,
-        vehicle_or_product=manifest.project.vehicle_or_product,
-        test_stage=manifest.project.test_stage,
-        description=manifest.project.description,
-        source_export_id=manifest.export_info.export_id,
-        source_export_time=manifest.export_info.export_time,
-        raw_manifest_json=json.dumps(manifest_data, ensure_ascii=False),
-    )
-    db.add(project)
-    db.flush()
-
-    for point_in in manifest.points:
-        point = models.TestPoint(
-            project_db_id=project.id,
-            point_id=point_in.point_id,
-            point_name=point_in.point_name,
-            point_type=point_in.point_type,
-            component=point_in.component,
-            side=point_in.side,
-            position_description=point_in.position_description,
-            direction=point_in.direction,
-            bridge_type=point_in.bridge_type,
-            resistance_ohm=point_in.resistance_ohm,
-            install_status=point_in.install_status,
-            check_status=point_in.check_status,
-            remark=point_in.remark,
-            raw_json=point_in.model_dump_json(),
+        project = models.Project(
+            project_id=manifest.project.project_id,
+            project_name=manifest.project.project_name,
+            test_object=manifest.project.test_object,
+            test_type=manifest.project.test_type,
+            department=manifest.project.department,
+            vehicle_or_product=manifest.project.vehicle_or_product,
+            test_stage=manifest.project.test_stage,
+            description=manifest.project.description,
+            source_export_id=manifest.export_info.export_id,
+            source_export_time=manifest.export_info.export_time,
+            raw_manifest_json=json.dumps(manifest_data, ensure_ascii=False),
         )
-        db.add(point)
+        db.add(project)
         db.flush()
 
-        if point_in.channel:
-            db.add(models.SensorChannel(point_db_id=point.id, **point_in.channel.model_dump()))
-        if point_in.cae_mapping:
-            db.add(models.CaeMapping(point_db_id=point.id, **point_in.cae_mapping.model_dump()))
+        # 批量导入场景：缓存项目弹性模量，避免逐条查询
+        project_modulus = project.elastic_modulus_mpa if project.elastic_modulus_mpa is not None else None
 
-        for photo in point_in.photos:
-            stored_path = _copy_member(extract_dir, photo.path, project_root)
-            stored_file = PROJECT_ROOT / stored_path
-            sha256 = photo.sha256 or file_sha256(stored_file)
-            db.add(
-                models.MediaFile(
-                    project_db_id=project.id,
-                    point_db_id=point.id,
-                    photo_id=photo.photo_id,
-                    type=photo.type,
-                    path=photo.path,
-                    stored_path=stored_path,
-                    filename=photo.filename,
-                    taken_time=photo.taken_time,
-                    sha256=sha256,
-                    remark=photo.remark,
-                )
+        for point_in in manifest.points:
+            point = models.TestPoint(
+                project_db_id=project.id,
+                point_id=point_in.point_id,
+                point_name=point_in.point_name,
+                point_type=point_in.point_type,
+                component=point_in.component,
+                side=point_in.side,
+                position_description=point_in.position_description,
+                direction=point_in.direction,
+                bridge_type=point_in.bridge_type,
+                resistance_ohm=point_in.resistance_ohm,
+                install_status=point_in.install_status,
+                check_status=point_in.check_status,
+                remark=point_in.remark,
+                raw_json=point_in.model_dump_json(),
             )
+            db.add(point)
+            db.flush()
 
-    for folder in ["raw", "attachments"]:
-        source = extract_dir / folder
-        target = project_root / folder
-        if source.exists() and source.is_dir():
-            if target.exists():
-                shutil.rmtree(target)
-            shutil.copytree(source, target)
+            if point_in.channel:
+                db.add(models.SensorChannel(point_db_id=point.id, **point_in.channel.model_dump()))
+            if point_in.cae_mapping:
+                db.add(models.CaeMapping(point_db_id=point.id, **point_in.cae_mapping.model_dump()))
 
-    job = db.scalar(select(models.ImportJob).where(models.ImportJob.temp_dir == _relative_to_project(temp_dir)))
-    if job:
-        job.status = "imported"
-        job.message = f"已导入项目 {project.project_id}"
-        job.zip_stored_path = _relative_to_project(imports_target)
+            for photo in point_in.photos:
+                stored_path = _copy_member(extract_dir, photo.path, project_root)
+                stored_file = PROJECT_ROOT / stored_path
+                sha256 = photo.sha256 or file_sha256(stored_file)
+                db.add(
+                    models.MediaFile(
+                        project_db_id=project.id,
+                        point_db_id=point.id,
+                        photo_id=photo.photo_id,
+                        type=photo.type,
+                        path=photo.path,
+                        stored_path=stored_path,
+                        filename=photo.filename,
+                        taken_time=photo.taken_time,
+                        sha256=sha256,
+                        remark=photo.remark,
+                    )
+                )
 
-    db.commit()
-    db.refresh(project)
-    return project
+        for folder in ["raw", "attachments"]:
+            source = extract_dir / folder
+            target = project_root / folder
+            if source.exists() and source.is_dir():
+                if target.exists():
+                    shutil.rmtree(target)
+                shutil.copytree(source, target)
+
+        job = db.scalar(select(models.ImportJob).where(models.ImportJob.temp_dir == _relative_to_project(temp_dir)))
+        if job:
+            job.status = "imported"
+            job.message = f"已导入项目 {project.project_id}"
+            job.zip_stored_path = _relative_to_project(imports_target)
+
+        db.commit()
+        db.refresh(project)
+        return project
+    except Exception:
+        # 导入失败时清理本次已复制的物理文件（含 zip 备份），避免遗留孤儿文件
+        if imports_target is not None and imports_target.exists() and imports_target != temp_dir:
+            imports_target.unlink()
+        shutil.rmtree(project_root, ignore_errors=True)
+        raise

@@ -17,6 +17,8 @@ def log_action(
     before: Any = None,
     after: Any = None,
     user_id: str | None = None,
+    client_ip: str | None = None,
+    user_agent: str | None = None,
 ) -> models.AuditLog:
     """写入一条审计日志。
 
@@ -30,6 +32,8 @@ def log_action(
         before: 操作前状态（可序列化对象）
         after: 操作后状态（可序列化对象）
         user_id: 操作者标识（暂用 'system'，后续接入认证体系）
+        client_ip: 客户端 IP（可选）
+        user_agent: 客户端 User-Agent（可选）
     """
     log_entry = models.AuditLog(
         user_id=user_id or "system",
@@ -40,6 +44,8 @@ def log_action(
         summary=summary,
         before_snapshot=json.dumps(before, ensure_ascii=False, default=str) if before is not None else None,
         after_snapshot=json.dumps(after, ensure_ascii=False, default=str) if after is not None else None,
+        ip_address=client_ip,
+        user_agent=user_agent,
     )
     db.add(log_entry)
     return log_entry

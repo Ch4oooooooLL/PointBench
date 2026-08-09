@@ -3,7 +3,7 @@ import re
 import shutil
 import tempfile
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -188,7 +188,7 @@ def _write_workbook(project: models.Project, points: list[models.TestPoint], run
     summary.append(["点位数量", len(points)])
     summary.append(["测试轮次数量", len(runs)])
     summary.append(["裂缝记录数量", len(cracks)])
-    summary.append(["导出时间", datetime.utcnow().isoformat()])
+    summary.append(["导出时间", datetime.now(timezone.utc).replace(tzinfo=None).isoformat()])
 
     point_sheet = wb.create_sheet("点位清单")
     point_sheet.append(["点位编号", "点位名称", "类型", "部件", "方位", "位置描述", "方向", "桥路", "电阻", "安装状态", "检查状态", "备注"])
@@ -270,7 +270,7 @@ def build_project_export_zip(db: Session, project_id: int) -> tuple[Path, str]:
     cracks = sorted(project.crack_records, key=lambda item: (item.cycle_count, item.point.point_id, item.id))
     dewesoft_imports = sorted(project.dewesoft_imports, key=lambda item: item.id)
     point_code_by_id = {point.id: point.point_id for point in points}
-    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    timestamp = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y%m%d%H%M%S")
     export_id = f"WEB-{project.project_id}-{timestamp}-{uuid.uuid4().hex[:6]}"
     temp_dir = Path(tempfile.mkdtemp(prefix=f"pointprocess-export-{project.id}-", dir=STORAGE_DIR / "temp"))
     package_root = temp_dir / "package"
@@ -318,7 +318,7 @@ def build_project_export_zip(db: Session, project_id: int) -> tuple[Path, str]:
         "schema_version": "1.0.0",
         "export_info": {
             "export_id": export_id,
-            "export_time": datetime.utcnow().isoformat(),
+            "export_time": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
             "app_name": "PointProcess Web",
             "app_version": "1.0",
             "remark": "PointProcess project export. manifest.json preserves app-compatible point and photo data; pointprocess_backup.json preserves full migration data.",
@@ -354,7 +354,7 @@ def build_project_export_zip(db: Session, project_id: int) -> tuple[Path, str]:
         "format": "pointprocess_project_backup",
         "version": "1.0",
         "export_id": export_id,
-        "exported_at": datetime.utcnow().isoformat(),
+        "exported_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
         "project": {
             "id": project.id,
             "project_id": project.project_id,

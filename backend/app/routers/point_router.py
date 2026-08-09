@@ -19,10 +19,39 @@ router = APIRouter(prefix="/api/points", tags=["points"])
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
+# 允许的图片扩展名白名单
+ALLOWED_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+# 单个上传文件大小上限：20MB
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+
 
 def _safe_filename(filename: str) -> str:
     name = Path(filename).name.strip() or "image"
-    return re.sub(r"[^A-Za-z0-9._-]+", "_", name)
+    name = re.sub(r"[^A-Za-z0-9._-]+", "_", name)
+    # 扩展名白名单校验：仅允许图片格式
+    suffix = Path(name).suffix.lower()
+    if suffix not in ALLOWED_IMAGE_SUFFIXES:
+        raise HTTPException(status_code=400, detail="只支持 .png/.jpg/.jpeg/.gif/.webp 格式的图片")
+    return name
+
+
+def _validate_image_upload(file: UploadFile, content: bytes) -> None:
+    """上传图片安全校验：大小限制 + magic bytes 文件类型校验。
+
+    只信任内容实际字节，不信任客户端声明的 content_type。
+    """
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=400, detail="图片大小不能超过 20MB")
+    magic = content[:16]
+    is_valid = (
+        magic.startswith(b"\x89PNG\r\n\x1a\n")
+        or magic.startswith(b"\xff\xd8\xff")
+        or magic.startswith(b"GIF87a")
+        or magic.startswith(b"GIF89a")
+        or (magic.startswith(b"RIFF") and magic[8:12] == b"WEBP")
+    )
+    if not is_valid:
+        raise HTTPException(status_code=400, detail="文件内容不是有效的图片（PNG/JPEG/GIF/WEBP）")
 
 
 def _relative_to_backend(path: Path) -> str:
@@ -123,13 +152,16 @@ async def upload_point_media(
     if media_type not in {"overall", "local"}:
         raise HTTPException(status_code=400, detail="图片类型只能是 overall 或 local")
 
+    content = await file.read()
+    # 大小限制 + magic bytes 校验（基于实际字节，不信任客户端声明的 content_type）
+    _validate_image_upload(file, content)
+
     safe_name = _safe_filename(file.filename)
     target_dir = safe_project_dir(point.project.project_id) / "uploads" / str(point.id)
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / f"{uuid.uuid4().hex[:10]}_{safe_name}"
     with target.open("wb") as output:
-        while chunk := await file.read(1024 * 1024):
-            output.write(chunk)
+        output.write(content)
 
     media = models.MediaFile(
         project_db_id=point.project_db_id,
