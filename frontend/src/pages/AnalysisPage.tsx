@@ -39,12 +39,39 @@ export function AnalysisPage() {
   const { setSelectedProjectId } = useAppContext();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [abnormal, setAbnormal] = useState<Array<Record<string, string | number | null>>>([]);
+  const [loadError, setLoadError] = useState('');
+  const [loadRetryKey, setLoadRetryKey] = useState(0);
 
   useEffect(() => {
-    api.get<Summary>(`/api/projects/${projectId}/analysis/summary`).then(setSummary);
-    api.get<Array<Record<string, string | number | null>>>(`/api/projects/${projectId}/analysis/abnormal-points`).then(setAbnormal);
-  }, [projectId]);
+    let cancelled = false;
+    setLoadError('');
+    api.get<Summary>(`/api/projects/${projectId}/analysis/summary`)
+      .then((data) => {
+        if (!cancelled) setSummary(data);
+      })
+      .catch((err) => {
+        if (!cancelled) setLoadError((err as Error).message);
+      });
+    api.get<Array<Record<string, string | number | null>>>(`/api/projects/${projectId}/analysis/abnormal-points`)
+      .then((data) => {
+        if (!cancelled) setAbnormal(data);
+      })
+      .catch((err) => {
+        if (!cancelled) setLoadError((err as Error).message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, loadRetryKey]);
 
+  if (loadError) {
+    return (
+      <div className="empty panel">
+        <p>分析数据加载失败：{loadError}</p>
+        <button className="button primary" onClick={() => setLoadRetryKey((key) => key + 1)}>重试</button>
+      </div>
+    );
+  }
   if (!summary) return <div className="empty">加载中...</div>;
 
   return (

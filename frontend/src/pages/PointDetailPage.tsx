@@ -110,7 +110,10 @@ export function PointDetailPage() {
   const [editMode, setEditMode] = useState(searchParams.get('edit') === '1');
   const [previewUrl, setPreviewUrl] = useState('');
   const [message, setMessage] = useState('');
+  const [messageError, setMessageError] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [loadRetryKey, setLoadRetryKey] = useState(0);
 
   // 新增切换点位状态
   const [pointsList, setPointsList] = useState<Point[]>([]);
@@ -189,20 +192,36 @@ export function PointDetailPage() {
   }, [pointsList, labelMode, sortMode]);
 
   const load = () => {
+    let cancelled = false;
+    setLoadError('');
     api.get<Point>(`/api/points/${pointId}`).then((data) => {
+      if (cancelled) return;
       setPoint(data);
       setForm(toPointForm(data));
+    }).catch((err) => {
+      if (!cancelled) setLoadError((err as Error).message);
     });
     api.get<PointMeasurementRow[]>(`/api/points/${pointId}/measurement-rows`).then((data) => {
+      if (cancelled) return;
       const editableRows = toEditableRows(data);
       setRows(editableRows);
       setRowSnapshot(editableRows);
       setDeletedMeasurementIds([]);
+    }).catch((err) => {
+      if (!cancelled) setLoadError((err as Error).message);
     });
-    api.get<TrendItem[]>(`/api/points/${pointId}/trend`).then(setTrend);
+    api.get<TrendItem[]>(`/api/points/${pointId}/trend`).then((data) => {
+      if (cancelled) return;
+      setTrend(data);
+    }).catch((err) => {
+      if (!cancelled) setLoadError((err as Error).message);
+    });
+    return () => {
+      cancelled = true;
+    };
   };
 
-  useEffect(load, [pointId]);
+  useEffect(() => load(), [pointId, loadRetryKey]);
 
   useEffect(() => {
     const nextEditMode = searchParams.get('edit') === '1';
@@ -279,8 +298,10 @@ export function PointDetailPage() {
       await api.post(`/api/points/${pointId}/media`, formData);
       load();
       setMessage('图片已上传。');
+      setMessageError(false);
     } catch (err) {
       setMessage(`上传失败：${(err as Error).message}`);
+      setMessageError(true);
     } finally {
       setBusy(false);
     }
@@ -294,8 +315,10 @@ export function PointDetailPage() {
       await api.delete(`/api/points/${pointId}/media/${mediaId}`);
       load();
       setMessage('图片已删除。');
+      setMessageError(false);
     } catch (err) {
       setMessage(`删除失败：${(err as Error).message}`);
+      setMessageError(true);
     } finally {
       setBusy(false);
     }
@@ -306,6 +329,7 @@ export function PointDetailPage() {
     const invalidRow = rows.find((row) => integerOrNull(row.cycle_count) == null);
     if (invalidRow) {
       setMessage('保存失败：循环次数必须填写为整数。');
+      setMessageError(true);
       return;
     }
     setBusy(true);
@@ -330,13 +354,23 @@ export function PointDetailPage() {
       });
       load();
       setMessage('点位信息已保存。');
+      setMessageError(false);
     } catch (err) {
       setMessage(`保存失败：${(err as Error).message}`);
+      setMessageError(true);
     } finally {
       setBusy(false);
     }
   }
 
+  if (!point && loadError) {
+    return (
+      <div className="empty panel">
+        <p>点位数据加载失败：{loadError}</p>
+        <button className="button primary" onClick={() => setLoadRetryKey((key) => key + 1)}>重试</button>
+      </div>
+    );
+  }
   if (!point) return <div className="empty">加载中...</div>;
 
   const sortedTrend = [...trend].sort((left, right) => left.cycle_count - right.cycle_count || left.run_id - right.run_id);
@@ -442,7 +476,7 @@ export function PointDetailPage() {
         </div>
       </div>
 
-      {message && <div className={message.includes('失败') ? 'alert danger' : 'alert ok'}>{message}</div>}
+      {message && <div className={messageError ? 'alert danger' : 'alert ok'}>{message}</div>}
 
       <div className="point-detail-summary">
         <div><span>最新循环次数</span><strong>{latestTrend?.cycle_count ?? '-'}</strong></div>

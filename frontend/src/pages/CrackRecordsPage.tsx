@@ -15,7 +15,6 @@ export function CrackRecordsPage() {
   const [editingRecord, setEditingRecord] = useState<CrackRecord | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
@@ -49,7 +48,6 @@ export function CrackRecordsPage() {
     setEditingRecord(null);
     setPreviewRecord(null);
     setEditMode(false);
-    setMessage('');
   }, [selectedProjectId]);
 
   const groupedStats = useMemo(() => {
@@ -104,7 +102,6 @@ export function CrackRecordsPage() {
       {!selectedProject && <div className="empty panel">暂无可用项目，请先导入项目 zip。</div>}
       {selectedProject && !points.length && <div className="empty panel">当前项目暂无点位，无法记录裂纹。</div>}
       {error && <div className="alert danger">{error}</div>}
-      {message && <div className={message.includes('失败') ? 'alert danger' : 'alert ok'}>{message}</div>}
 
       {selectedProject && (
         <>

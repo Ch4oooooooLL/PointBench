@@ -90,15 +90,19 @@ export function ProjectDetailPage() {
   useEffect(() => { load(); }, [projectId]);
 
   const components = useMemo(() => Array.from(new Set(points.map((item) => item.component).filter(Boolean))) as string[], [points]);
-  const filtered = points.filter((point) => {
-    const text = `${point.point_id} ${point.point_name}`.toLowerCase();
-    return (
-      text.includes(query.toLowerCase()) &&
-      (!component || point.component === component) &&
-      (!status || point.install_status === status) &&
-      (!abnormal || String(Boolean(point.latest_measurement?.is_abnormal)) === abnormal)
-    );
-  });
+  const filtered = useMemo(
+    () =>
+      points.filter((point) => {
+        const text = `${point.point_id} ${point.point_name}`.toLowerCase();
+        return (
+          text.includes(query.toLowerCase()) &&
+          (!component || point.component === component) &&
+          (!status || point.install_status === status) &&
+          (!abnormal || String(Boolean(point.latest_measurement?.is_abnormal)) === abnormal)
+        );
+      }),
+    [points, query, component, status, abnormal],
+  );
 
   if (loading) {
     return (

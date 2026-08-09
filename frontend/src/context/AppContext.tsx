@@ -1,4 +1,4 @@
-import { ReactNode, createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { BackendBusyGuard } from '../components/BackendBusyGuard';
 import { Project } from '../types';
@@ -97,10 +97,12 @@ function loadAnomalySettings(): AnomalySettings {
   if (!raw) return DEFAULT_ANOMALY;
   try {
     const parsed = JSON.parse(raw);
+    const rawRange = parsed.rangeMpa ?? parsed.thresholdPercent ?? DEFAULT_ANOMALY.rangeMpa;
+    const rangeMpa = typeof rawRange === 'number' && Number.isFinite(rawRange) ? rawRange : DEFAULT_ANOMALY.rangeMpa;
     return {
       ...DEFAULT_ANOMALY,
       ...parsed,
-      rangeMpa: parsed.rangeMpa ?? parsed.thresholdPercent ?? DEFAULT_ANOMALY.rangeMpa,
+      rangeMpa,
     };
   } catch {
     return DEFAULT_ANOMALY;
@@ -132,7 +134,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [isLoadingProjects, setIsLoadingProjects] = useState(false);
   const [projectsError, setProjectsError] = useState('');
 
-  const refreshProjects = async () => {
+  const refreshProjects = useCallback(async () => {
     setIsLoadingProjects(true);
     setProjectsError('');
     try {
@@ -152,7 +154,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoadingProjects(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     refreshProjects().catch(() => undefined);

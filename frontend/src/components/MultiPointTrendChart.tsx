@@ -1,5 +1,5 @@
 import * as echarts from 'echarts';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { crackImageUrl, mediaUrl } from '../api/client';
 import { useAppContext } from '../context/AppContext';
@@ -288,13 +288,6 @@ function buildOption(
     if (!cracksByPoint[record.point_db_id]) cracksByPoint[record.point_db_id] = [];
     cracksByPoint[record.point_db_id].push(record);
   }
-  // 为每条折线预留前两张照片的 media ID 列表
-  const pointMediaIds: number[] = [];
-  for (const { point } of trends) {
-    const firstTwo = point.media_files?.slice(0, 2).map((m) => m.id) ?? [];
-    pointMediaIds.push(firstTwo.length);
-  }
-
   return {
     color: palette,
     tooltip: {
@@ -452,7 +445,7 @@ function ChartCanvas({
       chart.dispatchAction({ type: 'hideTip' });
     };
 
-    const handlePointerMove = (event: ChartClickEvent) => {
+    const processPointerMove = (event: ChartClickEvent) => {
       const x = event.offsetX ?? event.zrX;
       const y = event.offsetY ?? event.zrY;
       if (x == null || y == null || !Number.isFinite(x) || !Number.isFinite(y)) {
@@ -482,6 +475,20 @@ function ChartCanvas({
       }
 
       hideActiveTip();
+    };
+
+    // mousemove 用 rAF 合并到每帧最多处理一次，避免反复对全部裂纹点/折线做逐点距离计算导致卡顿
+    let pendingMoveFrame = 0;
+    let latestMoveEvent: ChartClickEvent | null = null;
+    const handlePointerMove = (event: ChartClickEvent) => {
+      latestMoveEvent = event;
+      if (pendingMoveFrame) return;
+      pendingMoveFrame = requestAnimationFrame(() => {
+        pendingMoveFrame = 0;
+        const current = latestMoveEvent;
+        latestMoveEvent = null;
+        if (current) processPointerMove(current);
+      });
     };
 
     chart.getZr().on('mousemove', handlePointerMove);
@@ -525,6 +532,7 @@ function ChartCanvas({
     const resize = () => chart.resize();
     window.addEventListener('resize', resize);
     return () => {
+      if (pendingMoveFrame) cancelAnimationFrame(pendingMoveFrame);
       chartDom.removeEventListener('wheel', handleWheel, { capture: true });
       window.removeEventListener('resize', resize);
       chart.getZr().off('mousemove', handlePointerMove);
@@ -670,9 +678,14 @@ export function MultiPointTrendChart({
     [availableTrends, legendLabelMode, legendSortMode],
   );
 
-  const handlePointClick = (pointId: number) => {
-    navigate(`/points/${pointId}`);
-  };
+  const handlePointClick = useCallback(
+    (pointId: number) => {
+      navigate(`/points/${pointId}`);
+    },
+    [navigate],
+  );
+
+  const handleExpand = useCallback(() => setExpanded(true), []);
 
   // 加载中状态
   if (loading) {
@@ -705,7 +718,7 @@ export function MultiPointTrendChart({
           role={expandable ? 'button' : undefined}
           tabIndex={expandable ? 0 : undefined}
           onKeyDown={(event) => {
-            if (expandable && (event.key === 'Enter' || event.key === ' ')) setExpanded(true);
+            if (expandable && (event.key === 'Enter' || event.key === ' ')) handleExpand();
           }}
           title={expandable ? '点击空白区域放大图表 · 点击曲线跳转点位详情' : '点击曲线跳转点位详情'}
         >
@@ -716,7 +729,7 @@ export function MultiPointTrendChart({
             crackRecords={crackRecords}
             onCrackSelect={onCrackSelect}
             onPointClick={handlePointClick}
-            onChartClick={expandable ? () => setExpanded(true) : undefined}
+            onChartClick={expandable ? handleExpand : undefined}
           />
         </div>
         <SideLegend

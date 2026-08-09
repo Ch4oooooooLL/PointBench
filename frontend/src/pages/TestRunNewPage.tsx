@@ -1,5 +1,5 @@
-import { DatabaseZap, Download, FileSpreadsheet, Save, Upload, AlertTriangle, CheckCircle, XCircle, Info, ChevronDown, ChevronRight, Search, Filter, Layers, ShieldAlert, CheckCircle2, Zap, ArrowRight, FileText, Check } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { DatabaseZap, Download, FileSpreadsheet, Save, Upload, AlertTriangle, CheckCircle, XCircle, ChevronDown, ChevronRight, Search, Layers, ShieldAlert, CheckCircle2, Zap, FileText, Check } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import ExcelJS from 'exceljs/dist/exceljs.min.js';
 import { api } from '../api/client';
@@ -29,8 +29,18 @@ export function TestRunNewPage() {
   const [rows, setRows] = useState<Record<number, RowState>>({});
   const [stressFormula, setStressFormula] = useState(DEFAULT_STRESS_FORMULA);
   const [importMessage, setImportMessage] = useState('');
+  const [importMessageError, setImportMessageError] = useState(false);
+  const [manualMessage, setManualMessage] = useState('');
+  const [manualMessageError, setManualMessageError] = useState(false);
+  const [manualBusy, setManualBusy] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
   const [templateRunCount, setTemplateRunCount] = useState('10');
+  const loadPointsRequestRef = useRef(0);
+
+  function showImportMessage(message: string, isError = false) {
+    setImportMessage(message);
+    setImportMessageError(isError);
+  }
 
   // ── XLSX 多步导入流程状态 ──
   type XlsxStep = 'upload' | 'preview' | 'confirming' | 'result';
@@ -61,14 +71,25 @@ export function TestRunNewPage() {
 
   async function loadPoints() {
     if (!projectId) return;
-    const data = await api.get<Point[]>(`/api/projects/${projectId}/points`);
-    setPoints(data);
-    setRows(Object.fromEntries(data.map((point) => [point.id, { max_strain_ue: '', min_strain_ue: '', is_abnormal: false, remark: '' }])));
+    const requestId = ++loadPointsRequestRef.current;
+    try {
+      const data = await api.get<Point[]>(`/api/projects/${projectId}/points`);
+      if (requestId !== loadPointsRequestRef.current) return;
+      setPoints(data);
+      setRows(Object.fromEntries(data.map((point) => [point.id, { max_strain_ue: '', min_strain_ue: '', is_abnormal: false, remark: '' }])));
+    } catch (err) {
+      if (requestId !== loadPointsRequestRef.current) return;
+      setManualMessage(`点位列表加载失败：${(err as Error).message}`);
+      setManualMessageError(true);
+    }
   }
 
   useEffect(() => {
     loadPoints();
     loadExistingRuns();
+    return () => {
+      loadPointsRequestRef.current += 1;
+    };
   }, [projectId]);
 
   useEffect(() => {
@@ -91,8 +112,6 @@ export function TestRunNewPage() {
     await loadPoints();
   }
 
-  const pointMap = useMemo(() => new Map(points.map((point) => [point.point_id, point])), [points]);
-
   const filledRows = useMemo(
     () =>
       points
@@ -109,22 +128,38 @@ export function TestRunNewPage() {
   }
 
   async function saveManual() {
-    const run = await api.post<TestRun>(`/api/projects/${projectId}/test-runs`, {
-      run_name: runName,
-      cycle_count: Number(cycleCount),
-      test_time: testTime || null,
-      remark,
-    });
-    await api.post(`/api/test-runs/${run.id}/measurements`, {
-      measurements: filledRows.map(({ point, row }) => ({
-        point_db_id: point.id,
-        max_strain_ue: row.max_strain_ue === '' ? null : Number(row.max_strain_ue),
-        min_strain_ue: row.min_strain_ue === '' ? null : Number(row.min_strain_ue),
-        is_abnormal: row.is_abnormal,
-        remark: row.remark,
-      })),
-    });
-    navigate(`/projects/${projectId}/analysis`);
+    if (!projectId) return;
+    const cycleCountValue = Number(cycleCount);
+    if (!cycleCount.trim() || Number.isNaN(cycleCountValue)) {
+      setManualMessage('保存失败：循环次数必须填写为数字。');
+      setManualMessageError(true);
+      return;
+    }
+    setManualBusy(true);
+    setManualMessage('');
+    try {
+      const run = await api.post<TestRun>(`/api/projects/${projectId}/test-runs`, {
+        run_name: runName,
+        cycle_count: cycleCountValue,
+        test_time: testTime || null,
+        remark,
+      });
+      await api.post(`/api/test-runs/${run.id}/measurements`, {
+        measurements: filledRows.map(({ point, row }) => ({
+          point_db_id: point.id,
+          max_strain_ue: row.max_strain_ue === '' ? null : Number(row.max_strain_ue),
+          min_strain_ue: row.min_strain_ue === '' ? null : Number(row.min_strain_ue),
+          is_abnormal: row.is_abnormal,
+          remark: row.remark,
+        })),
+      });
+      navigate(`/projects/${projectId}/analysis`);
+    } catch (err) {
+      setManualMessage(`保存失败：${(err as Error).message}`);
+      setManualMessageError(true);
+    } finally {
+      setManualBusy(false);
+    }
   }
 
   // ── 模板生成 ──
@@ -148,23 +183,23 @@ export function TestRunNewPage() {
     if (!raw) return;
     const num = Number(raw);
     if (!Number.isInteger(num) || num < 0) {
-      setImportMessage('请输入有效的非负整数');
+      showImportMessage('请输入有效的非负整数', true);
       return;
     }
     const unit = CYCLE_UNITS.find(u => u.value === templateCycleUnit);
     const multiplier = unit?.multiplier ?? 1;
     const realValue = num * multiplier;
     if (realValue > 10_000_000_000) {
-      setImportMessage('循环次数不能超过 100 亿');
+      showImportMessage('循环次数不能超过 100 亿', true);
       return;
     }
     if (templateCycleList.includes(realValue)) {
-      setImportMessage(`循环次数 ${realValue.toLocaleString()} 已存在`);
+      showImportMessage(`循环次数 ${realValue.toLocaleString()} 已存在`, true);
       return;
     }
     setTemplateCycleList([...templateCycleList, realValue].sort((a, b) => a - b));
     setTemplateCycleInput('');
-    setImportMessage('');
+    showImportMessage('');
   }
 
   function removeCycleCount(val: number) {
@@ -174,7 +209,7 @@ export function TestRunNewPage() {
   async function downloadNewCyclesTemplate() {
     const cycles = templateCycleList;
     if (cycles.length === 0) {
-      setImportMessage('请至少添加一个循环次数');
+      showImportMessage('请至少添加一个循环次数', true);
       return;
     }
     const workbook = new ExcelJS.Workbook();
@@ -221,12 +256,12 @@ export function TestRunNewPage() {
   async function downloadFillMissingTemplate() {
     const runId = Number(templateSelectedRunId);
     if (!runId) {
-      setImportMessage('请先选择一个已有测试轮次');
+      showImportMessage('请先选择一个已有测试轮次', true);
       return;
     }
     const run = existingRuns.find(r => r.id === runId);
     if (!run) {
-      setImportMessage('未找到所选轮次');
+      showImportMessage('未找到所选轮次', true);
       return;
     }
     // 获取该轮次已有的测量记录
@@ -234,14 +269,14 @@ export function TestRunNewPage() {
     try {
       existingMeasurements = await api.get<{ point_db_id: number }[]>(`/api/test-runs/${runId}/measurements`);
     } catch {
-      setImportMessage('获取已有测量记录失败');
+      showImportMessage('获取已有测量记录失败', true);
       return;
     }
     const existingPointIds = new Set(existingMeasurements.map(m => m.point_db_id));
     const missingPoints = points.filter(p => !existingPointIds.has(p.id));
 
     if (missingPoints.length === 0) {
-      setImportMessage('当前轮次所有点位均已有测量记录。如需修改，请使用更新/覆盖导入策略。');
+      showImportMessage('当前轮次所有点位均已有测量记录。如需修改，请使用更新/覆盖导入策略。');
       return;
     }
 
@@ -289,6 +324,7 @@ export function TestRunNewPage() {
     if (!file) return;
     setImportBusy(true);
     setImportMessage('');
+    setImportMessageError(false);
     setXlsxPreview(null);
     setXlsxResult(null);
     try {
@@ -305,7 +341,7 @@ export function TestRunNewPage() {
         setXlsxStrategy('append_only');
       }
     } catch (err) {
-      setImportMessage(`预览失败：${(err as Error).message}`);
+      showImportMessage(`预览失败：${(err as Error).message}`, true);
     } finally {
       setImportBusy(false);
     }
@@ -337,7 +373,7 @@ export function TestRunNewPage() {
       // 刷新数据
       await loadExistingRuns();
     } catch (err) {
-      setImportMessage(`导入失败：${(err as Error).message}`);
+      showImportMessage(`导入失败：${(err as Error).message}`, true);
       setXlsxStep('preview');
     }
   }
@@ -412,8 +448,9 @@ export function TestRunNewPage() {
               <h2>手动录入单次测试轮次</h2>
               <p>录入最大应变和最小应变后自动计算应变幅、应力幅。</p>
             </div>
-            <button className="button primary" disabled={!runName || !cycleCount} onClick={saveManual}><Save size={18} />保存</button>
+            <button className="button primary" disabled={!runName || !cycleCount || manualBusy} onClick={saveManual}><Save size={18} />保存</button>
           </div>
+          {manualMessage && <div className={manualMessageError ? 'alert danger' : 'alert ok'}>{manualMessage}</div>}
           <div className="form-row">
             <label>轮次名称<input value={runName} onChange={(e) => setRunName(e.target.value)} /></label>
             <label>循环次数<input type="number" value={cycleCount} onChange={(e) => setCycleCount(e.target.value)} /></label>
@@ -565,7 +602,7 @@ export function TestRunNewPage() {
           )}
 
           {importMessage && (
-            <div className={importMessage.includes('失败') ? 'alert danger' : 'alert ok'}>{importMessage}</div>
+            <div className={importMessageError ? 'alert danger' : 'alert ok'}>{importMessage}</div>
           )}
         </div>
       )}

@@ -210,7 +210,7 @@ export function ProjectOverviewPage() {
             <div><span>测量记录</span><strong>{summary.measurement_count}</strong></div>
             <div><span>异常点位</span><strong>{summary.abnormal_count}</strong></div>
             <div><span>最新循环次数</span><strong>{latestCycle ?? '-'}</strong></div>
-            <div><span>当前最大应力幅</span><strong>{topPoint?.stress_amplitude_mpa ? Number(topPoint.stress_amplitude_mpa).toFixed(1) : '-'}</strong></div>
+            <div><span>当前最大应力幅</span><strong>{formatNumber(topPoint?.stress_amplitude_mpa) ?? '-'}</strong></div>
           </div>
 
           <div className="overview-actions">
@@ -240,7 +240,7 @@ export function ProjectOverviewPage() {
             <div className="section-head">
               <div>
                 <h2>全点位应力幅趋势</h2>
-                <p>Ctrl+滚轮缩放 · Shift+滚轮平移 · 鼠标悬停查看点位照片与裂纹 · 点击曲线跳转点位详情 · 点击空白放大图表 · 红圈=裂纹记录</p>
+                <p>Ctrl+滚轮缩放 · Shift+滚轮平移 · 鼠标悬停查看点位照片与裂纹 · 点击曲线跳转点位详情 · 点击空白放大图表 · 红圈=裂纹记录 · 仅异常=仅显示异常点位</p>
               </div>
               <div className="toggle-switch-group">
                 <div

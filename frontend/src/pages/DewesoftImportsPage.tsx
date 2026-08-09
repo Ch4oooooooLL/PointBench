@@ -1,5 +1,5 @@
 import { RefreshCw, Trash2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { DewesoftImport } from '../types';
@@ -10,21 +10,32 @@ export function DewesoftImportsPage() {
   const [activeId, setActiveId] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const loadRequestRef = useRef(0);
 
   const active = imports.find((item) => item.id === activeId) ?? imports[0] ?? null;
 
-  function load() {
+  const load = useCallback(() => {
     if (!projectId) return;
+    const requestId = ++loadRequestRef.current;
     setError('');
     api.get<DewesoftImport[]>(`/api/dewesoft/projects/${projectId}/imports`)
       .then((data) => {
+        if (requestId !== loadRequestRef.current) return;
         setImports(data);
         setActiveId((current) => current ?? data[0]?.id ?? null);
       })
-      .catch((err) => setError(err.message));
-  }
+      .catch((err) => {
+        if (requestId !== loadRequestRef.current) return;
+        setError(err.message);
+      });
+  }, [projectId]);
 
-  useEffect(load, [projectId]);
+  useEffect(() => {
+    load();
+    return () => {
+      loadRequestRef.current += 1;
+    };
+  }, [load]);
 
   async function deleteImport(item: DewesoftImport) {
     if (!window.confirm(`确认删除 Dewesoft 导入记录 ${item.run_name}？`)) return;

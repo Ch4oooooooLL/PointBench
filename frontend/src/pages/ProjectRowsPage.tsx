@@ -1,5 +1,5 @@
 import { BarChart3, ClipboardPlus, ImageOff, Pencil, Plus, Save, Search, Trash2, Upload, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, mediaUrl } from '../api/client';
 import { ProjectSelector } from '../components/ProjectSelector';
@@ -166,8 +166,10 @@ export function ProjectRowsPage() {
   const [installGroup, setInstallGroup] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [messageError, setMessageError] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
+  const loadRowsRequestRef = useRef(0);
 
   useEffect(() => {
     setProjectForm(toProjectForm(selectedProject));
@@ -175,6 +177,9 @@ export function ProjectRowsPage() {
 
   useEffect(() => {
     loadRows();
+    return () => {
+      loadRowsRequestRef.current += 1;
+    };
   }, [selectedProjectId]);
 
   async function loadRows() {
@@ -185,6 +190,7 @@ export function ProjectRowsPage() {
       setLoading(false);
       return;
     }
+    const requestId = ++loadRowsRequestRef.current;
     setRows([]);
     setError('');
     setLoading(true);
@@ -199,13 +205,15 @@ export function ProjectRowsPage() {
           trend: await api.get<TrendItem[]>(`/api/points/${point.id}/trend`),
         })),
       );
+      if (requestId !== loadRowsRequestRef.current) return;
       setRows(data);
       setTestRuns(runs);
       setSelectedRowId((current) => (current && data.some((row) => row.point.id === current) ? current : data[0]?.point.id ?? null));
     } catch (err) {
+      if (requestId !== loadRowsRequestRef.current) return;
       setError((err as Error).message);
     } finally {
-      setLoading(false);
+      if (requestId === loadRowsRequestRef.current) setLoading(false);
     }
   }
 
@@ -217,8 +225,10 @@ export function ProjectRowsPage() {
       await api.put<Project>(`/api/projects/${selectedProject.id}`, projectForm);
       await refreshProjects();
       setMessage('项目基础信息已保存。');
+      setMessageError(false);
     } catch (err) {
       setMessage(`保存失败：${(err as Error).message}`);
+      setMessageError(true);
     } finally {
       setBusy(false);
     }
@@ -236,6 +246,7 @@ export function ProjectRowsPage() {
       await loadRows();
     } catch (err) {
       setMessage(`新增点位失败：${(err as Error).message}`);
+      setMessageError(true);
     } finally {
       setBusy(false);
     }
@@ -254,6 +265,18 @@ export function ProjectRowsPage() {
   const filteredRows = useMemo(
     () => rows.filter((row) => matchesLedgerFilters(row, states.get(row.point.id), query, quickFilter, componentGroup, installGroup)),
     [rows, states, query, quickFilter, componentGroup, installGroup],
+  );
+  const quickFilterCounts = useMemo(
+    () => new Map(quickFilters.map((filter) => [filter.key, filterCount(rows, states, filter.key)])),
+    [rows, states],
+  );
+  const componentCounts = useMemo(
+    () => new Map(components.map((component) => [component, rows.filter((row) => row.point.component === component).length])),
+    [rows, components],
+  );
+  const installStatusCounts = useMemo(
+    () => new Map(installStatuses.map((status) => [status, rows.filter((row) => row.point.install_status === status).length])),
+    [rows, installStatuses],
   );
   const selectedRow = filteredRows.find((row) => row.point.id === selectedRowId) ?? rows.find((row) => row.point.id === selectedRowId) ?? filteredRows[0] ?? rows[0] ?? null;
   const latestAcquiredAt = latestRun?.test_time || latestRun?.created_at || (latestValidCycle == null ? null : selectedProject?.updated_at);
@@ -280,7 +303,7 @@ export function ProjectRowsPage() {
 
       {!selectedProject && <div className="empty panel">暂无可用项目，请先导入项目 zip。</div>}
       {error && <div className="alert danger">{error}</div>}
-      {message && <div className={message.includes('失败') ? 'alert danger' : 'alert ok'}>{message}</div>}
+      {message && <div className={messageError ? 'alert danger' : 'alert ok'}>{message}</div>}
 
       {loading && selectedProject && (
         <div className="chart chart-loading" style={{ height: 360 }}>
@@ -335,7 +358,7 @@ export function ProjectRowsPage() {
                   {quickFilters.map((filter) => (
                     <button key={filter.key} className={quickFilter === filter.key ? 'active' : ''} onClick={() => setQuickFilter(filter.key)}>
                       {filter.label}
-                      <span>{filterCount(rows, states, filter.key)}</span>
+                      <span>{quickFilterCounts.get(filter.key) ?? 0}</span>
                     </button>
                   ))}
                 </div>
@@ -346,7 +369,7 @@ export function ProjectRowsPage() {
                 {components.map((component) => (
                   <button key={component} className={componentGroup === component ? 'active' : ''} onClick={() => setComponentGroup(component)}>
                     {component}
-                    <span>{rows.filter((row) => row.point.component === component).length}</span>
+                    <span>{componentCounts.get(component) ?? 0}</span>
                   </button>
                 ))}
               </div>
@@ -356,7 +379,7 @@ export function ProjectRowsPage() {
                 {installStatuses.map((status) => (
                   <button key={status} className={installGroup === status ? 'active' : ''} onClick={() => setInstallGroup(status)}>
                     {status}
-                    <span>{rows.filter((row) => row.point.install_status === status).length}</span>
+                    <span>{installStatusCounts.get(status) ?? 0}</span>
                   </button>
                 ))}
               </div>
@@ -372,7 +395,7 @@ export function ProjectRowsPage() {
               </div>
               <div className="point-ledger-rows">
                 {filteredRows.map((row) => {
-                  const state = states.get(row.point.id) as PointLedgerState;
+                  const state = states.get(row.point.id) ?? pointLedgerState(row, riskSettings, latestProjectCycle);
                   return (
                     <PointRiskRow
                       key={row.point.id}
@@ -608,6 +631,7 @@ export function PointRiskModal({
   const [deletedMeasurementIds, setDeletedMeasurementIds] = useState<number[]>([]);
   const [previewUrl, setPreviewUrl] = useState('');
   const [message, setMessage] = useState('');
+  const [messageError, setMessageError] = useState(false);
   const [busy, setBusy] = useState(false);
   const [activeTab, setActiveTab] = useState<PointEditTab>('main');
   const [pasteMediaType, setPasteMediaType] = useState<MediaType>('overall');
@@ -664,11 +688,17 @@ export function PointRiskModal({
   }
 
   async function loadMeasurementRows(pointId: number) {
-    const data = await api.get<PointMeasurementRow[]>(`/api/points/${pointId}/measurement-rows`);
-    const editableRows = toEditableRows(data);
-    setMeasurements(editableRows);
-    setMeasurementSnapshot(editableRows);
-    setDeletedMeasurementIds([]);
+    setMessage('');
+    try {
+      const data = await api.get<PointMeasurementRow[]>(`/api/points/${pointId}/measurement-rows`);
+      const editableRows = toEditableRows(data);
+      setMeasurements(editableRows);
+      setMeasurementSnapshot(editableRows);
+      setDeletedMeasurementIds([]);
+    } catch (err) {
+      setMessage(`循环数据加载失败：${(err as Error).message}`);
+      setMessageError(true);
+    }
   }
 
   function updateMeasurement(localKey: string, patch: Partial<EditableMeasurementRow>) {
@@ -709,8 +739,10 @@ export function PointRiskModal({
       await api.post(`/api/points/${point.id}/media`, formData);
       await refreshPoint();
       setMessage(`${mediaTypeLabel(mediaType)}照片已上传。`);
+      setMessageError(false);
     } catch (err) {
       setMessage(`上传失败：${(err as Error).message}`);
+      setMessageError(true);
     } finally {
       setBusy(false);
     }
@@ -723,8 +755,10 @@ export function PointRiskModal({
       await api.delete(`/api/points/${point.id}/media/${mediaId}`);
       await refreshPoint();
       setMessage('图片已删除。');
+      setMessageError(false);
     } catch (err) {
       setMessage(`删除失败：${(err as Error).message}`);
+      setMessageError(true);
     } finally {
       setBusy(false);
     }
@@ -733,12 +767,14 @@ export function PointRiskModal({
   async function savePoint() {
     if (!form.point_id.trim() || !form.point_name.trim()) {
       setMessage('保存失败：点位编号和名称不能为空。');
+      setMessageError(true);
       setActiveTab('main');
       return;
     }
     const invalidRow = measurements.find((item) => integerOrNull(item.cycle_count) == null);
     if (invalidRow) {
       setMessage('保存失败：循环次数必须填写为整数。');
+      setMessageError(true);
       return;
     }
     setBusy(true);
@@ -763,8 +799,10 @@ export function PointRiskModal({
       });
       await refreshPoint();
       setMessage('点位信息已保存。');
+      setMessageError(false);
     } catch (err) {
       setMessage(`保存失败：${(err as Error).message}`);
+      setMessageError(true);
     } finally {
       setBusy(false);
     }
@@ -789,7 +827,7 @@ export function PointRiskModal({
             <button className="button" onClick={closeWithConfirm}>关闭</button>
           </div>
         </div>
-        {message && <div className={message.includes('失败') ? 'alert danger' : 'alert ok'}>{message}</div>}
+        {message && <div className={messageError ? 'alert danger' : 'alert ok'}>{message}</div>}
         {editMode ? (
           <div className="point-editor">
             <div className="mode-tabs point-edit-tabs">
