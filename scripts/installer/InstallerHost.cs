@@ -30,12 +30,83 @@ namespace PointBenchInstaller
         public readonly List<PackageFile> Files = new List<PackageFile>();
     }
 
+    internal sealed class ProgressWindow : Form
+    {
+        private readonly Label _phase;
+        private readonly Label _detail;
+        private readonly ProgressBar _bar;
+
+        public ProgressWindow(string title)
+        {
+            Text = title;
+            Width = 600;
+            Height = 180;
+            StartPosition = FormStartPosition.CenterScreen;
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            ControlBox = false;
+            ShowInTaskbar = true;
+            TopMost = true;
+
+            _phase = new Label();
+            _phase.Left = 24;
+            _phase.Top = 20;
+            _phase.Width = 540;
+            _phase.Height = 24;
+            _phase.Font = new System.Drawing.Font(System.Drawing.SystemFonts.MessageBoxFont, System.Drawing.FontStyle.Bold);
+
+            _bar = new ProgressBar();
+            _bar.Left = 24;
+            _bar.Top = 54;
+            _bar.Width = 540;
+            _bar.Height = 24;
+
+            _detail = new Label();
+            _detail.Left = 24;
+            _detail.Top = 90;
+            _detail.Width = 540;
+            _detail.Height = 38;
+            _detail.AutoEllipsis = true;
+
+            Controls.Add(_phase);
+            Controls.Add(_bar);
+            Controls.Add(_detail);
+        }
+
+        public void SetProgress(string phase, int completed, int total, string detail)
+        {
+            _phase.Text = phase;
+            _detail.Text = detail ?? String.Empty;
+            if (total <= 0)
+            {
+                _bar.Style = ProgressBarStyle.Marquee;
+                _bar.MarqueeAnimationSpeed = 25;
+            }
+            else
+            {
+                _bar.Style = ProgressBarStyle.Continuous;
+                _bar.MarqueeAnimationSpeed = 0;
+                _bar.Minimum = 0;
+                _bar.Maximum = Math.Max(1, total);
+                _bar.Value = Math.Max(0, Math.Min(completed, total));
+                int percent = (int)((long)Math.Max(0, completed) * 100L / Math.Max(1, total));
+                _phase.Text = phase + "  " + percent.ToString(CultureInfo.InvariantCulture) + "%";
+            }
+            Refresh();
+            Application.DoEvents();
+        }
+    }
+
     internal static class Program
     {
-        private const string RegistryPath = @"Software\PointBench";
+        private const string DefaultRegistryPath = @"Software\PointBench";
         private const string PackageMagic = "PBPKG001";
         private static bool _silent;
+        private static bool _noDesktop;
+        private static string _registryPath = DefaultRegistryPath;
         private static string _logPath;
+        private static ProgressWindow _progress;
 
         [STAThread]
         private static int Main(string[] args)
@@ -43,6 +114,9 @@ namespace PointBenchInstaller
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             _silent = HasArgument(args, "/S") || HasArgument(args, "--silent");
+            _noDesktop = HasArgument(args, "/NODESKTOP");
+            string requestedRegistryPath = ArgumentValue(args, "/REGKEY=");
+            if (!String.IsNullOrWhiteSpace(requestedRegistryPath)) _registryPath = requestedRegistryPath;
             string requestedDirectory = ArgumentValue(args, "/D=");
             string logDirectory = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -65,6 +139,7 @@ namespace PointBenchInstaller
             }
             catch (Exception ex)
             {
+                CloseProgress();
                 Log("ERROR: {0}\r\n{1}", ex.Message, ex.StackTrace);
                 Show("安装失败：\r\n\r\n" + ex.Message + "\r\n\r\n日志：" + _logPath, MessageBoxIcon.Error);
                 return 1;
@@ -79,18 +154,21 @@ namespace PointBenchInstaller
             string target = ChooseInstallDirectory("选择 PointBench 依赖安装目录", requestedDirectory, defaultDirectory);
             if (target == null) return 3;
 
+            StartProgress("PointBench 依赖安装", "正在准备安装", 0, 0, target);
             ExtractAndVerify(package, target);
+            UpdateProgress("正在记录依赖版本", 1, 1, package.Version, true);
             string marker = Path.Combine(target, ".pointbench-dependencies");
             File.WriteAllText(marker, "version=" + package.Version + Environment.NewLine + "installedAt=" + DateTime.Now.ToString("o", CultureInfo.InvariantCulture), new UTF8Encoding(false));
             File.WriteAllBytes(Path.Combine(target, ".pointbench-dependencies.manifest"), package.RawManifest);
 
-            using (RegistryKey key = Registry.CurrentUser.CreateSubKey(RegistryPath))
+            using (RegistryKey key = Registry.CurrentUser.CreateSubKey(_registryPath))
             {
                 key.SetValue("DependenciesInstallDir", target, RegistryValueKind.String);
                 key.SetValue("DependenciesVersion", package.Version, RegistryValueKind.String);
                 key.SetValue("DependenciesInstalledAt", DateTime.Now.ToString("o", CultureInfo.InvariantCulture), RegistryValueKind.String);
                 key.SetValue("DependenciesManifestSha256", Sha256(package.RawManifest), RegistryValueKind.String);
             }
+            CloseProgress();
             Show("PointBench 依赖安装并校核完成。\r\n\r\n版本：" + package.Version + "\r\n位置：" + target, MessageBoxIcon.Information);
             return 0;
         }
@@ -99,7 +177,7 @@ namespace PointBenchInstaller
         {
             string dependencyDirectory;
             string dependencyVersion;
-            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(RegistryPath))
+            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(_registryPath))
             {
                 dependencyDirectory = key == null ? null : key.GetValue("DependenciesInstallDir") as string;
                 dependencyVersion = key == null ? null : key.GetValue("DependenciesVersion") as string;
@@ -109,15 +187,18 @@ namespace PointBenchInstaller
                 throw new InvalidOperationException("未检测到 PointBench 依赖安装记录。请先运行依赖安装 EXE。 ");
             if (!String.Equals(dependencyVersion, package.RequiredDependenciesVersion, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("依赖版本不匹配。代码要求 " + package.RequiredDependenciesVersion + "，当前记录为 " + dependencyVersion + "。请先安装匹配的依赖版本。 ");
-            VerifyDependencyInstallation(dependencyDirectory, dependencyVersion);
-
             string defaultDirectory = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "Programs", "PointBench", package.Version);
             string target = ChooseInstallDirectory("选择 PointBench 代码安装目录", requestedDirectory, defaultDirectory);
             if (target == null) return 3;
+
+            StartProgress("PointBench 代码安装", "正在读取依赖安装清单", 0, 0, dependencyDirectory);
+            VerifyDependencyInstallation(dependencyDirectory, dependencyVersion);
+            UpdateProgress("正在安装代码文件", 0, package.Files.Count, target, true);
             ExtractAndVerify(package, target);
 
+            UpdateProgress("正在配置共享依赖", 0, 0, dependencyDirectory, true);
             string nodeModulesTarget = Path.Combine(dependencyDirectory, "frontend", "node_modules");
             string nodeModulesLink = Path.Combine(target, "frontend", "node_modules");
             CreateDirectoryJunction(nodeModulesLink, nodeModulesTarget);
@@ -129,7 +210,8 @@ namespace PointBenchInstaller
             Directory.CreateDirectory(Path.Combine(dataDirectory, "storage"));
             Directory.CreateDirectory(Path.Combine(dataDirectory, "logs"));
 
-            string shortcutPath = CreateDesktopShortcut(target);
+            UpdateProgress("正在创建桌面快捷方式", 0, 0, target, true);
+            string shortcutPath = _noDesktop ? String.Empty : CreateDesktopShortcut(target);
             File.WriteAllText(
                 Path.Combine(target, "config", "install-state.txt"),
                 "codeVersion=" + package.Version + Environment.NewLine +
@@ -138,7 +220,7 @@ namespace PointBenchInstaller
                 "userDataDir=" + dataDirectory + Environment.NewLine,
                 new UTF8Encoding(false));
 
-            using (RegistryKey key = Registry.CurrentUser.CreateSubKey(RegistryPath))
+            using (RegistryKey key = Registry.CurrentUser.CreateSubKey(_registryPath))
             {
                 key.SetValue("CodeInstallDir", target, RegistryValueKind.String);
                 key.SetValue("CodeVersion", package.Version, RegistryValueKind.String);
@@ -148,6 +230,8 @@ namespace PointBenchInstaller
                 key.SetValue("UserDataDir", dataDirectory, RegistryValueKind.String);
                 key.SetValue("DesktopShortcut", shortcutPath, RegistryValueKind.String);
             }
+            UpdateProgress("安装完成", 1, 1, target, true);
+            CloseProgress();
             Show("PointBench 代码安装并校核完成。\r\n\r\n代码版本：" + package.Version + "\r\n依赖版本：" + dependencyVersion + "\r\n位置：" + target + "\r\n\r\n桌面快捷方式已创建。", MessageBoxIcon.Information);
             return 0;
         }
@@ -167,12 +251,15 @@ namespace PointBenchInstaller
             PackageManifest installed = ParseManifest(File.ReadAllBytes(manifestPath));
             if (!String.Equals(installed.Version, version, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("依赖安装清单版本不一致，请重新运行依赖安装 EXE。 ");
+            int checkedFiles = 0;
             foreach (PackageFile item in installed.Files)
             {
                 string path = Path.Combine(directory, item.RelativePath.Replace('/', Path.DirectorySeparatorChar));
                 FileInfo info = new FileInfo(path);
                 if (!info.Exists || info.Length != item.Length || !String.Equals(Sha256File(path), item.Sha256, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException("依赖文件校核失败，请重新安装依赖：" + item.RelativePath);
+                checkedFiles++;
+                UpdateProgress("正在校核依赖文件", checkedFiles, installed.Files.Count, item.RelativePath, false);
             }
         }
 
@@ -200,6 +287,7 @@ namespace PointBenchInstaller
             {
                 input.Position = package.PayloadStart;
                 byte[] buffer = new byte[1024 * 1024];
+                int installedFiles = 0;
                 foreach (PackageFile item in package.Files)
                 {
                     string relative = item.RelativePath.Replace('/', Path.DirectorySeparatorChar);
@@ -229,6 +317,8 @@ namespace PointBenchInstaller
                     }
                     if (File.Exists(destination)) File.Delete(destination);
                     File.Move(temporary, destination);
+                    installedFiles++;
+                    UpdateProgress("正在写入并校核文件", installedFiles, package.Files.Count, item.RelativePath, false);
                 }
             }
 
@@ -297,6 +387,13 @@ namespace PointBenchInstaller
         private static void CreateDirectoryJunction(string link, string target)
         {
             if (!Directory.Exists(target)) throw new DirectoryNotFoundException("依赖目录不存在：" + target);
+            string normalizedLink = Path.GetFullPath(link).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string normalizedTarget = Path.GetFullPath(target).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (String.Equals(normalizedLink, normalizedTarget, StringComparison.OrdinalIgnoreCase))
+            {
+                Log("Code and dependencies share node_modules: {0}", normalizedTarget);
+                return;
+            }
             if (Directory.Exists(link))
             {
                 FileAttributes attributes = File.GetAttributes(link);
@@ -382,6 +479,31 @@ namespace PointBenchInstaller
         {
             Log(text.Replace("\r", " ").Replace("\n", " "));
             if (!_silent) MessageBox.Show(text, "PointBench 安装程序", MessageBoxButtons.OK, icon);
+        }
+
+        private static void StartProgress(string title, string phase, int completed, int total, string detail)
+        {
+            if (_silent) return;
+            CloseProgress();
+            _progress = new ProgressWindow(title);
+            _progress.Show();
+            _progress.SetProgress(phase, completed, total, detail);
+        }
+
+        private static void UpdateProgress(string phase, int completed, int total, string detail, bool force)
+        {
+            if (_silent || _progress == null) return;
+            if (!force && completed != total && (completed % 20) != 0) return;
+            _progress.SetProgress(phase, completed, total, detail);
+        }
+
+        private static void CloseProgress()
+        {
+            if (_progress == null) return;
+            _progress.Close();
+            _progress.Dispose();
+            _progress = null;
+            Application.DoEvents();
         }
 
         private static void Log(string format, params object[] args)

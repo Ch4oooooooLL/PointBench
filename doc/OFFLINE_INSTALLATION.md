@@ -25,6 +25,8 @@
 
 安装界面允许用户改选代码和依赖位置。数据目录保持稳定，升级代码不会丢失数据库、附件或日志。
 
+代码和依赖可以选择同一个目录，例如都安装到 `D:\PB`；此时代码直接复用该目录中的 `frontend\node_modules`。如果选择不同目录，代码安装器会创建不需要管理员权限的目录连接来复用共享依赖。
+
 ## 安装记录
 
 安装器在 `HKEY_CURRENT_USER\Software\PointBench` 写入：
@@ -35,6 +37,14 @@
 - 代码和依赖各自的安装清单 SHA-256
 
 代码目录的 `config\install-state.txt` 也保存本次代码/依赖组合和数据目录，方便离线排查。
+
+## 安装进度
+
+手动安装时会显示置顶进度窗口：
+
+- 依赖安装：显示当前写入文件、完成百分比和版本记录阶段。
+- 代码安装：先显示共享依赖逐文件 SHA-256 校核进度，再显示代码写入、共享依赖配置和桌面快捷方式阶段。
+- `/S` 静默安装不显示进度窗口，但仍执行同样的完整校核，并将结果写入安装日志。
 
 ## 版本管理与校核
 
@@ -69,7 +79,7 @@
 
 ```bat
 PointBench-Dependencies-1.0.0-windows-x64.exe /S /D=D:\Apps\PointBenchDeps
-PointBench-Code-1.0.0.exe /S /D=D:\Apps\PointBench
+PointBench-Code-1.0.1.exe /S /D=D:\Apps\PointBench
 ```
 
 `/S` 不显示对话框，进程退出码为 `0` 表示成功；错误详情写入安装日志。
