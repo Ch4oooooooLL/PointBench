@@ -52,7 +52,7 @@
 
 ```json
 {
-  "codeVersion": "1.0.4",
+  "codeVersion": "1.0.5",
   "dependenciesVersion": "1.0.0-windows-x64",
   "minimumDependenciesVersion": "1.0.0-windows-x64"
 }
@@ -78,13 +78,15 @@
 
 桌面快捷方式、`scripts\start.bat` 和 `scripts\run.bat` 都使用隐藏启动入口，加载完成后不会留下控制台窗口。如需排查启动问题，可手动运行 `scripts\start-debug.bat` 查看实时日志。
 
+`scripts\launcher.ps1` 必须保存为带 BOM 的 UTF-8。代码构建会强制检查 BOM 和 Windows PowerShell 5.1 语法，避免隐藏启动时因中文进度文字编码错误而静默退出。
+
 ## 静默安装
 
 安装器支持自动验收使用的静默参数：
 
 ```bat
 PointBench-Dependencies-1.0.0-windows-x64.exe /S /D=D:\Apps\PointBenchDeps
-PointBench-Code-1.0.4.exe /S
+PointBench-Code-1.0.5.exe /S
 ```
 
 `/S` 不显示对话框，进程退出码为 `0` 表示成功；错误详情写入安装日志。代码安装器不接受安装目录，始终跟随已记录的依赖目录。

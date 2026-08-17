@@ -172,6 +172,16 @@ if ($buildCode) {
     foreach ($requiredRelative in @('assets/PointBench.ico', 'backend/app/main.py', 'config/version.json', 'frontend/package.json', 'scripts/launcher.ps1', 'scripts/run.vbs')) {
         if ($requiredRelative -notin $codeFiles.Relative) { throw "Code installer input is missing: $requiredRelative" }
     }
+    $launcherPath = Join-Path $root 'scripts\launcher.ps1'
+    $launcherBytes = [IO.File]::ReadAllBytes($launcherPath)
+    if ($launcherBytes.Length -lt 3 -or $launcherBytes[0] -ne 0xEF -or $launcherBytes[1] -ne 0xBB -or $launcherBytes[2] -ne 0xBF) {
+        throw 'scripts/launcher.ps1 must use UTF-8 with BOM for Windows PowerShell 5.1 compatibility.'
+    }
+    $launcherParseErrors = $null
+    [System.Management.Automation.Language.Parser]::ParseFile($launcherPath, [ref]$null, [ref]$launcherParseErrors) | Out-Null
+    if ($launcherParseErrors.Count -gt 0) {
+        throw "Windows PowerShell launcher syntax check failed: $($launcherParseErrors[0].Message)"
+    }
     New-RawInstaller -HostPath $hostExe -OutputPath $codeOutput -PackageType 'code' -Version $versions.codeVersion -RequiredDependenciesVersion $versions.minimumDependenciesVersion -Files $codeFiles
 }
 
