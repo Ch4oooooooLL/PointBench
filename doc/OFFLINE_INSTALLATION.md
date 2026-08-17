@@ -23,7 +23,7 @@
 | 桌面入口 | `%USERPROFILE%\Desktop\PointBench.lnk` |
 | 安装日志 | `%LOCALAPPDATA%\PointBench\install-logs` |
 
-依赖安装界面允许用户选择安装位置；代码安装器不再询问路径，而是读取注册表中的 `DependenciesInstallDir` 并自动安装到同一目录。数据目录保持稳定，升级代码不会丢失数据库、附件或日志。
+依赖首次安装时允许用户选择安装位置；第二次及以后安装会从注册表读取 `DependenciesInstallDir`，并在文件夹选择器中自动定位到上次目录。静默重装未传 `/D` 时也会直接复用上次目录。代码安装器不再询问路径，而是自动安装到同一目录。数据目录保持稳定，升级代码不会丢失数据库、附件或日志。
 
 例如依赖安装到 `D:\PB` 后，代码必定安装到 `D:\PB`，并直接复用该目录中的 `frontend\node_modules`。
 

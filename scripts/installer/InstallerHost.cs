@@ -151,6 +151,15 @@ namespace PointBenchInstaller
             string defaultDirectory = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "PointBench", "Dependencies", package.Version);
+            using (RegistryKey existingKey = Registry.CurrentUser.OpenSubKey(_registryPath))
+            {
+                string previousDirectory = existingKey == null ? null : existingKey.GetValue("DependenciesInstallDir") as string;
+                if (!String.IsNullOrWhiteSpace(previousDirectory))
+                {
+                    defaultDirectory = Path.GetFullPath(previousDirectory);
+                    Log("Reusing previous dependency install directory: {0}", defaultDirectory);
+                }
+            }
             string target = ChooseInstallDirectory("选择 PointBench 依赖安装目录", requestedDirectory, defaultDirectory);
             if (target == null) return 3;
 
