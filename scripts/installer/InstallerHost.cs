@@ -134,7 +134,7 @@ namespace PointBenchInstaller
                 if (String.Equals(package.Type, "dependencies", StringComparison.OrdinalIgnoreCase))
                     return InstallDependencies(package, requestedDirectory);
                 if (String.Equals(package.Type, "code", StringComparison.OrdinalIgnoreCase))
-                    return InstallCode(package, requestedDirectory);
+                    return InstallCode(package);
                 throw new InvalidDataException("未知安装包类型：" + package.Type);
             }
             catch (Exception ex)
@@ -173,7 +173,7 @@ namespace PointBenchInstaller
             return 0;
         }
 
-        private static int InstallCode(PackageManifest package, string requestedDirectory)
+        private static int InstallCode(PackageManifest package)
         {
             string dependencyDirectory;
             string dependencyVersion;
@@ -187,11 +187,8 @@ namespace PointBenchInstaller
                 throw new InvalidOperationException("未检测到 PointBench 依赖安装记录。请先运行依赖安装 EXE。 ");
             if (!String.Equals(dependencyVersion, package.RequiredDependenciesVersion, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("依赖版本不匹配。代码要求 " + package.RequiredDependenciesVersion + "，当前记录为 " + dependencyVersion + "。请先安装匹配的依赖版本。 ");
-            string defaultDirectory = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "Programs", "PointBench", package.Version);
-            string target = ChooseInstallDirectory("选择 PointBench 代码安装目录", requestedDirectory, defaultDirectory);
-            if (target == null) return 3;
+            string target = Path.GetFullPath(dependencyDirectory);
+            Log("Code install directory follows dependency installation: {0}", target);
 
             StartProgress("PointBench 代码安装", "正在读取依赖安装清单", 0, 0, dependencyDirectory);
             VerifyDependencyInstallation(dependencyDirectory, dependencyVersion);

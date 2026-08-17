@@ -18,14 +18,14 @@
 | 内容 | 默认位置 |
 | ---- | ---- |
 | 依赖 | `%LOCALAPPDATA%\PointBench\Dependencies\<依赖版本>` |
-| 代码 | `%LOCALAPPDATA%\Programs\PointBench\<代码版本>` |
+| 代码 | 自动使用依赖安装目录 |
 | 数据库、附件和日志 | `%LOCALAPPDATA%\PointBench\Data` |
 | 桌面入口 | `%USERPROFILE%\Desktop\PointBench.lnk` |
 | 安装日志 | `%LOCALAPPDATA%\PointBench\install-logs` |
 
-安装界面允许用户改选代码和依赖位置。数据目录保持稳定，升级代码不会丢失数据库、附件或日志。
+依赖安装界面允许用户选择安装位置；代码安装器不再询问路径，而是读取注册表中的 `DependenciesInstallDir` 并自动安装到同一目录。数据目录保持稳定，升级代码不会丢失数据库、附件或日志。
 
-代码和依赖可以选择同一个目录，例如都安装到 `D:\PB`；此时代码直接复用该目录中的 `frontend\node_modules`。如果选择不同目录，代码安装器会创建不需要管理员权限的目录连接来复用共享依赖。
+例如依赖安装到 `D:\PB` 后，代码必定安装到 `D:\PB`，并直接复用该目录中的 `frontend\node_modules`。
 
 ## 安装记录
 
@@ -52,7 +52,7 @@
 
 ```json
 {
-  "codeVersion": "1.0.0",
+  "codeVersion": "1.0.2",
   "dependenciesVersion": "1.0.0-windows-x64",
   "minimumDependenciesVersion": "1.0.0-windows-x64"
 }
@@ -79,10 +79,10 @@
 
 ```bat
 PointBench-Dependencies-1.0.0-windows-x64.exe /S /D=D:\Apps\PointBenchDeps
-PointBench-Code-1.0.1.exe /S /D=D:\Apps\PointBench
+PointBench-Code-1.0.2.exe /S
 ```
 
-`/S` 不显示对话框，进程退出码为 `0` 表示成功；错误详情写入安装日志。
+`/S` 不显示对话框，进程退出码为 `0` 表示成功；错误详情写入安装日志。代码安装器不接受安装目录，始终跟随已记录的依赖目录。
 
 ## 离线电脑验收
 
