@@ -1,6 +1,6 @@
 @echo off
 setlocal
-title Pack PointBench Code and Dependencies
+title Build PointBench EXE Installers
 
 cd /d "%~dp0.."
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0pack-portable.ps1" -ProjectDir "%~dp0.."

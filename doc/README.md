@@ -13,28 +13,27 @@
 
 ## 快速开始（便携版）
 
-本项目按便携版发布和使用。代码与依赖分别发布；部署时将依赖目录的内容合并到代码目录。最终目录应包含：
+本项目按无管理员权限的离线应用发布，代码和依赖分别生成 EXE 安装器：
 
-| 路径 | 说明 |
+| 安装器 | 说明 |
 | ---- | ---- |
-| `runtime/python/` | 便携 Python 与后端 Python 依赖 |
-| `runtime/node/` | 便携 Node.js |
-| `frontend/node_modules/` | 前端依赖 |
+| `PointBench-Dependencies-<版本>.exe` | 便携 Python、Node.js 和前后端依赖，必须先安装 |
+| `PointBench-Code-<版本>.exe` | 项目代码、图标和启动入口；安装时校核依赖版本 |
 
-启动脚本只使用项目目录内的便携依赖，不会回退到系统 Python、系统 Node.js 或本机虚拟环境。依赖必须是普通的未压缩文件；尤其是 embeddable Python 自带的 `python3xx.zip` 标准库也必须先展开，不能直接使用。
+两个安装器均安装到当前用户可写目录，并在 `HKCU\Software\PointBench` 分别记录代码/依赖版本、安装位置和安装时间，不需要管理员权限。安装器载荷使用 PointBench 原始文件容器，不使用 ZIP/CAB。
 
 ### Windows 启动
 
-双击根目录：
+正式安装后双击桌面的 PointBench 快捷方式。源码目录可执行：
 
 ```text
-start.bat
+scripts\start.bat
 ```
 
 或在命令行执行：
 
 ```bat
-run.bat
+scripts\run.bat
 ```
 
 默认地址：
@@ -55,41 +54,22 @@ scripts\setup-portable-deps.bat
 
 脚本会生成 `runtime/python/`、`runtime/node/` 和 `frontend/node_modules/`。下载产生的临时归档在展开后立即删除，并检查最终依赖中不存在 `.zip`、`.whl`、`.7z`、`.tar`、`.gz` 等压缩文件。
 
-### 分别打包代码和依赖
+### 构建双 EXE 安装器
 
-准备好便携依赖后，可分别执行：
-
-```bat
-scripts\pack-code.bat
-scripts\pack-dependencies.bat
-```
-
-也可用一个入口依次生成两种产物：
+准备好便携依赖后执行：
 
 ```bat
-scripts\pack-portable.bat
+scripts\build-installers.bat
 ```
 
-产物默认位于 `dist/`：
+也可继续使用统一发布入口 `scripts\pack-portable.bat`。产物默认位于 `dist/`：
 
 | 产物 | 格式 | 内容 |
 | ---- | ---- | ---- |
-| `PointBench-code-时间戳.zip` | ZIP | 仅代码、启动脚本和文档，不含依赖 |
-| `PointBench-dependencies-windows-x64/` | 未压缩目录 | `runtime/` 与 `frontend/node_modules/` |
+| `PointBench-Dependencies-<依赖版本>.exe` | EXE | 共享依赖安装器 |
+| `PointBench-Code-<代码版本>.exe` | EXE | 代码安装器 |
 
-部署时先解压代码 ZIP，再将依赖目录**里面的内容**复制到代码根目录。不要将依赖目录再次压缩；依赖打包脚本检测到任何压缩归档会直接失败。
-
-如需在 Linux 上生成同样的 Windows 分离产物，执行：
-
-```bash
-scripts/pack-windows-portable.sh
-```
-
-该脚本会自动准备 Windows embeddable Python、Windows Node.js、后端包和 Windows 目标的 `frontend/node_modules`，最后输出代码 ZIP 与未压缩依赖目录。若项目内已有完整依赖，默认会复用；需要强制重新准备可执行：
-
-```bash
-scripts/pack-windows-portable.sh --runtime refresh --frontend prepare
-```
+版本统一配置在 `config/version.json`。完整安装、升级、注册表和静默安装说明见 [离线安装与发布说明](OFFLINE_INSTALLATION.md)。
 
 ### 示例数据
 

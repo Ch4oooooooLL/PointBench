@@ -10,7 +10,7 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 logger = logging.getLogger("app.database")
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-STORAGE_DIR = BASE_DIR / "storage"
+STORAGE_DIR = Path(os.environ.get("POINTBENCH_STORAGE_DIR", BASE_DIR / "storage")).resolve()
 
 # 支持通过环境变量切换数据库（默认 SQLite）
 #   SQLite:   不设置 或 DATABASE_URL=sqlite:///./test_point.db

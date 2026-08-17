@@ -20,18 +20,19 @@ $backendDir = Join-Path $root 'backend'
 $frontendDir = Join-Path $root 'frontend'
 $appUrl = 'http://127.0.0.1:5173/'
 $healthUrl = 'http://127.0.0.1:8000/api/health'
+$registryInstallState = $null
+try {
+    $registryInstallState = Get-ItemProperty -LiteralPath 'HKCU:\Software\PointBench' -ErrorAction Stop
+} catch {
+    $registryInstallState = $null
+}
 
 if ([string]::IsNullOrWhiteSpace($DependencyDir)) {
     $localRuntime = Join-Path $root 'runtime\python\python.exe'
     if (Test-Path -LiteralPath $localRuntime -PathType Leaf) {
         $DependencyDir = $root
     } else {
-        try {
-            $installState = Get-ItemProperty -LiteralPath 'HKCU:\Software\PointBench' -ErrorAction Stop
-            $DependencyDir = [string]$installState.DependenciesInstallDir
-        } catch {
-            $DependencyDir = ''
-        }
+        $DependencyDir = if ($registryInstallState) { [string]$registryInstallState.DependenciesInstallDir } else { '' }
     }
 }
 if (-not [string]::IsNullOrWhiteSpace($DependencyDir)) {
@@ -39,7 +40,12 @@ if (-not [string]::IsNullOrWhiteSpace($DependencyDir)) {
 }
 $dependencyRuntimeDir = if ($DependencyDir) { Join-Path $DependencyDir 'runtime' } else { '' }
 $dependencyNodeModules = if ($DependencyDir) { Join-Path $DependencyDir 'frontend\node_modules' } else { '' }
-$logRoot = Join-Path $root 'logs'
+$userDataDir = ''
+if ($registryInstallState -and [string]$registryInstallState.CodeInstallDir -and
+    ([System.IO.Path]::GetFullPath([string]$registryInstallState.CodeInstallDir) -eq $root)) {
+    $userDataDir = [string]$registryInstallState.UserDataDir
+}
+$logRoot = if ($userDataDir) { Join-Path $userDataDir 'logs' } else { Join-Path $root 'logs' }
 New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
 
 $runId = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -526,6 +532,8 @@ try {
         'set PYTHONIOENCODING=utf-8',
         'set PYTHONFAULTHANDLER=1',
         ('set "PYTHONPATH={0}"' -f $backendDir),
+        $(if ($userDataDir) { 'set "DATABASE_URL=sqlite:///{0}"' -f ((Join-Path $userDataDir 'pointbench.db').Replace('\', '/')) } else { 'rem DATABASE_URL uses the source-tree default' }),
+        $(if ($userDataDir) { 'set "POINTBENCH_STORAGE_DIR={0}"' -f (Join-Path $userDataDir 'storage') } else { 'rem POINTBENCH_STORAGE_DIR uses the source-tree default' }),
         'set POINTBENCH_LOG_LEVEL=INFO',
         ('set POINTBENCH_ERROR_LOG={0}' -f $errorLog),
         ('cd /d "{0}"' -f $backendDir),
