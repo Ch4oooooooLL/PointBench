@@ -3,9 +3,11 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Management;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
@@ -151,9 +153,12 @@ namespace PointBenchInstaller
             string defaultDirectory = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "PointBench", "Dependencies", package.Version);
+            string previousDirectory = null;
+            string previousCodeDirectory = null;
             using (RegistryKey existingKey = Registry.CurrentUser.OpenSubKey(_registryPath))
             {
-                string previousDirectory = existingKey == null ? null : existingKey.GetValue("DependenciesInstallDir") as string;
+                previousDirectory = existingKey == null ? null : existingKey.GetValue("DependenciesInstallDir") as string;
+                previousCodeDirectory = existingKey == null ? null : existingKey.GetValue("CodeInstallDir") as string;
                 if (!String.IsNullOrWhiteSpace(previousDirectory))
                 {
                     defaultDirectory = Path.GetFullPath(previousDirectory);
@@ -164,6 +169,11 @@ namespace PointBenchInstaller
             if (target == null) return 3;
 
             StartProgress("PointBench 依赖安装", "正在准备安装", 0, 0, target);
+            if (!String.IsNullOrWhiteSpace(previousCodeDirectory) && !PathsEqual(previousCodeDirectory, target))
+                StopRunningPointBench(previousCodeDirectory);
+            if (!String.IsNullOrWhiteSpace(previousDirectory) && !PathsEqual(previousDirectory, target) && !PathsEqual(previousDirectory, previousCodeDirectory))
+                StopRunningPointBench(previousDirectory);
+            StopRunningPointBench(target);
             ExtractAndVerify(package, target);
             UpdateProgress("正在记录依赖版本", 1, 1, package.Version, true);
             string marker = Path.Combine(target, ".pointbench-dependencies");
@@ -199,7 +209,9 @@ namespace PointBenchInstaller
             string target = Path.GetFullPath(dependencyDirectory);
             Log("Code install directory follows dependency installation: {0}", target);
 
-            StartProgress("PointBench 代码安装", "正在读取依赖安装清单", 0, 0, dependencyDirectory);
+            StartProgress("PointBench 代码安装", "正在检查后台运行状态", 0, 0, dependencyDirectory);
+            StopRunningPointBench(target);
+            UpdateProgress("正在读取依赖安装清单", 0, 0, dependencyDirectory, true);
             VerifyDependencyInstallation(dependencyDirectory, dependencyVersion);
             UpdateProgress("正在安装代码文件", 0, package.Files.Count, target, true);
             ExtractAndVerify(package, target);
@@ -242,6 +254,134 @@ namespace PointBenchInstaller
             return 0;
         }
 
+        private static bool PathsEqual(string left, string right)
+        {
+            if (String.IsNullOrWhiteSpace(left) || String.IsNullOrWhiteSpace(right)) return false;
+            return String.Equals(
+                Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void StopRunningPointBench(string installDirectory)
+        {
+            string target = Path.GetFullPath(installDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            List<int> running = FindPointBenchProcesses(target);
+            if (running.Count == 0)
+            {
+                Log("No running PointBench processes found for {0}", target);
+                return;
+            }
+
+            UpdateProgress("正在关闭运行中的 PointBench", 0, 0, "正在请求后台程序安全退出", true);
+            Log("PointBench is running. Process IDs: {0}", String.Join(",", running));
+            try
+            {
+                using (EventWaitHandle shutdown = EventWaitHandle.OpenExisting(@"Local\PointBenchShutdown"))
+                {
+                    shutdown.Set();
+                    Log("Sent PointBench graceful shutdown signal.");
+                }
+            }
+            catch (WaitHandleCannotBeOpenedException)
+            {
+                Log("The installed launcher does not expose a shutdown signal; compatibility shutdown will be used.");
+            }
+
+            if (WaitForPointBenchExit(target, 5000)) return;
+
+            running = FindPointBenchProcesses(target);
+            UpdateProgress("正在关闭运行中的 PointBench", 0, 0, "正在结束旧版后台进程", true);
+            foreach (int processId in running) KillProcessTree(processId);
+
+            if (!WaitForPointBenchExit(target, 10000))
+            {
+                running = FindPointBenchProcesses(target);
+                throw new IOException("无法关闭正在运行的 PointBench。请从托盘退出后重试。进程 ID：" + String.Join(",", running));
+            }
+            Log("Running PointBench instance stopped before installation.");
+        }
+
+        private static bool WaitForPointBenchExit(string target, int timeoutMilliseconds)
+        {
+            Stopwatch timer = Stopwatch.StartNew();
+            while (timer.ElapsedMilliseconds < timeoutMilliseconds)
+            {
+                if (FindPointBenchProcesses(target).Count == 0) return true;
+                Application.DoEvents();
+                Thread.Sleep(250);
+            }
+            return FindPointBenchProcesses(target).Count == 0;
+        }
+
+        private static List<int> FindPointBenchProcesses(string target)
+        {
+            List<int> result = new List<int>();
+            string runtimePrefix = Path.Combine(target, "runtime") + Path.DirectorySeparatorChar;
+            string launcherPath = Path.Combine(target, "scripts", "launcher.ps1");
+            int currentProcessId = Process.GetCurrentProcess().Id;
+
+            try
+            {
+                using (ManagementObjectSearcher searcher = new ManagementObjectSearcher("SELECT ProcessId, ExecutablePath, CommandLine FROM Win32_Process"))
+                using (ManagementObjectCollection processes = searcher.Get())
+                {
+                    foreach (ManagementObject process in processes)
+                    {
+                        int processId = Convert.ToInt32((uint)process["ProcessId"], CultureInfo.InvariantCulture);
+                        if (processId == currentProcessId) continue;
+                        string executable = process["ExecutablePath"] as string ?? String.Empty;
+                        string commandLine = process["CommandLine"] as string ?? String.Empty;
+                        bool runtimeProcess = executable.StartsWith(runtimePrefix, StringComparison.OrdinalIgnoreCase);
+                        string processName = Path.GetFileName(executable);
+                        bool launcherProcess =
+                            (String.Equals(processName, "powershell.exe", StringComparison.OrdinalIgnoreCase) ||
+                             String.Equals(processName, "pwsh.exe", StringComparison.OrdinalIgnoreCase)) &&
+                            HasPowerShellFileArgument(commandLine, launcherPath);
+                        if ((runtimeProcess || launcherProcess) && !result.Contains(processId)) result.Add(processId);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("Process detection warning: {0}", ex.Message);
+            }
+            return result;
+        }
+
+        private static bool HasPowerShellFileArgument(string commandLine, string launcherPath)
+        {
+            int fileIndex = commandLine.IndexOf("-File", StringComparison.OrdinalIgnoreCase);
+            if (fileIndex < 0) return false;
+            string value = commandLine.Substring(fileIndex + 5).TrimStart();
+            string quotedPath = "\"" + launcherPath + "\"";
+            if (value.StartsWith(quotedPath, StringComparison.OrdinalIgnoreCase)) return true;
+            return value.StartsWith(launcherPath, StringComparison.OrdinalIgnoreCase) &&
+                (value.Length == launcherPath.Length || Char.IsWhiteSpace(value[launcherPath.Length]));
+        }
+
+        private static void KillProcessTree(int processId)
+        {
+            try
+            {
+                ProcessStartInfo start = new ProcessStartInfo("taskkill.exe", "/PID " + processId.ToString(CultureInfo.InvariantCulture) + " /T /F");
+                start.CreateNoWindow = true;
+                start.UseShellExecute = false;
+                start.RedirectStandardOutput = true;
+                start.RedirectStandardError = true;
+                using (Process process = Process.Start(start))
+                {
+                    string detail = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
+                    process.WaitForExit();
+                    Log("taskkill PID={0}; exit={1}; detail={2}", processId, process.ExitCode, detail.Trim());
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("Failed to stop process tree PID={0}: {1}", processId, ex.Message);
+            }
+        }
+
         private static void VerifyDependencyInstallation(string directory, string version)
         {
             if (!Directory.Exists(directory)) throw new DirectoryNotFoundException("依赖安装目录不存在：" + directory);
@@ -258,8 +398,14 @@ namespace PointBenchInstaller
             if (!String.Equals(installed.Version, version, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("依赖安装清单版本不一致，请重新运行依赖安装 EXE。 ");
             int checkedFiles = 0;
+            int skippedMutableFiles = 0;
             foreach (PackageFile item in installed.Files)
             {
+                if (IsMutableDependencyFile(item.RelativePath))
+                {
+                    skippedMutableFiles++;
+                    continue;
+                }
                 string path = Path.Combine(directory, item.RelativePath.Replace('/', Path.DirectorySeparatorChar));
                 FileInfo info = new FileInfo(path);
                 if (!info.Exists || info.Length != item.Length || !String.Equals(Sha256File(path), item.Sha256, StringComparison.OrdinalIgnoreCase))
@@ -267,6 +413,16 @@ namespace PointBenchInstaller
                 checkedFiles++;
                 UpdateProgress("正在校核依赖文件", checkedFiles, installed.Files.Count, item.RelativePath, false);
             }
+            if (skippedMutableFiles > 0) Log("Skipped {0} mutable dependency cache files during verification.", skippedMutableFiles);
+        }
+
+        private static bool IsMutableDependencyFile(string relativePath)
+        {
+            string normalized = (relativePath ?? String.Empty).Replace('\\', '/');
+            return normalized.StartsWith("frontend/node_modules/.vite/", StringComparison.OrdinalIgnoreCase) ||
+                normalized.IndexOf("/__pycache__/", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                normalized.EndsWith(".pyc", StringComparison.OrdinalIgnoreCase) ||
+                normalized.EndsWith(".pyo", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string ChooseInstallDirectory(string description, string requested, string defaultDirectory)

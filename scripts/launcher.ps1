@@ -588,6 +588,15 @@ try {
         throw 'Another PointBench launcher is active, but the application did not become ready within 35 seconds.'
     }
 
+    $shutdownEventCreated = $false
+    $shutdownEvent = [System.Threading.EventWaitHandle]::new(
+        $false,
+        [System.Threading.EventResetMode]::ManualReset,
+        'Local\PointBenchShutdown',
+        [ref]$shutdownEventCreated
+    )
+    Write-LauncherLog "Installer shutdown signal ready. Created=$shutdownEventCreated"
+
     if ([string]::IsNullOrWhiteSpace($DependencyDir)) {
         throw 'PointBench dependencies are not installed. Install PointBench Dependencies first.'
     }
@@ -744,11 +753,28 @@ try {
             Start-Process $appUrl
         }
     })
+
+    $shutdownTimer = New-Object System.Windows.Forms.Timer
+    $shutdownTimer.Interval = 500
+    $shutdownTimer.Add_Tick({
+        if ($shutdownEvent.WaitOne(0)) {
+            Write-LauncherLog 'Installer requested PointBench shutdown.'
+            $shutdownTimer.Stop()
+            $trayIcon.Visible = $false
+            Stop-ProcessTree $backendProc
+            Stop-ProcessTree $frontendProc
+            [System.Windows.Forms.Application]::Exit()
+        }
+    }.GetNewClosure())
+    $shutdownTimer.Start()
     [System.Windows.Forms.Application]::Run()
 
+    $shutdownTimer.Stop()
+    $shutdownTimer.Dispose()
     $trayIcon.Visible = $false
     Stop-ProcessTree $backendProc
     Stop-ProcessTree $frontendProc
+    if ($shutdownEvent) { $shutdownEvent.Dispose() }
 } catch {
     Close-StartupProgress
     Write-LauncherLog "Unhandled launcher error: $($_.Exception.Message)"
@@ -756,6 +782,7 @@ try {
     Write-FailureSummary "Unhandled launcher error: $($_.Exception.Message)"
     Stop-ProcessTree $backendProc
     Stop-ProcessTree $frontendProc
+    if ($shutdownEvent) { $shutdownEvent.Dispose() }
     Show-StartupFailure -Message $_.Exception.Message
     exit 1
 }

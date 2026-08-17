@@ -49,6 +49,8 @@ function Get-DependencyFiles([string]$Root) {
     foreach ($dependencyRoot in @((Join-Path $Root 'runtime'), (Join-Path $Root 'frontend\node_modules'))) {
         Get-ChildItem -LiteralPath $dependencyRoot -File -Recurse -Force | ForEach-Object {
             $relative = $_.FullName.Substring($Root.Length).TrimStart('\', '/')
+            $normalized = $relative.Replace('\', '/')
+            if ($normalized -match '^frontend/node_modules/\.vite/' -or $normalized -match '(^|/)__pycache__/' -or $normalized -match '\.py[co]$') { return }
             $selected.Add([pscustomobject]@{ Source = $_.FullName; Relative = $relative.Replace('\', '/') }) | Out-Null
         }
     }
@@ -148,7 +150,7 @@ if ([string]::IsNullOrWhiteSpace($versions.codeVersion) -or [string]::IsNullOrWh
 }
 
 New-Item -ItemType Directory -Path $outputRoot, $buildRoot -Force | Out-Null
-& $csc /nologo /target:winexe /platform:x64 /optimize+ /codepage:65001 "/win32icon:$iconFile" "/out:$hostExe" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll $hostSource
+& $csc /nologo /target:winexe /platform:x64 /optimize+ /codepage:65001 "/win32icon:$iconFile" "/out:$hostExe" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Management.dll $hostSource
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $hostExe -PathType Leaf)) { throw 'Failed to compile the installer host.' }
 
 $dependencyOutput = Join-Path $outputRoot "PointBench-Dependencies-$($versions.dependenciesVersion).exe"

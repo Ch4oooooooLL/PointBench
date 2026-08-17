@@ -52,7 +52,7 @@
 
 ```json
 {
-  "codeVersion": "1.0.5",
+  "codeVersion": "1.0.6",
   "dependenciesVersion": "1.0.0-windows-x64",
   "minimumDependenciesVersion": "1.0.0-windows-x64"
 }
@@ -80,13 +80,15 @@
 
 `scripts\launcher.ps1` 必须保存为带 BOM 的 UTF-8。代码构建会强制检查 BOM 和 Windows PowerShell 5.1 语法，避免隐藏启动时因中文进度文字编码错误而静默退出。
 
+两个安装器在覆盖文件前都会检测当前安装目录中的 PointBench 后台进程。新版启动器会响应安装器的安全退出信号；升级旧版时，安装器会在等待后关闭对应的启动器、Python 和 Node.js 进程树。Vite 的 `.vite` 和 Python 的 `__pycache__`、`.pyc`、`.pyo` 都属于运行时缓存，不参与依赖哈希校核。
+
 ## 静默安装
 
 安装器支持自动验收使用的静默参数：
 
 ```bat
 PointBench-Dependencies-1.0.0-windows-x64.exe /S /D=D:\Apps\PointBenchDeps
-PointBench-Code-1.0.5.exe /S
+PointBench-Code-1.0.6.exe /S
 ```
 
 `/S` 不显示对话框，进程退出码为 `0` 表示成功；错误详情写入安装日志。代码安装器不接受安装目录，始终跟随已记录的依赖目录。
