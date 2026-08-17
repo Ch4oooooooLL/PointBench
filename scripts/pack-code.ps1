@@ -36,7 +36,7 @@ New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
 
 $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $output = Join-Path $outputRoot "$OutputName-$timestamp.zip"
-$includeItems = @('start.bat', 'run.bat', 'run.vbs', 'backend', 'frontend', 'scripts', 'doc', 'sample_data')
+$includeItems = @('assets', 'backend', 'config', 'frontend', 'scripts', 'doc', 'sample_data')
 $files = [System.Collections.Generic.List[object]]::new()
 
 foreach ($item in $includeItems) {
@@ -74,7 +74,7 @@ try {
 $zip = [System.IO.Compression.ZipFile]::OpenRead($output)
 try {
     $names = @($zip.Entries.FullName)
-    foreach ($required in @('start.bat', 'scripts/launcher.ps1', 'scripts/setup-portable-deps.ps1', 'backend/app/main.py', 'frontend/package.json')) {
+    foreach ($required in @('assets/PointBench.ico', 'scripts/start.bat', 'scripts/run.vbs', 'scripts/launcher.ps1', 'scripts/setup-portable-deps.ps1', 'backend/app/main.py', 'frontend/package.json')) {
         if ($names -notcontains $required) { throw "Code package is missing: $required" }
     }
     if (@($names | Where-Object { $_ -match '(^|/)(runtime|node_modules)(/|$)' }).Count -gt 0) {

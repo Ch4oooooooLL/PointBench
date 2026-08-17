@@ -367,9 +367,9 @@ prepare_windows_frontend_node_modules() {
 require_command python3
 require_file "frontend/package.json"
 require_file "frontend/package-lock.json"
-require_file "start.bat"
-require_file "run.bat"
-require_file "run.vbs"
+require_file "scripts/start.bat"
+require_file "scripts/run.bat"
+require_file "scripts/run.vbs"
 require_file "scripts/launcher.ps1"
 require_file "scripts/preflight_check.py"
 require_file "scripts/pack-portable.bat"
@@ -471,9 +471,9 @@ runtime_dir = Path(os.environ["POINTBENCH_PACK_RUNTIME_DIR"]).resolve()
 frontend_node_modules = Path(os.environ["POINTBENCH_PACK_FRONTEND_NODE_MODULES"]).resolve()
 
 include_items = [
-    "start.bat",
-    "run.bat",
-    "run.vbs",
+    "scripts/start.bat",
+    "scripts/run.bat",
+    "scripts/run.vbs",
     "backend",
     "frontend",
     "scripts",
@@ -482,9 +482,9 @@ include_items = [
 ]
 
 required_entries = {
-    "start.bat",
-    "run.bat",
-    "run.vbs",
+    "scripts/start.bat",
+    "scripts/run.bat",
+    "scripts/run.vbs",
     "scripts/launcher.ps1",
     "scripts/preflight_check.py",
     "scripts/pack-portable.bat",

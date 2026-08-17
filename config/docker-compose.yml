@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   backend:
-    build: ./backend
+    build: ../backend
     container_name: pointbench-backend
     ports:
       - "8000:8000"
@@ -15,7 +15,7 @@ services:
     restart: unless-stopped
 
   frontend:
-    build: ./frontend
+    build: ../frontend
     container_name: pointbench-frontend
     ports:
       - "80:80"

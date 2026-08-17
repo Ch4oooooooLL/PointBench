@@ -1,12 +1,11 @@
 @echo off
 setlocal
 
-set "PROJECT_DIR=%~dp0"
-set "PROJECT_DIR=%PROJECT_DIR:~0,-1%"
+for %%I in ("%~dp0..") do set "PROJECT_DIR=%%~fI"
 cd /d "%PROJECT_DIR%"
 title PointBench Portable
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%PROJECT_DIR%\scripts\launcher.ps1" -ProjectDir "%PROJECT_DIR%" -ShowLogs
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0launcher.ps1" -ProjectDir "%PROJECT_DIR%" -ShowLogs
 set "EXIT_CODE=%ERRORLEVEL%"
 
 echo.
