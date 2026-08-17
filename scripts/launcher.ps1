@@ -167,6 +167,109 @@ function Open-PointBenchBrowser {
     }
 }
 
+$script:StartupProgressForm = $null
+$script:StartupProgressBar = $null
+$script:StartupProgressPhase = $null
+$script:StartupProgressDetail = $null
+
+function Start-StartupProgress {
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        Add-Type -AssemblyName System.Drawing
+
+        $form = New-Object System.Windows.Forms.Form
+        $form.Text = 'PointBench 正在启动'
+        $form.Width = 560
+        $form.Height = 180
+        $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+        $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+        $form.MaximizeBox = $false
+        $form.MinimizeBox = $false
+        $form.ControlBox = $false
+        $form.ShowInTaskbar = $true
+        $form.TopMost = $true
+
+        $iconPath = Join-Path $root 'assets\PointBench.ico'
+        if (Test-Path -LiteralPath $iconPath -PathType Leaf) {
+            $form.Icon = New-Object System.Drawing.Icon($iconPath)
+        }
+
+        $phase = New-Object System.Windows.Forms.Label
+        $phase.Left = 24
+        $phase.Top = 20
+        $phase.Width = 500
+        $phase.Height = 24
+        $phase.Font = [System.Drawing.Font]::new([System.Drawing.SystemFonts]::MessageBoxFont, [System.Drawing.FontStyle]::Bold)
+
+        $bar = New-Object System.Windows.Forms.ProgressBar
+        $bar.Left = 24
+        $bar.Top = 54
+        $bar.Width = 500
+        $bar.Height = 24
+        $bar.Minimum = 0
+        $bar.Maximum = 100
+        $bar.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
+
+        $detail = New-Object System.Windows.Forms.Label
+        $detail.Left = 24
+        $detail.Top = 90
+        $detail.Width = 500
+        $detail.Height = 36
+        $detail.AutoEllipsis = $true
+
+        $form.Controls.Add($phase)
+        $form.Controls.Add($bar)
+        $form.Controls.Add($detail)
+        $script:StartupProgressForm = $form
+        $script:StartupProgressBar = $bar
+        $script:StartupProgressPhase = $phase
+        $script:StartupProgressDetail = $detail
+        $form.Show()
+        Update-StartupProgress -Percent 5 -Phase '正在准备 PointBench' -Detail $root
+    } catch {
+        Write-LauncherLog "Startup progress UI is unavailable: $($_.Exception.Message)"
+        $script:StartupProgressForm = $null
+    }
+}
+
+function Update-StartupProgress {
+    param(
+        [int]$Percent,
+        [string]$Phase,
+        [string]$Detail = ''
+    )
+    if (-not $script:StartupProgressForm) { return }
+    $safePercent = [Math]::Max(0, [Math]::Min(100, $Percent))
+    $script:StartupProgressBar.Value = $safePercent
+    $script:StartupProgressPhase.Text = "$Phase  $safePercent%"
+    $script:StartupProgressDetail.Text = $Detail
+    $script:StartupProgressForm.Refresh()
+    [System.Windows.Forms.Application]::DoEvents()
+}
+
+function Close-StartupProgress {
+    if (-not $script:StartupProgressForm) { return }
+    $script:StartupProgressForm.Close()
+    $script:StartupProgressForm.Dispose()
+    $script:StartupProgressForm = $null
+    [System.Windows.Forms.Application]::DoEvents()
+}
+
+function Show-StartupFailure {
+    param([string]$Message)
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        [System.Windows.Forms.MessageBox]::Show(
+            "$Message`r`n`r`n日志：$launcherLog",
+            'PointBench 启动失败',
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Error
+        ) | Out-Null
+    } catch {
+        Write-LauncherLog "Unable to show startup failure dialog: $($_.Exception.Message)"
+    }
+}
+
 function Write-NewLogLines {
     param(
         [string]$Prefix,
@@ -469,11 +572,15 @@ try {
     }
 
     $launcherMutex = [System.Threading.Mutex]::new($false, 'Local\PointBenchLauncher')
+    Start-StartupProgress
     if (-not $launcherMutex.WaitOne(0, $false)) {
         Write-LauncherLog 'Another launcher is starting PointBench; waiting for it to become ready.'
         for ($attempt = 0; $attempt -lt 35; $attempt++) {
+            Update-StartupProgress -Percent ([Math]::Min(90, 10 + ($attempt * 2))) -Phase '正在等待 PointBench 启动' -Detail '检测到另一个启动进程'
             Start-Sleep -Seconds 1
             if (Test-PointBenchReady) {
+                Update-StartupProgress -Percent 100 -Phase 'PointBench 已就绪'
+                Close-StartupProgress
                 Open-PointBenchBrowser
                 exit 0
             }
@@ -485,6 +592,7 @@ try {
         throw 'PointBench dependencies are not installed. Install PointBench Dependencies first.'
     }
 
+    Update-StartupProgress -Percent 15 -Phase '正在检查运行环境' -Detail $DependencyDir
     $portablePython = Join-Path $dependencyRuntimeDir 'python\python.exe'
     if (-not (Test-Path $portablePython)) {
         throw "Portable Python is missing: $portablePython. Reinstall PointBench Dependencies."
@@ -510,7 +618,9 @@ try {
         throw "Frontend dependencies are missing: $viteEntry. Reinstall PointBench Dependencies or repair the code installation."
     }
 
+    Update-StartupProgress -Percent 30 -Phase '正在校核依赖和数据' -Detail '运行启动前检查'
     Run-Preflight
+    Update-StartupProgress -Percent 48 -Phase '启动前检查完成' -Detail '正在准备本地服务'
 
     $backendCmd = Join-Path $logDir 'start-backend.cmd'
     $backendPy = Join-Path $logDir 'start-backend.py'
@@ -565,27 +675,31 @@ try {
     Write-Console "Latest:  $latestLogDirFile"
     Write-Console ''
 
+    Update-StartupProgress -Percent 58 -Phase '正在启动后端服务' -Detail 'http://127.0.0.1:8000'
     $backendProc = Start-CmdScript -Name 'backend' -ScriptPath $backendCmd -WorkingDirectory $backendDir
     $frontendProc = Start-CmdScript -Name 'frontend' -ScriptPath $frontendCmd -WorkingDirectory $frontendDir
 
     if (-not (Wait-HttpReady -Name 'backend health' -Url 'http://127.0.0.1:8000/api/health' -BackendProcess $backendProc -FrontendProcess $frontendProc -TimeoutSeconds 30)) {
         Stop-ProcessTree $backendProc
         Stop-ProcessTree $frontendProc
-        exit 1
+        throw 'Backend did not become ready. See the startup logs for details.'
     }
+    Update-StartupProgress -Percent 78 -Phase '后端服务已就绪' -Detail '正在等待前端服务'
     if (-not (Wait-HttpReady -Name 'frontend' -Url 'http://127.0.0.1:5173/' -BackendProcess $backendProc -FrontendProcess $frontendProc -TimeoutSeconds 30)) {
         Stop-ProcessTree $backendProc
         Stop-ProcessTree $frontendProc
-        exit 1
+        throw 'Frontend did not become ready. See the startup logs for details.'
     }
 
+    Update-StartupProgress -Percent 100 -Phase 'PointBench 已启动' -Detail '正在打开浏览器'
+    Start-Sleep -Milliseconds 250
+    Close-StartupProgress
     Open-PointBenchBrowser
 
     if ($ShowLogs) {
         Write-Host ''
-        Write-Host 'PointBench is running. Close this window or press Ctrl+C to stop backend and frontend.'
+        Write-Host 'PointBench is running in the system tray. Use the tray menu to exit.'
         Write-Host ''
-        Wait-UntilProcessExit -BackendProcess $backendProc -FrontendProcess $frontendProc
     }
 
     try {
@@ -630,21 +744,18 @@ try {
             Start-Process $appUrl
         }
     })
-    $trayIcon.BalloonTipTitle = 'PointBench'
-    $trayIcon.BalloonTipText = "Backend :8000 | Frontend :5173 | Logs: $runId"
-    $trayIcon.BalloonTipIcon = [System.Windows.Forms.ToolTipIcon]::Info
-    $trayIcon.ShowBalloonTip(3000)
-
     [System.Windows.Forms.Application]::Run()
 
     $trayIcon.Visible = $false
     Stop-ProcessTree $backendProc
     Stop-ProcessTree $frontendProc
 } catch {
+    Close-StartupProgress
     Write-LauncherLog "Unhandled launcher error: $($_.Exception.Message)"
     Write-ExceptionLog -Title 'unhandled_launcher_error' -Record $_ -Path $launcherLog
     Write-FailureSummary "Unhandled launcher error: $($_.Exception.Message)"
     Stop-ProcessTree $backendProc
     Stop-ProcessTree $frontendProc
+    Show-StartupFailure -Message $_.Exception.Message
     exit 1
 }

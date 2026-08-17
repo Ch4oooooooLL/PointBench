@@ -1,6 +1,6 @@
 {
   "product": "PointBench",
-  "codeVersion": "1.0.2",
+  "codeVersion": "1.0.3",
   "dependenciesVersion": "1.0.0-windows-x64",
   "dependenciesPlatform": "windows-x64",
   "minimumDependenciesVersion": "1.0.0-windows-x64"
