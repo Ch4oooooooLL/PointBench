@@ -2,7 +2,7 @@
 
 ## 发布产物
 
-运行 `scripts\build-installers.bat` 后，`dist/` 中生成两个 Windows x64 EXE：
+代码日常更新时运行 `scripts\build-installers.bat`，默认只生成代码安装器。只有依赖实际变化并提升 `dependenciesVersion` 后，才运行 `scripts\build-dependencies.bat` 生成依赖安装器。`dist/` 中的发布文件为：
 
 1. `PointBench-Dependencies-<版本>.exe`
 2. `PointBench-Code-<版本>.exe`
@@ -52,7 +52,7 @@
 
 ```json
 {
-  "codeVersion": "1.0.2",
+  "codeVersion": "1.0.4",
   "dependenciesVersion": "1.0.0-windows-x64",
   "minimumDependenciesVersion": "1.0.0-windows-x64"
 }
@@ -60,6 +60,8 @@
 
 - 仅代码变化：增加 `codeVersion`，依赖版本可以保持不变。
 - Python/Node/npm 依赖变化：增加 `dependenciesVersion`，同步修改 `minimumDependenciesVersion`。
+- 普通代码构建不会读取、覆盖或重新编译依赖安装器，因此其文件时间、PE metadata 和 SHA-256 保持不变。
+- 全量入口 `scripts\pack-portable.bat` 遇到相同版本的依赖安装器时也会跳过；依赖变化必须先提升 `dependenciesVersion`。
 - 每次安装都会重新写入并校核安装包内文件长度和 SHA-256。
 - 重复安装同一版本可用于修复被修改或损坏的文件。
 - 不同代码版本安装在独立目录，桌面快捷方式始终指向最后成功安装的版本。
@@ -82,7 +84,7 @@
 
 ```bat
 PointBench-Dependencies-1.0.0-windows-x64.exe /S /D=D:\Apps\PointBenchDeps
-PointBench-Code-1.0.2.exe /S
+PointBench-Code-1.0.4.exe /S
 ```
 
 `/S` 不显示对话框，进程退出码为 `0` 表示成功；错误详情写入安装日志。代码安装器不接受安装目录，始终跟随已记录的依赖目录。

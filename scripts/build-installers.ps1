@@ -1,6 +1,11 @@
 param(
     [string]$ProjectDir,
-    [string]$OutputDir
+    [string]$OutputDir,
+
+    [ValidateSet('Code', 'Dependencies', 'All')]
+    [string]$Package = 'Code',
+
+    [switch]$ForceDependencies
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,7 +22,7 @@ function Test-CodeSkipPath([string]$RelativePath) {
     if ($path -match '^frontend/(node_modules|dist|\.vite)(/|$)') { return $true }
     if ($path -match '(^|/)(__pycache__|\.pytest_cache|\.mypy_cache|\.ruff_cache)(/|$)') { return $true }
     if ($path -match '^scripts/installer(/|$)') { return $true }
-    if ($path -match '^scripts/(pack-|setup-portable|build-installers)') { return $true }
+    if ($path -match '^scripts/(pack-|setup-portable|build-)') { return $true }
     if ($name -match '\.(pyc|pyo|db|db-journal|db-wal)$') { return $true }
     if ($name -eq 'tsconfig.tsbuildinfo') { return $true }
     return $false
@@ -125,8 +130,16 @@ $hostSource = Join-Path $root 'scripts\installer\InstallerHost.cs'
 $hostExe = Join-Path $buildRoot 'PointBenchInstallerHost.exe'
 $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 
-foreach ($required in @($versionFile, $iconFile, $hostSource, $csc, (Join-Path $root 'runtime\python\python.exe'), (Join-Path $root 'runtime\node\node.exe'), (Join-Path $root 'frontend\node_modules\vite\bin\vite.js'))) {
+$buildCode = $Package -in @('Code', 'All')
+$buildDependencies = $Package -in @('Dependencies', 'All')
+
+foreach ($required in @($versionFile, $iconFile, $hostSource, $csc)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Required installer input is missing: $required" }
+}
+if ($buildDependencies) {
+    foreach ($required in @((Join-Path $root 'runtime\python\python.exe'), (Join-Path $root 'runtime\node\node.exe'), (Join-Path $root 'frontend\node_modules\vite\bin\vite.js'))) {
+        if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Required dependency input is missing: $required" }
+    }
 }
 
 $versions = Get-Content -LiteralPath $versionFile -Raw | ConvertFrom-Json
@@ -138,21 +151,29 @@ New-Item -ItemType Directory -Path $outputRoot, $buildRoot -Force | Out-Null
 & $csc /nologo /target:winexe /platform:x64 /optimize+ /codepage:65001 "/win32icon:$iconFile" "/out:$hostExe" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll $hostSource
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $hostExe -PathType Leaf)) { throw 'Failed to compile the installer host.' }
 
-$archivePatterns = @('*.zip', '*.whl', '*.7z', '*.rar', '*.tar', '*.tgz', '*.gz', '*.xz', '*.bz2')
-$dependencyFiles = @(Get-DependencyFiles $root)
-$forbiddenArchives = @($dependencyFiles | Where-Object { $name = [IO.Path]::GetFileName($_.Relative); @($archivePatterns | Where-Object { $name -like $_ }).Count -gt 0 })
-if ($forbiddenArchives.Count -gt 0) { throw "Dependencies contain compressed archives: $($forbiddenArchives[0].Relative)" }
-
-$codeFiles = @(Get-CodeFiles $root)
-foreach ($requiredRelative in @('assets/PointBench.ico', 'backend/app/main.py', 'config/version.json', 'frontend/package.json', 'scripts/launcher.ps1', 'scripts/run.vbs')) {
-    if ($requiredRelative -notin $codeFiles.Relative) { throw "Code installer input is missing: $requiredRelative" }
-}
-
 $dependencyOutput = Join-Path $outputRoot "PointBench-Dependencies-$($versions.dependenciesVersion).exe"
 $codeOutput = Join-Path $outputRoot "PointBench-Code-$($versions.codeVersion).exe"
-New-RawInstaller -HostPath $hostExe -OutputPath $dependencyOutput -PackageType 'dependencies' -Version $versions.dependenciesVersion -RequiredDependenciesVersion '' -Files $dependencyFiles
-New-RawInstaller -HostPath $hostExe -OutputPath $codeOutput -PackageType 'code' -Version $versions.codeVersion -RequiredDependenciesVersion $versions.minimumDependenciesVersion -Files $codeFiles
+
+if ($buildDependencies) {
+    if ((Test-Path -LiteralPath $dependencyOutput -PathType Leaf) -and -not $ForceDependencies) {
+        Write-Host "[SKIP] Dependency installer already exists for version $($versions.dependenciesVersion)." -ForegroundColor Yellow
+        Write-Host '       Its file metadata and SHA-256 are preserved. Bump dependenciesVersion when dependencies actually change.'
+    } else {
+        $archivePatterns = @('*.zip', '*.whl', '*.7z', '*.rar', '*.tar', '*.tgz', '*.gz', '*.xz', '*.bz2')
+        $dependencyFiles = @(Get-DependencyFiles $root)
+        $forbiddenArchives = @($dependencyFiles | Where-Object { $name = [IO.Path]::GetFileName($_.Relative); @($archivePatterns | Where-Object { $name -like $_ }).Count -gt 0 })
+        if ($forbiddenArchives.Count -gt 0) { throw "Dependencies contain compressed archives: $($forbiddenArchives[0].Relative)" }
+        New-RawInstaller -HostPath $hostExe -OutputPath $dependencyOutput -PackageType 'dependencies' -Version $versions.dependenciesVersion -RequiredDependenciesVersion '' -Files $dependencyFiles
+    }
+}
+
+if ($buildCode) {
+    $codeFiles = @(Get-CodeFiles $root)
+    foreach ($requiredRelative in @('assets/PointBench.ico', 'backend/app/main.py', 'config/version.json', 'frontend/package.json', 'scripts/launcher.ps1', 'scripts/run.vbs')) {
+        if ($requiredRelative -notin $codeFiles.Relative) { throw "Code installer input is missing: $requiredRelative" }
+    }
+    New-RawInstaller -HostPath $hostExe -OutputPath $codeOutput -PackageType 'code' -Version $versions.codeVersion -RequiredDependenciesVersion $versions.minimumDependenciesVersion -Files $codeFiles
+}
 
 Write-Host ''
-Write-Host '[OK] Two non-admin PointBench installers are ready.' -ForegroundColor Green
-Write-Host 'Install Dependencies first, then install Code.'
+Write-Host "[OK] PointBench installer build finished. Package=$Package" -ForegroundColor Green
