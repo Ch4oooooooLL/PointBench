@@ -2,6 +2,9 @@ param(
     [Parameter(Mandatory=$false)]
     [string]$ProjectDir,
 
+    [Parameter(Mandatory=$false)]
+    [string]$DependencyDir,
+
     [switch]$ShowLogs
 )
 
@@ -15,6 +18,27 @@ if ([string]::IsNullOrWhiteSpace($ProjectDir)) {
 $root = [System.IO.Path]::GetFullPath($ProjectDir.TrimEnd('\', '/', '"', ' '))
 $backendDir = Join-Path $root 'backend'
 $frontendDir = Join-Path $root 'frontend'
+$appUrl = 'http://127.0.0.1:5173/'
+$healthUrl = 'http://127.0.0.1:8000/api/health'
+
+if ([string]::IsNullOrWhiteSpace($DependencyDir)) {
+    $localRuntime = Join-Path $root 'runtime\python\python.exe'
+    if (Test-Path -LiteralPath $localRuntime -PathType Leaf) {
+        $DependencyDir = $root
+    } else {
+        try {
+            $installState = Get-ItemProperty -LiteralPath 'HKCU:\Software\PointBench' -ErrorAction Stop
+            $DependencyDir = [string]$installState.DependenciesInstallDir
+        } catch {
+            $DependencyDir = ''
+        }
+    }
+}
+if (-not [string]::IsNullOrWhiteSpace($DependencyDir)) {
+    $DependencyDir = [System.IO.Path]::GetFullPath($DependencyDir.TrimEnd('\', '/', '"', ' '))
+}
+$dependencyRuntimeDir = if ($DependencyDir) { Join-Path $DependencyDir 'runtime' } else { '' }
+$dependencyNodeModules = if ($DependencyDir) { Join-Path $DependencyDir 'frontend\node_modules' } else { '' }
 $logRoot = Join-Path $root 'logs'
 New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
 
@@ -113,6 +137,27 @@ function Write-Console {
     param([string]$Text)
     if ($ShowLogs) {
         Write-Host $Text
+    }
+}
+
+function Test-PointBenchReady {
+    try {
+        $health = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 2
+        if ($health.StatusCode -lt 200 -or $health.StatusCode -ge 400) { return $false }
+        $frontend = Invoke-WebRequest -Uri $appUrl -UseBasicParsing -TimeoutSec 2
+        return $frontend.StatusCode -ge 200 -and $frontend.StatusCode -lt 400
+    } catch {
+        return $false
+    }
+}
+
+function Open-PointBenchBrowser {
+    try {
+        Start-Process $appUrl
+        Write-LauncherLog "Opened browser: $appUrl"
+    } catch {
+        Write-ExceptionLog -Title 'open_browser_failed' -Record $_ -Path $launcherLog
+        Write-LauncherLog "Failed to open browser automatically: $($_.Exception.Message)"
     }
 }
 
@@ -251,69 +296,6 @@ function Stop-ProcessTree {
             & taskkill /PID $($Process.Id) /T /F 2>$null
         } catch {
             Write-LauncherLog ("Failed to stop process tree PID={0}: {1}" -f $Process.Id, $_.Exception.Message)
-        }
-    }
-}
-
-function Stop-ExistingPointBenchProcesses {
-    $currentPid = $PID
-    $escapedRoot = [Regex]::Escape($root)
-    $existingProcesses = @()
-
-    try {
-        $processes = @(Get-CimInstance Win32_Process -ErrorAction Stop)
-    } catch {
-        Write-LauncherLog ("Unable to inspect existing processes: {0}" -f $_.Exception.Message)
-        return
-    }
-
-    foreach ($process in $processes) {
-        if ($process.ProcessId -eq $currentPid) {
-            continue
-        }
-
-        $commandLine = [string]$process.CommandLine
-        if ([string]::IsNullOrWhiteSpace($commandLine)) {
-            continue
-        }
-
-        $isPointBenchProcess = $commandLine -match $escapedRoot -and (
-            $commandLine -match 'launcher\.ps1' -or
-            $commandLine -match 'start-backend\.cmd' -or
-            $commandLine -match 'start-frontend\.cmd' -or
-            $commandLine -match 'uvicorn\s+app\.main:app' -or
-            $commandLine -match 'vite[\\/]+bin[\\/]+vite\.js'
-        )
-
-        if ($isPointBenchProcess) {
-            $existingProcesses += $process
-        }
-    }
-
-    if ($existingProcesses.Count -eq 0) {
-        Write-LauncherLog 'No existing PointBench process found.'
-        return
-    }
-
-    $ids = ($existingProcesses | ForEach-Object { $_.ProcessId }) -join ', '
-    Write-LauncherLog "Stopping existing PointBench processes: $ids"
-    foreach ($process in $existingProcesses) {
-        try {
-            & taskkill /PID $($process.ProcessId) /T /F 2>$null
-        } catch {
-            Write-LauncherLog ("Failed to stop existing process PID={0}: {1}" -f $process.ProcessId, $_.Exception.Message)
-        }
-    }
-}
-
-function Release-Port {
-    param([string]$Port)
-
-    $null = & netstat -ano 2>$null | Select-String (":{0}.*LISTENING" -f $Port) | ForEach-Object {
-        $parts = $_ -split '\s+'
-        if ($parts[-1] -match '^\d+$') {
-            Write-LauncherLog "Killing existing process on port $Port. PID=$($parts[-1])"
-            & taskkill /PID $($parts[-1]) /F 2>$null
         }
     }
 }
@@ -474,33 +456,55 @@ function Run-Preflight {
 }
 
 try {
-    $portablePython = Join-Path $root 'runtime\python\python.exe'
+    if (Test-PointBenchReady) {
+        Write-LauncherLog 'PointBench is already running; opening the existing instance.'
+        Open-PointBenchBrowser
+        exit 0
+    }
+
+    $launcherMutex = [System.Threading.Mutex]::new($false, 'Local\PointBenchLauncher')
+    if (-not $launcherMutex.WaitOne(0, $false)) {
+        Write-LauncherLog 'Another launcher is starting PointBench; waiting for it to become ready.'
+        for ($attempt = 0; $attempt -lt 35; $attempt++) {
+            Start-Sleep -Seconds 1
+            if (Test-PointBenchReady) {
+                Open-PointBenchBrowser
+                exit 0
+            }
+        }
+        throw 'Another PointBench launcher is active, but the application did not become ready within 35 seconds.'
+    }
+
+    if ([string]::IsNullOrWhiteSpace($DependencyDir)) {
+        throw 'PointBench dependencies are not installed. Install PointBench Dependencies first.'
+    }
+
+    $portablePython = Join-Path $dependencyRuntimeDir 'python\python.exe'
     if (-not (Test-Path $portablePython)) {
-        throw "Portable Python is missing: $portablePython. Use a complete PointBench portable package with runtime\python unpacked."
+        throw "Portable Python is missing: $portablePython. Reinstall PointBench Dependencies."
     }
     $pythonExe = $portablePython
-    $env:PATH = "$(Join-Path $root 'runtime\python');$(Join-Path $root 'runtime\python\Scripts');$env:PATH"
+    $env:PATH = "$(Join-Path $dependencyRuntimeDir 'python');$(Join-Path $dependencyRuntimeDir 'python\Scripts');$env:PATH"
     $env:PYTHONPATH = $backendDir
 
-    $portableNode = Join-Path $root 'runtime\node\node.exe'
+    $portableNode = Join-Path $dependencyRuntimeDir 'node\node.exe'
     if (-not (Test-Path $portableNode)) {
-        throw "Portable Node.js is missing: $portableNode. Use a complete PointBench portable package with runtime\node unpacked."
+        throw "Portable Node.js is missing: $portableNode. Reinstall PointBench Dependencies."
     }
     $nodeExe = $portableNode
-    $portableNpm = Join-Path $root 'runtime\node\npm.cmd'
+    $portableNpm = Join-Path $dependencyRuntimeDir 'node\npm.cmd'
     $npmExe = if (Test-Path $portableNpm) { $portableNpm } else { $null }
-    $env:PATH = "$(Join-Path $root 'runtime\node');$env:PATH"
+    $env:PATH = "$(Join-Path $dependencyRuntimeDir 'node');$env:PATH"
 
     $viteEntry = Join-Path $frontendDir 'node_modules\vite\bin\vite.js'
     if (-not (Test-Path $viteEntry)) {
-        throw "Frontend dependencies are missing: $viteEntry. Use a complete PointBench portable package with frontend\node_modules unpacked."
+        $viteEntry = Join-Path $dependencyNodeModules 'vite\bin\vite.js'
+    }
+    if (-not (Test-Path $viteEntry)) {
+        throw "Frontend dependencies are missing: $viteEntry. Reinstall PointBench Dependencies or repair the code installation."
     }
 
-    Stop-ExistingPointBenchProcesses
     Run-Preflight
-
-    Release-Port '8000'
-    Release-Port '5173'
 
     $backendCmd = Join-Path $logDir 'start-backend.cmd'
     $backendPy = Join-Path $logDir 'start-backend.py'
@@ -541,8 +545,8 @@ try {
         'set NODE_OPTIONS=--trace-uncaught --trace-warnings',
         ('cd /d "{0}"' -f $frontendDir),
         ('echo cwd=%CD% >> "{0}"' -f $frontendLog),
-        ('echo command="{0}" .\node_modules\vite\bin\vite.js --host 127.0.0.1 --port 5173 --clearScreen false >> "{1}"' -f $nodeExe, $frontendLog),
-        ('"{0}" .\node_modules\vite\bin\vite.js --host 127.0.0.1 --port 5173 --clearScreen false >> "{1}" 2>&1' -f $nodeExe, $frontendLog),
+        ('echo command="{0}" "{1}" --host 127.0.0.1 --port 5173 --clearScreen false >> "{2}"' -f $nodeExe, $viteEntry, $frontendLog),
+        ('"{0}" "{1}" --host 127.0.0.1 --port 5173 --clearScreen false >> "{2}" 2>&1' -f $nodeExe, $viteEntry, $frontendLog),
         ('echo frontend_exit_code=%ERRORLEVEL% >> "{0}"' -f $frontendLog),
         'exit /b %ERRORLEVEL%'
     )
@@ -567,12 +571,7 @@ try {
         exit 1
     }
 
-    try {
-        Start-Process 'http://localhost:5173'
-    } catch {
-        Write-ExceptionLog -Title 'open_browser_failed' -Record $_ -Path $launcherLog
-        Write-LauncherLog "Failed to open browser automatically: $($_.Exception.Message)"
-    }
+    Open-PointBenchBrowser
 
     if ($ShowLogs) {
         Write-Host ''
@@ -591,14 +590,19 @@ try {
     }
 
     $trayIcon = New-Object System.Windows.Forms.NotifyIcon
-    $trayIcon.Icon = [System.Drawing.SystemIcons]::Application
-    $trayIcon.Text = 'test-point-web'
+    $iconPath = Join-Path $root 'assets\PointBench.ico'
+    if (Test-Path -LiteralPath $iconPath -PathType Leaf) {
+        $trayIcon.Icon = New-Object System.Drawing.Icon($iconPath)
+    } else {
+        $trayIcon.Icon = [System.Drawing.SystemIcons]::Application
+    }
+    $trayIcon.Text = 'PointBench'
     $trayIcon.Visible = $true
 
     $menu = New-Object System.Windows.Forms.ContextMenuStrip
 
     $openBrowser = New-Object System.Windows.Forms.ToolStripMenuItem('Open Browser')
-    $openBrowser.Add_Click({ Start-Process 'http://localhost:5173' })
+    $openBrowser.Add_Click({ Start-Process $appUrl })
     $menu.Items.Add($openBrowser) | Out-Null
 
     $menu.Items.Add('-') | Out-Null
@@ -615,10 +619,10 @@ try {
     $trayIcon.ContextMenuStrip = $menu
     $trayIcon.Add_Click({
         if ($_.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
-            Start-Process 'http://localhost:5173'
+            Start-Process $appUrl
         }
     })
-    $trayIcon.BalloonTipTitle = 'test-point-web'
+    $trayIcon.BalloonTipTitle = 'PointBench'
     $trayIcon.BalloonTipText = "Backend :8000 | Frontend :5173 | Logs: $runId"
     $trayIcon.BalloonTipIcon = [System.Windows.Forms.ToolTipIcon]::Info
     $trayIcon.ShowBalloonTip(3000)
