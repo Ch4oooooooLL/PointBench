@@ -6,6 +6,7 @@ import { AppProvider } from './context/AppContext';
 import { AnalysisPage } from './pages/AnalysisPage';
 import { CrackRecordsPage } from './pages/CrackRecordsPage';
 import { DewesoftImportsPage } from './pages/DewesoftImportsPage';
+import { FemPreviewPage } from './pages/FemPreviewPage';
 import { ImportPage } from './pages/ImportPage';
 import { PointDetailPage } from './pages/PointDetailPage';
 import { ProjectCreatePage } from './pages/ProjectCreatePage';
@@ -27,6 +28,7 @@ const router = createBrowserRouter([
       { path: 'crack-records', element: <CrackRecordsPage /> },
       { path: 'projects/new', element: <ProjectCreatePage /> },
       { path: 'import', element: <ImportPage /> },
+      { path: 'fem-preview', element: <FemPreviewPage /> },
       { path: 'settings', element: <SettingsPage /> },
       { path: 'help', element: <UsageGuidePage /> },
       { path: 'workflow', element: <WorkflowPage /> },

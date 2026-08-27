@@ -17,6 +17,7 @@ from app.routers import (
     analysis_router,
     crack_router,
     dewesoft_router,
+    fem_router,
     import_router,
     measurement_router,
     media_router,
@@ -196,6 +197,7 @@ if AUTH_ENABLED:
 
     app.include_router(auth_router.router)
 app.include_router(import_router.router)
+app.include_router(fem_router.router)
 app.include_router(project_router.router)
 app.include_router(point_router.router)
 app.include_router(media_router.router)

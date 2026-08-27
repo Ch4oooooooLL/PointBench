@@ -141,6 +141,23 @@ export interface ImportPreview {
   can_import: boolean;
 }
 
+export interface FemPreviewStats {
+  node_count: number;
+  element_count: number;
+  triangle_count: number;
+  element_types: Record<string, number>;
+  ignored_cards: Record<string, number>;
+  included_files: string[];
+  source_name: string;
+}
+
+export interface FemPreviewResult {
+  preview_id: string;
+  stats: FemPreviewStats;
+  glb_url: string;
+  mapping_url: string;
+}
+
 export interface TrendItem {
   run_id: number;
   run_name: string;
