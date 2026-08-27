@@ -4522,3 +4522,66 @@ label {
   padding: 20px;
   text-align: center;
 }
+
+/* ── FEM 预览：显示选项与图例 ─────────────────────────── */
+.viewer-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 24px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  background: #f8fafc;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+
+.toggle-switch.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.fem-legend {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.fem-legend-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  line-height: 24px;
+  white-space: nowrap;
+}
+
+.fem-legend-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+.fem-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-main);
+  line-height: 24px;
+}
+
+.fem-legend-item i {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  flex-shrink: 0;
+}
+
+.fem-legend-item em {
+  font-style: normal;
+  color: var(--text-muted);
+  font-size: 12px;
+}

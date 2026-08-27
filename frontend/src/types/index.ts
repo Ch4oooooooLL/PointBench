@@ -151,11 +151,26 @@ export interface FemPreviewStats {
   source_name: string;
 }
 
+export interface FemGroupInfo {
+  id: number;
+  name: string;
+  color: string;
+  element_count: number;
+}
+
+export interface FemGroupingData {
+  coloring_mode: 'component' | 'property' | 'none';
+  groups: FemGroupInfo[];
+  /** Element ID (as string key) -> group ID. */
+  element_group_ids: Record<string, number>;
+}
+
 export interface FemPreviewResult {
   preview_id: string;
   stats: FemPreviewStats;
   glb_url: string;
   mapping_url: string;
+  grouping: FemGroupingData;
 }
 
 export interface TrendItem {

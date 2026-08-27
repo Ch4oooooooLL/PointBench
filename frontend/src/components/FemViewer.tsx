@@ -2,33 +2,44 @@ import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { FemGroupingData } from '../types';
 
 // Keep the mesh deliberately quiet so the selected solver element stays the
 // visual focus of the preview.
 const BASE_COLOR = new THREE.Color('#6f899a');
 const SELECTED_COLOR = new THREE.Color('#d9544d');
+const EDGE_COLOR = new THREE.Color('#1f2937');
 type ViewPreset = 'front' | 'iso' | 'fit';
 
 interface FemViewerProps {
   glbUrl: string;
   mappingUrl: string;
+  grouping: FemGroupingData | null;
+  showEdges: boolean;
+  transparent: boolean;
+  colorByGroup: boolean;
 }
 
-export function FemViewer({ glbUrl, mappingUrl }: FemViewerProps) {
+interface ViewerRuntime {
+  applyColors: (elementId: number | null) => void;
+  buildEdges: () => void;
+  applyMaterialMode: () => void;
+  fitView: (preset: ViewPreset) => void;
+  fit: () => void;
+  back: () => void;
+}
+
+export function FemViewer({ glbUrl, mappingUrl, grouping, showEdges, transparent, colorByGroup }: FemViewerProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedElement, setSelectedElement] = useState<number | null>(null);
   const [activePreset, setActivePreset] = useState<ViewPreset>('front');
   const selectedRef = useRef(selectedElement);
-  const runtimeRef = useRef<{
-    geometry: THREE.BufferGeometry | null;
-    mapping: number[];
-    fitView: (preset: ViewPreset) => void;
-    fit: () => void;
-    back: () => void;
-  } | null>(null);
+  const optionsRef = useRef({ showEdges, transparent, colorByGroup, grouping });
+  const runtimeRef = useRef<ViewerRuntime | null>(null);
 
   selectedRef.current = selectedElement;
+  optionsRef.current = { showEdges, transparent, colorByGroup, grouping };
 
   useEffect(() => {
     const host = hostRef.current;
@@ -72,12 +83,23 @@ export function FemViewer({ glbUrl, mappingUrl }: FemViewerProps) {
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
     let modelMesh: THREE.Mesh | null = null;
+    let edgeLines: THREE.LineSegments | null = null;
+    let material: THREE.MeshStandardMaterial | null = null;
     let geometry: THREE.BufferGeometry | null = null;
     let mapping: number[] = [];
     let modelBounds: THREE.Box3 | null = null;
     let disposed = false;
 
-    const applySelectionColors = (elementId: number | null) => {
+    const colorForElement = (elementId: number): THREE.Color => {
+      const options = optionsRef.current;
+      if (!options.colorByGroup) return BASE_COLOR;
+      const groupId = options.grouping?.element_group_ids[String(elementId)];
+      if (groupId == null) return BASE_COLOR;
+      const info = options.grouping?.groups.find((group) => group.id === groupId);
+      return info ? new THREE.Color(info.color) : BASE_COLOR;
+    };
+
+    const applyColors = (elementId: number | null) => {
       if (!geometry) return;
       const position = geometry.getAttribute('position');
       let color = geometry.getAttribute('color') as THREE.BufferAttribute | undefined;
@@ -86,12 +108,44 @@ export function FemViewer({ glbUrl, mappingUrl }: FemViewerProps) {
         geometry.setAttribute('color', color);
       }
       for (let triangle = 0; triangle < mapping.length; triangle += 1) {
-        const tint = mapping[triangle] === elementId ? SELECTED_COLOR : BASE_COLOR;
+        const elementIdOfTriangle = mapping[triangle];
+        const isSelected = elementId != null && elementIdOfTriangle === elementId;
+        const tint = isSelected ? SELECTED_COLOR : colorForElement(elementIdOfTriangle);
         for (let corner = 0; corner < 3; corner += 1) {
           color.setXYZ(triangle * 3 + corner, tint.r, tint.g, tint.b);
         }
       }
       color.needsUpdate = true;
+    };
+
+    const buildEdges = () => {
+      if (edgeLines) {
+        edgeLines.geometry.dispose();
+        if (edgeLines.material instanceof THREE.Material) edgeLines.material.dispose();
+        scene.remove(edgeLines);
+        edgeLines = null;
+      }
+      if (!geometry || !modelMesh) return;
+      if (!optionsRef.current.showEdges) return;
+      const edges = new THREE.EdgesGeometry(geometry, 1);
+      const lines = new THREE.LineSegments(
+        edges,
+        new THREE.LineBasicMaterial({ color: EDGE_COLOR, transparent: true, opacity: 0.6 }),
+      );
+      lines.position.copy(modelMesh.position);
+      lines.rotation.copy(modelMesh.rotation);
+      lines.scale.copy(modelMesh.scale);
+      scene.add(lines);
+      edgeLines = lines;
+    };
+
+    const applyMaterialMode = () => {
+      if (!material) return;
+      const semiTransparent = optionsRef.current.transparent;
+      material.transparent = semiTransparent;
+      material.opacity = semiTransparent ? 0.55 : 1;
+      material.depthWrite = !semiTransparent;
+      material.needsUpdate = true;
     };
 
     // View history for the "B" (go back to previous view) shortcut.
@@ -172,7 +226,7 @@ export function FemViewer({ glbUrl, mappingUrl }: FemViewerProps) {
           if (mapping.length * 3 !== meshGeometry.getAttribute('position').count) {
             throw new Error('triangle mapping does not match GLB geometry');
           }
-          node.material = new THREE.MeshStandardMaterial({
+          material = new THREE.MeshStandardMaterial({
             vertexColors: true,
             roughness: 0.72,
             metalness: 0.08,
@@ -180,6 +234,7 @@ export function FemViewer({ glbUrl, mappingUrl }: FemViewerProps) {
             emissiveIntensity: 0.2,
             side: THREE.DoubleSide,
           });
+          node.material = material;
         });
         scene.add(gltf.scene);
         modelBounds = new THREE.Box3().setFromObject(gltf.scene);
@@ -190,8 +245,10 @@ export function FemViewer({ glbUrl, mappingUrl }: FemViewerProps) {
         const grid = new THREE.GridHelper(maxDimension * 3, 24, '#b9cbd6', '#dce6ec');
         grid.position.set(modelCenter.x, modelBounds.min.y - maxDimension * 0.06, modelCenter.z);
         scene.add(grid);
-        applySelectionColors(selectedRef.current);
-        runtimeRef.current = { geometry, mapping, fitView, fit, back };
+        runtimeRef.current = { applyColors, buildEdges, applyMaterialMode, fitView, fit, back };
+        applyColors(selectedRef.current);
+        buildEdges();
+        applyMaterialMode();
         fitView('front');
       })
       .catch((error) => {
@@ -218,14 +275,14 @@ export function FemViewer({ glbUrl, mappingUrl }: FemViewerProps) {
       const hits = raycaster.intersectObjects(modelMesh ? [modelMesh] : [], false);
       if (!hits.length) {
         setSelectedElement(null);
-        applySelectionColors(null);
+        applyColors(null);
         return;
       }
       const faceIndex = hits[0].faceIndex;
       if (faceIndex != null && mapping[faceIndex] !== undefined) {
         const elementId = mapping[faceIndex];
         setSelectedElement(elementId);
-        applySelectionColors(elementId);
+        applyColors(elementId);
       }
     };
     renderer.domElement.addEventListener('pointerdown', onPointerDown);
@@ -270,6 +327,11 @@ export function FemViewer({ glbUrl, mappingUrl }: FemViewerProps) {
       renderer.domElement.removeEventListener('pointerdown', onPointerDown);
       renderer.domElement.removeEventListener('pointerup', onPointerUp);
       renderer.domElement.removeEventListener('keydown', onKeyDown);
+      if (edgeLines) {
+        edgeLines.geometry.dispose();
+        if (edgeLines.material instanceof THREE.Material) edgeLines.material.dispose();
+        scene.remove(edgeLines);
+      }
       controls.dispose();
       renderer.dispose();
       scene.traverse((object) => {
@@ -284,20 +346,18 @@ export function FemViewer({ glbUrl, mappingUrl }: FemViewerProps) {
     };
   }, [glbUrl, mappingUrl]);
 
-  // Selection changes re-tint triangles without reloading the model.
+  // Live application of view options (colors, edges, transparency).
   useEffect(() => {
-    const runtime = runtimeRef.current;
-    if (!runtime?.geometry) return;
-    const color = runtime.geometry.getAttribute('color') as THREE.BufferAttribute;
-    if (!color) return;
-    for (let triangle = 0; triangle < runtime.mapping.length; triangle += 1) {
-      const tint = runtime.mapping[triangle] === selectedElement ? SELECTED_COLOR : BASE_COLOR;
-      for (let corner = 0; corner < 3; corner += 1) {
-        color.setXYZ(triangle * 3 + corner, tint.r, tint.g, tint.b);
-      }
-    }
-    color.needsUpdate = true;
-  }, [selectedElement]);
+    runtimeRef.current?.applyColors(selectedElement);
+  }, [selectedElement, colorByGroup, grouping]);
+
+  useEffect(() => {
+    runtimeRef.current?.buildEdges();
+  }, [showEdges]);
+
+  useEffect(() => {
+    runtimeRef.current?.applyMaterialMode();
+  }, [transparent]);
 
   const setView = (preset: ViewPreset) => {
     if (preset === 'fit') runtimeRef.current?.fit();

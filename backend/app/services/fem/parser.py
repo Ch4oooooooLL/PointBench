@@ -10,6 +10,7 @@ from typing import Any, ClassVar
 
 from .canonical import (
     CanonicalFEModel,
+    Component,
     Element,
     Material,
     Node,
@@ -29,6 +30,15 @@ class ModelParseError(ModelProviderError, ValueError):
 
 
 _SEMANTIC_SOLID_FIELDS = frozenset({"CORDM", "CID", "THETA", "PHI"})
+
+# HyperMesh export metadata cards.  These live in ``$`` comment rows and are
+# the standard way a deck records component names/colors and element-to-comp
+# membership (``$HMCOMP ID`` is the block marker that groups the elements
+# following it until the next marker).
+_HMNAME_COMP_RE = re.compile(r'^\$HMNAME\s+COMP\s+(\d+)\s*"([^"]*)"', re.IGNORECASE)
+_HWCOLOR_COMP_RE = re.compile(r"^\$HWCOLOR\s+COMP\s+(\d+)\s+(\d+)", re.IGNORECASE)
+_HMCOMP_ID_RE = re.compile(r"^\$HMCOMP\s+ID\s+(\d+)", re.IGNORECASE)
+_ELEMENTPROP_RE = re.compile(r"^\$ELEMENTPROP\s+(\d+)\s+(\d+)", re.IGNORECASE)
 
 
 def _as_int(value: Any, *, field_name: str) -> int:
@@ -443,6 +453,27 @@ class FemModelProvider(FEModelProvider):
         }
     ) | frozenset(_solid_node_counts)
 
+    _element_cards = frozenset(
+        {
+            "CTRIA3",
+            "CTRIA6",
+            "CQUAD4",
+            "CQUAD8",
+            "CTETRA",
+            "CTETRA10",
+            "CPENTA",
+            "CPENTA15",
+            "CPYRA",
+            "CPYRA13",
+            "CHEXA",
+            "CHEXA20",
+            "CROD",
+            "CBAR",
+            "CBEAM",
+            "CONROD",
+        }
+    )
+
     def __init__(
         self,
         fem_path: str | Path,
@@ -489,12 +520,23 @@ class FemModelProvider(FEModelProvider):
         materials: dict[int, Material] = {}
         sets: dict[int, SetDefinition] = {}
         subcases: dict[int, Subcase] = {}
+        components: dict[int, Component] = {}
         ignored_cards: dict[str, int] = {}
         current_subcase: int | None = None
+        # HyperMesh component metadata: element->comp membership collected
+        # from ``$HMCOMP ID`` block markers plus ``$ELEMENTPROP`` pid links.
+        element_comp_block: dict[int, int] = {}
+        elementprop_by_pid: dict[int, int] = {}
+        current_component_id: int | None = None
 
         def dispatch(fields: Sequence[str], line_number: int) -> None:
             nonlocal current_subcase
             card = str(fields[0]).strip().upper().rstrip("*")
+            if card in self._element_cards and current_component_id is not None and len(fields) > 1:
+                try:
+                    element_comp_block[_as_int(fields[1], field_name=f"{card} EID")] = current_component_id
+                except ModelParseError:
+                    pass
             if card not in self._supported_cards:
                 if card and not card.startswith("$"):
                     ignored_cards[card] = ignored_cards.get(card, 0) + 1
@@ -603,6 +645,13 @@ class FemModelProvider(FEModelProvider):
                 # occur between continuation rows.  A later non-continuation
                 # row still flushes the pending logical card, while source
                 # path changes below prevent INCLUDE records crossing files.
+                # HyperMesh component metadata also lives in comment rows, so
+                # scan the raw line (inline-comment stripping would erase it).
+                block_marker = self._parse_component_metadata(
+                    raw_line, components, elementprop_by_pid, current_component_id
+                )
+                if block_marker is not None:
+                    current_component_id = block_marker
                 continue
 
             if (
@@ -688,11 +737,20 @@ class FemModelProvider(FEModelProvider):
             "included_files": included_files,
             "include_status": "resolved" if included_files else "none",
         }
+        metadata.update(
+            self._finalize_component_association(
+                components,
+                element_comp_block,
+                elementprop_by_pid,
+                elements,
+            )
+        )
         return CanonicalFEModel(
             nodes=nodes,
             elements=elements,
             properties=properties,
             materials=materials,
+            components=components,
             sets=sets,
             subcases=subcases,
             source="fem",
@@ -1079,6 +1137,101 @@ class FemModelProvider(FEModelProvider):
                 f" at line {line_number}"
             )
         elements[element.element_id] = element
+
+    @classmethod
+    def _parse_component_metadata(
+        cls,
+        raw_line: str,
+        components: dict[int, Component],
+        elementprop_by_pid: dict[int, int],
+        current_component_id: int | None,
+    ) -> int | None:
+        """Parse one HyperMesh metadata comment row.
+
+        Handles ``$HMNAME COMP`` (name), ``$HWCOLOR COMP`` (color index),
+        ``$HMCOMP ID`` (block marker) and ``$ELEMENTPROP`` (pid -> comp).
+        Returns the new current component ID for a block marker, else None.
+        Components are frozen records, so updates replace the dict entry.
+        """
+
+        line = raw_line.strip()
+        if not line:
+            return None
+        block = _HMCOMP_ID_RE.match(line)
+        if block:
+            return _as_int(block.group(1), field_name="HMCOMP ID")
+        name_match = _HMNAME_COMP_RE.match(line)
+        if name_match:
+            comp_id = _as_int(name_match.group(1), field_name="HMNAME COMP ID")
+            name = name_match.group(2).strip() or None
+            existing = components.get(comp_id)
+            if existing is None:
+                components[comp_id] = Component(comp_id, name)
+            elif name and not existing.name:
+                components[comp_id] = Component(
+                    comp_id, name, existing.element_ids, existing.property_id, existing.fields
+                )
+            return None
+        color_match = _HWCOLOR_COMP_RE.match(line)
+        if color_match:
+            comp_id = _as_int(color_match.group(1), field_name="HWCOLOR COMP ID")
+            color = _as_int(color_match.group(2), field_name="HWCOLOR value")
+            existing = components.get(comp_id)
+            fields = {"hw_color": color}
+            if existing is None:
+                components[comp_id] = Component(comp_id, None, fields=fields)
+            else:
+                components[comp_id] = Component(
+                    comp_id,
+                    existing.name,
+                    existing.element_ids,
+                    existing.property_id,
+                    {**existing.fields, **fields},
+                )
+            return None
+        prop_match = _ELEMENTPROP_RE.match(line)
+        if prop_match:
+            pid = _as_int(prop_match.group(1), field_name="ELEMENTPROP PID")
+            comp_id = _as_int(prop_match.group(2), field_name="ELEMENTPROP COMP ID")
+            elementprop_by_pid[pid] = comp_id
+            if comp_id not in components:
+                components[comp_id] = Component(comp_id, None)
+        return None
+
+    @staticmethod
+    def _finalize_component_association(
+        components: dict[int, Component],
+        element_comp_block: dict[int, int],
+        elementprop_by_pid: dict[int, int],
+        elements: dict[int, Element],
+    ) -> dict[str, Any]:
+        """Resolve element->component membership and record it in metadata.
+
+        Block markers are authoritative; ``$ELEMENTPROP`` pid links back-fill
+        any elements left unassigned.  When nothing links elements to a
+        component the mapping stays empty so callers can fall back to
+        property-based coloring.
+        """
+
+        element_component_ids: dict[int, int] = {}
+        element_component_ids.update(element_comp_block)
+        for element_id, element in elements.items():
+            if element_id in element_component_ids:
+                continue
+            pid = element.property_id
+            if pid is not None and pid in elementprop_by_pid:
+                element_component_ids[element_id] = elementprop_by_pid[pid]
+        if not element_component_ids:
+            return {"element_component_ids": {}, "component_element_ids": {}}
+        component_element_ids: dict[int, list[int]] = {}
+        for element_id, comp_id in element_component_ids.items():
+            component_element_ids.setdefault(comp_id, []).append(element_id)
+        for comp_id in components:
+            component_element_ids.setdefault(comp_id, [])
+        return {
+            "element_component_ids": element_component_ids,
+            "component_element_ids": component_element_ids,
+        }
 
 
 __all__ = [

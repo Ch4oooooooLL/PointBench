@@ -28,6 +28,8 @@ SMALL_FEM = "\n".join(
         "$$ Minimal test deck",
         "$$",
         "BEGIN BULK",
+        '$HMNAME COMP                   1"plate"',
+        "$HMCOMP ID 1",
         _card("GRID", 1, "", 0.0, 0.0, 0.0),
         _card("GRID", 2, "", 10.0, 0.0, 0.0),
         _card("GRID", 3, "", 10.0, 10.0, 0.0),
@@ -185,3 +187,55 @@ def test_resolve_preview_dir_rejects_traversal(tmp_path, monkeypatch) -> None:
 
     with pytest.raises(KeyError):
         fem_preview_service.resolve_preview_dir("../../etc")
+
+
+# A deck without any HyperMesh component metadata but two properties, so the
+# preview falls back to property (PID) grouping.
+MULTI_PID_FEM = "\n".join(
+    [
+        "BEGIN BULK",
+        _card("GRID", 1, "", 0.0, 0.0, 0.0),
+        _card("GRID", 2, "", 10.0, 0.0, 0.0),
+        _card("GRID", 3, "", 10.0, 10.0, 0.0),
+        _card("GRID", 4, "", 0.0, 10.0, 0.0),
+        _card("GRID", 5, "", 0.0, 0.0, 10.0),
+        _card("GRID", 6, "", 10.0, 0.0, 10.0),
+        _card("CQUAD4", 1, 1, 1, 2, 3, 4),
+        _card("CQUAD4", 2, 2, 3, 4, 5, 6),
+        "ENDDATA",
+    ]
+)
+
+
+def test_parse_component_blocks() -> None:
+    model = _parse(SMALL_FEM)
+    assert model.components[1].name == "plate"
+    assert model.metadata["element_component_ids"] == {1: 1, 2: 1, 3: 1}
+
+
+def test_preview_grouping_component(tmp_path, monkeypatch) -> None:
+    from app.services import fem as fem_module
+
+    preview_root = tmp_path / "fem_preview"
+    monkeypatch.setattr(fem_module.preview, "PREVIEW_ROOT", preview_root)
+
+    result = fem_preview_service.create_preview([("model.fem", SMALL_FEM.encode("utf-8"))])
+    grouping = result["grouping"]
+    assert grouping["coloring_mode"] == "component"
+    assert grouping["groups"] == [
+        {"id": 1, "name": "plate", "color": "hsl(0, 55%, 42%)", "element_count": 3}
+    ]
+    assert grouping["element_group_ids"] == {1: 1, 2: 1, 3: 1}
+
+
+def test_preview_grouping_property_fallback(tmp_path, monkeypatch) -> None:
+    from app.services import fem as fem_module
+
+    preview_root = tmp_path / "fem_preview"
+    monkeypatch.setattr(fem_module.preview, "PREVIEW_ROOT", preview_root)
+
+    result = fem_preview_service.create_preview([("model.fem", MULTI_PID_FEM.encode("utf-8"))])
+    grouping = result["grouping"]
+    assert grouping["coloring_mode"] == "property"
+    assert {group["name"] for group in grouping["groups"]} == {"PID 1", "PID 2"}
+    assert grouping["element_group_ids"] == {1: 1, 2: 2}

@@ -16,6 +16,97 @@ from .parser import FemModelProvider, ModelParseError, ModelProviderError
 PREVIEW_ROOT = STORAGE_DIR / "temp" / "fem_preview"
 PREVIEW_MAX_AGE_SECONDS = 24 * 60 * 60
 
+# HyperMesh ``$HWCOLOR COMP`` color index palette.  White (7) is shifted to a
+# light grey-blue so components remain visible against the light viewer
+# background; the rest match HyperMesh's classic first-12 color table.
+_HM_COLOR_PALETTE: dict[int, str] = {
+    1: "#d9534f",  # red
+    2: "#d9b13a",  # yellow
+    3: "#5cb85c",  # green
+    4: "#33c4d9",  # cyan
+    5: "#4d7fd9",  # blue
+    6: "#c94fd9",  # magenta
+    7: "#a8b2ba",  # white -> grey
+    8: "#7f8c99",  # grey
+    9: "#8c3b3b",  # dark red
+    10: "#8a7d33",  # olive
+    11: "#3d7a3d",  # dark green
+    12: "#3a7a7a",  # dark cyan
+}
+
+
+def _group_color(position: int, total: int, hw_color: int | None) -> str:
+    """Stable color for a component/group index.
+
+    HyperMesh color index wins when present; otherwise distribute hues with
+    the golden angle so adjacent groups stay visually distinct.
+    """
+
+    if hw_color is not None and hw_color in _HM_COLOR_PALETTE:
+        return _HM_COLOR_PALETTE[hw_color]
+    hue = (position * 137.5) % 360
+    return f"hsl({hue:.0f}, 55%, 42%)"
+
+
+def _build_group_data(model: "CanonicalFEModel") -> dict[str, Any]:
+    """Turn component/property membership into frontend coloring groups.
+
+    Returns ``coloring_mode`` (component | property | none), the ordered
+    ``groups`` list (id/name/color/element_count) and an ``element_group_ids``
+    map.  Real component membership comes from HyperMesh metadata; without it
+    the model falls back to property (PID) grouping, then to no grouping.
+    """
+
+    metadata = model.metadata
+    element_component_ids = metadata.get("element_component_ids") or {}
+    component_element_ids = metadata.get("component_element_ids") or {}
+    if element_component_ids:
+        groups: list[dict[str, Any]] = []
+        positions = {comp_id: index for index, comp_id in enumerate(sorted(component_element_ids))}
+        for comp_id, element_ids in component_element_ids.items():
+            component = model.components.get(comp_id)
+            name = component.name if component is not None and component.name else f"COMP {comp_id}"
+            hw_color = component.fields.get("hw_color") if component is not None else None
+            groups.append(
+                {
+                    "id": comp_id,
+                    "name": name,
+                    "color": _group_color(positions[comp_id], len(positions), hw_color),
+                    "element_count": len(element_ids),
+                }
+            )
+        groups.sort(key=lambda group: (-group["element_count"], group["id"]))
+        return {
+            "coloring_mode": "component",
+            "groups": groups,
+            "element_group_ids": {element_id: comp_id for element_id, comp_id in element_component_ids.items()},
+        }
+
+    by_property: dict[int, list[int]] = {}
+    for element_id, element in model.elements.items():
+        if element.property_id is not None:
+            by_property.setdefault(element.property_id, []).append(element_id)
+    if len(by_property) > 1:
+        property_groups: list[dict[str, Any]] = []
+        for position, property_id in enumerate(sorted(by_property)):
+            property_groups.append(
+                {
+                    "id": property_id,
+                    "name": f"PID {property_id}",
+                    "color": _group_color(position, len(by_property), None),
+                    "element_count": len(by_property[property_id]),
+                }
+            )
+        property_groups.sort(key=lambda group: (-group["element_count"], group["id"]))
+        return {
+            "coloring_mode": "property",
+            "groups": property_groups,
+            "element_group_ids": {
+                element_id: property_id for property_id, element_ids in by_property.items() for element_id in element_ids
+            },
+        }
+    return {"coloring_mode": "none", "groups": [], "element_group_ids": {}}
+
 
 class FemPreviewError(ValueError):
     """User-facing FEM preview failure with a Chinese message."""
@@ -185,6 +276,7 @@ class FemPreviewService:
                 "stats": stats.as_dict(),
                 "glb_url": f"/api/fem-preview/{preview_id}/model.glb",
                 "mapping_url": f"/api/fem-preview/{preview_id}/mapping.json",
+                "grouping": _build_group_data(model),
             }
         except Exception:
             shutil.rmtree(preview_dir, ignore_errors=True)

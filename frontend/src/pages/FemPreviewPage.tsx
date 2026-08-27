@@ -9,6 +9,9 @@ export function FemPreviewPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [fileCount, setFileCount] = useState(0);
+  const [showEdges, setShowEdges] = useState(false);
+  const [transparent, setTransparent] = useState(false);
+  const [colorByGroup, setColorByGroup] = useState(true);
 
   async function upload(files?: FileList | null) {
     const list = Array.from(files ?? []);
@@ -31,6 +34,8 @@ export function FemPreviewPage() {
   }
 
   const stats = preview?.stats;
+  const grouping = preview?.grouping ?? null;
+  const hasGrouping = grouping != null && grouping.coloring_mode !== 'none' && grouping.groups.length > 0;
 
   return (
     <section>
@@ -117,11 +122,75 @@ export function FemPreviewPage() {
               <h2>三维预览</h2>
               <span className="pill">{preview.stats.triangle_count} 面片</span>
             </div>
-            <FemViewer glbUrl={preview.glb_url} mappingUrl={preview.mapping_url} />
+            <div className="viewer-options">
+              <ToggleSwitch checked={showEdges} onChange={setShowEdges} label="显示网格边界" />
+              <ToggleSwitch checked={transparent} onChange={setTransparent} label="半透明显示" />
+              <ToggleSwitch checked={colorByGroup} onChange={setColorByGroup} label="按分组着色" disabled={!hasGrouping} />
+            </div>
+            {hasGrouping && (
+              <div className="fem-legend">
+                <span className="fem-legend-title">
+                  {grouping.coloring_mode === 'component' ? '组件' : '属性'}（{grouping.groups.length}）
+                </span>
+                <div className="fem-legend-items">
+                  {grouping.groups.map((group) => (
+                    <span key={group.id} className="fem-legend-item">
+                      <i style={{ backgroundColor: group.color }} />
+                      {group.name}
+                      <em>{group.element_count}</em>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            <FemViewer
+              glbUrl={preview.glb_url}
+              mappingUrl={preview.mapping_url}
+              grouping={grouping}
+              showEdges={showEdges}
+              transparent={transparent}
+              colorByGroup={colorByGroup}
+            />
           </div>
         </>
       )}
     </section>
+  );
+}
+
+function ToggleSwitch({
+  checked,
+  onChange,
+  label,
+  disabled,
+}: {
+  checked: boolean;
+  onChange: (value: boolean) => void;
+  label: string;
+  disabled?: boolean;
+}) {
+  return (
+    <div
+      className={`toggle-switch${checked ? ' active' : ''}${disabled ? ' disabled' : ''}`}
+      onClick={() => {
+        if (!disabled) onChange(!checked);
+      }}
+      role="switch"
+      aria-checked={checked}
+      tabIndex={disabled ? -1 : 0}
+      onKeyDown={(event) => {
+        if (disabled) return;
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onChange(!checked);
+        }
+      }}
+    >
+      <span className="toggle-switch-track">
+        <span className="toggle-switch-thumb" />
+      </span>
+      <span className="toggle-switch-label">{label}</span>
+    </div>
   );
 }
 
