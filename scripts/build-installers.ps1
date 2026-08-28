@@ -170,6 +170,12 @@ $versions = Get-Content -LiteralPath $versionFile -Raw | ConvertFrom-Json
 if ([string]::IsNullOrWhiteSpace($versions.codeVersion) -or [string]::IsNullOrWhiteSpace($versions.dependenciesVersion)) {
     throw 'config/version.json does not define codeVersion and dependenciesVersion.'
 }
+if ([string]::IsNullOrWhiteSpace($versions.minimumDependenciesVersion)) {
+    throw 'config/version.json does not define minimumDependenciesVersion.'
+}
+if ($versions.minimumDependenciesVersion -cne $versions.dependenciesVersion) {
+    throw ("minimumDependenciesVersion ({0}) must equal dependenciesVersion ({1}): the installer host requires an exact match." -f $versions.minimumDependenciesVersion, $versions.dependenciesVersion)
+}
 
 New-Item -ItemType Directory -Path $outputRoot, $buildRoot -Force | Out-Null
 & $csc /nologo /target:winexe /platform:x64 /optimize+ /codepage:65001 "/win32icon:$iconFile" "/out:$hostExe" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Management.dll $hostSource

@@ -74,7 +74,36 @@ function Read-VersionJson {
     $versions = Get-Content -LiteralPath $specPath -Raw -Encoding UTF8 | ConvertFrom-Json
     if ([string]::IsNullOrWhiteSpace($versions.codeVersion)) { throw 'version.json 缺少 codeVersion' }
     if ([string]::IsNullOrWhiteSpace($versions.dependenciesVersion)) { throw 'version.json 缺少 dependenciesVersion' }
+    if ([string]::IsNullOrWhiteSpace($versions.minimumDependenciesVersion)) { throw 'version.json 缺少 minimumDependenciesVersion' }
+    if ($versions.minimumDependenciesVersion -cne $versions.dependenciesVersion) {
+        throw ("minimumDependenciesVersion（{0}）必须等于 dependenciesVersion（{1}）：安装器要求精确匹配。" -f $versions.minimumDependenciesVersion, $versions.dependenciesVersion)
+    }
     return $versions
+}
+
+function Test-DependencyFilesNewerThanManifest {
+    param(
+        [Parameter(Mandatory = $true)][string]$Repo,
+        [Parameter(Mandatory = $true)][datetime]$ManifestGeneratedAt
+    )
+    # If any dependency file was modified after the fingerprint manifest was
+    # generated, the manifest is stale and a reuse decision would ship the old
+    # dependencies.  Returns the newest file timestamp (or $null when the
+    # manifest is fresh).
+    $latest = $null
+    foreach ($scanRoot in @((Join-Path $Repo 'runtime'), (Join-Path $Repo 'frontend\node_modules'))) {
+        if (-not (Test-Path -LiteralPath $scanRoot -PathType Container)) { continue }
+        Get-ChildItem -LiteralPath $scanRoot -File -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
+            # The manifest itself is always written after its generated_at clock
+            # reading; it must not count as a stale dependency.
+            $relative = $_.FullName.Substring($Repo.Length).TrimStart('\', '/').Replace('\', '/')
+            if ($relative -ieq 'runtime/runtime-manifest.json') { return }
+            if ($_.LastWriteTimeUtc -gt $ManifestGeneratedAt) {
+                if ($null -eq $latest -or $_.LastWriteTimeUtc -gt $latest) { $latest = $_.LastWriteTimeUtc }
+            }
+        }
+    }
+    return $latest
 }
 
 function Get-RuntimeManifestHash {
@@ -415,6 +444,16 @@ try {
     New-Item -ItemType Directory -Force -Path $dist | Out-Null
 
     $manifestHash = Get-RuntimeManifestHash $repo
+    $manifestJson = Get-Content -LiteralPath (Join-Path $repo 'runtime\runtime-manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    $manifestGenerated = $null
+    if ($manifestJson.generated_at) {
+        try { $manifestGenerated = [datetime]::Parse($manifestJson.generated_at, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal) } catch { $manifestGenerated = $null }
+    }
+    $staleFileTime = if ($null -ne $manifestGenerated) { Test-DependencyFilesNewerThanManifest $repo $manifestGenerated } else { $null }
+    if ($null -ne $staleFileTime) {
+        Write-Output "[警告] 有依赖文件晚于 runtime-manifest.json 生成时间（$($staleFileTime.ToString('o'))）。清单可能已过期，建议先运行 scripts\update-runtime-manifest.ps1 重新生成指纹。"
+    }
+
     $dependencyName = 'PointBench-Dependencies-' + $dependenciesVersion
     $dependencyInstaller = Join-Path $dist ($dependencyName + '.exe')
     $decision = Get-DependencyDecision $dependencyInstaller $dependenciesVersion $manifestHash
