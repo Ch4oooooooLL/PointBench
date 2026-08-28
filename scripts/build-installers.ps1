@@ -1,6 +1,7 @@
-param(
+﻿param(
     [string]$ProjectDir,
     [string]$OutputDir,
+    [string]$Timestamp,
 
     [ValidateSet('Code', 'Dependencies', 'All')]
     [string]$Package = 'Code',
@@ -22,7 +23,7 @@ function Test-CodeSkipPath([string]$RelativePath) {
     if ($path -match '^frontend/(node_modules|dist|\.vite)(/|$)') { return $true }
     if ($path -match '(^|/)(__pycache__|\.pytest_cache|\.mypy_cache|\.ruff_cache)(/|$)') { return $true }
     if ($path -match '^scripts/installer(/|$)') { return $true }
-    if ($path -match '^scripts/(pack-|setup-portable|build-)') { return $true }
+    if ($path -match '^scripts/(pack-|packup|update-runtime-manifest|setup-portable|build-)') { return $true }
     if ($name -match '\.(pyc|pyo|db|db-journal|db-wal)$') { return $true }
     if ($name -eq 'tsconfig.tsbuildinfo') { return $true }
     return $false
@@ -68,6 +69,14 @@ function Get-Sha256([string]$Path) {
     }
 }
 
+function Get-RuntimeManifestHash([string]$Root) {
+    $manifest = Join-Path $Root 'runtime\runtime-manifest.json'
+    if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) {
+        throw "Runtime manifest is missing: $manifest. Run scripts\update-runtime-manifest.ps1 or scripts\setup-portable-deps.bat first."
+    }
+    return (Get-Sha256 $manifest)
+}
+
 function New-RawInstaller {
     param(
         [string]$HostPath,
@@ -75,7 +84,8 @@ function New-RawInstaller {
         [string]$PackageType,
         [string]$Version,
         [string]$RequiredDependenciesVersion,
-        [object[]]$Files
+        [object[]]$Files,
+        [System.Collections.IDictionary]$ExtraManifestFields
     )
 
     $outputFull = Resolve-FullPath $OutputPath
@@ -88,6 +98,11 @@ function New-RawInstaller {
     $manifest.Add("Version`t$Version")
     $manifest.Add("RequiredDependenciesVersion`t$RequiredDependenciesVersion")
     $manifest.Add("Platform`twindows-x64")
+    if ($ExtraManifestFields) {
+        foreach ($key in $ExtraManifestFields.Keys) {
+            $manifest.Add("$key`t$($ExtraManifestFields[$key])")
+        }
+    }
 
     $output = [System.IO.File]::Open($outputFull, [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
     try {
@@ -97,8 +112,8 @@ function New-RawInstaller {
             if (($index % 500) -eq 0 -or $index -eq $Files.Count) {
                 Write-Progress -Activity "Building $PackageType installer" -Status "$index / $($Files.Count)" -PercentComplete (($index * 100) / $Files.Count)
             }
-            $length = (Get-Item -LiteralPath $file.Source).Length
-            $hash = Get-Sha256 $file.Source
+            $length = if ($null -ne $file.LengthBytes) { $file.LengthBytes } else { (Get-Item -LiteralPath $file.Source).Length }
+            $hash = if ($file.Sha256) { $file.Sha256 } else { Get-Sha256 $file.Source }
             $encodedPath = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($file.Relative))
             $manifest.Add("F`t$length`t$hash`t$encodedPath")
             $input = [System.IO.File]::OpenRead($file.Source)
@@ -144,6 +159,13 @@ if ($buildDependencies) {
     }
 }
 
+if ([string]::IsNullOrWhiteSpace($Timestamp)) {
+    $resolvedTimestamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
+} else {
+    $resolvedTimestamp = $Timestamp
+}
+if ($resolvedTimestamp -notmatch '^\d{8}T\d{6}Z$') { throw "Invalid Timestamp: $resolvedTimestamp" }
+
 $versions = Get-Content -LiteralPath $versionFile -Raw | ConvertFrom-Json
 if ([string]::IsNullOrWhiteSpace($versions.codeVersion) -or [string]::IsNullOrWhiteSpace($versions.dependenciesVersion)) {
     throw 'config/version.json does not define codeVersion and dependenciesVersion.'
@@ -159,13 +181,65 @@ $codeOutput = Join-Path $outputRoot "PointBench-Code-$($versions.codeVersion).ex
 if ($buildDependencies) {
     if ((Test-Path -LiteralPath $dependencyOutput -PathType Leaf) -and -not $ForceDependencies) {
         Write-Host "[SKIP] Dependency installer already exists for version $($versions.dependenciesVersion)." -ForegroundColor Yellow
-        Write-Host '       Its file metadata and SHA-256 are preserved. Bump dependenciesVersion when dependencies actually change.'
+        Write-Host '       Use scripts\packup.ps1 for metadata-aware reuse decisions, or pass -ForceDependencies to rebuild.'
     } else {
+        $runtimeManifestHash = Get-RuntimeManifestHash $root
+        $runtimeManifest = Get-Content -LiteralPath (Join-Path $root 'runtime\runtime-manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+
         $archivePatterns = @('*.zip', '*.whl', '*.7z', '*.rar', '*.tar', '*.tgz', '*.gz', '*.xz', '*.bz2')
         $dependencyFiles = @(Get-DependencyFiles $root)
         $forbiddenArchives = @($dependencyFiles | Where-Object { $name = [IO.Path]::GetFileName($_.Relative); @($archivePatterns | Where-Object { $name -like $_ }).Count -gt 0 })
         if ($forbiddenArchives.Count -gt 0) { throw "Dependencies contain compressed archives: $($forbiddenArchives[0].Relative)" }
-        New-RawInstaller -HostPath $hostExe -OutputPath $dependencyOutput -PackageType 'dependencies' -Version $versions.dependenciesVersion -RequiredDependenciesVersion '' -Files $dependencyFiles
+
+        $records = New-Object System.Collections.Generic.List[object]
+        foreach ($file in $dependencyFiles) {
+            $length = (Get-Item -LiteralPath $file.Source).Length
+            $hash = Get-Sha256 $file.Source
+            $file | Add-Member -NotePropertyName LengthBytes -NotePropertyValue ([int64]$length) -Force
+            $file | Add-Member -NotePropertyName Sha256 -NotePropertyValue $hash -Force
+            [void]$records.Add([ordered]@{ path = $file.Relative.Replace('\', '/'); sha256 = $hash; size_bytes = [int64]$length })
+        }
+
+        $packageName = "PointBench-Dependencies-$($versions.dependenciesVersion)"
+        $generatedAt = (Get-Date).ToUniversalTime().ToString('o')
+        $metadata = [ordered]@{
+            schema_version = 1
+            app_version = $versions.dependenciesVersion
+            package_type = 'dependencies'
+            package_name = $packageName
+            generated_at_utc = $generatedAt
+            platform = 'windows-x64'
+            architecture = if ([Environment]::Is64BitOperatingSystem) { 'x64' } else { 'x86' }
+            runtime_versions = [ordered]@{
+                python = [string]$runtimeManifest.python.version
+                node = [string]$runtimeManifest.node.version
+                npm = [string]$runtimeManifest.node.npm_version
+            }
+            source_runtime_manifest = [ordered]@{
+                path = 'runtime/runtime-manifest.json'
+                sha256 = $runtimeManifestHash
+            }
+            archive_policy = [ordered]@{
+                format = 'exe-installer'
+                compression = 'none'
+                payload_magic = 'PBPKG001'
+            }
+            manifest_in_payload = $true
+            exclusions = @('dependency-metadata.json is not self-hashed in file_records', 'project source and build outputs')
+            file_records = @($records.ToArray())
+        }
+        $metadataPath = Join-Path $buildRoot 'dependency-metadata.json'
+        [IO.File]::WriteAllText($metadataPath, ($metadata | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
+        $dependencyFiles += [pscustomobject]@{ Source = $metadataPath; Relative = 'dependency-metadata.json' }
+
+        $extraFields = [ordered]@{
+            SchemaVersion = '2'
+            PackageName = $packageName
+            GeneratedAtUtc = $generatedAt
+            SourceRuntimeManifestSha256 = $runtimeManifestHash
+            RuntimeVersions = ($metadata.runtime_versions | ConvertTo-Json -Compress)
+        }
+        New-RawInstaller -HostPath $hostExe -OutputPath $dependencyOutput -PackageType 'dependencies' -Version $versions.dependenciesVersion -RequiredDependenciesVersion '' -Files $dependencyFiles -ExtraManifestFields $extraFields
     }
 }
 
@@ -184,7 +258,48 @@ if ($buildCode) {
     if ($launcherParseErrors.Count -gt 0) {
         throw "Windows PowerShell launcher syntax check failed: $($launcherParseErrors[0].Message)"
     }
-    New-RawInstaller -HostPath $hostExe -OutputPath $codeOutput -PackageType 'code' -Version $versions.codeVersion -RequiredDependenciesVersion $versions.minimumDependenciesVersion -Files $codeFiles
+
+    $records = New-Object System.Collections.Generic.List[object]
+    foreach ($file in $codeFiles) {
+        $length = (Get-Item -LiteralPath $file.Source).Length
+        $hash = Get-Sha256 $file.Source
+        $file | Add-Member -NotePropertyName LengthBytes -NotePropertyValue ([int64]$length) -Force
+        $file | Add-Member -NotePropertyName Sha256 -NotePropertyValue $hash -Force
+        [void]$records.Add([ordered]@{ path = $file.Relative.Replace('\', '/'); sha256 = $hash; size_bytes = [int64]$length })
+    }
+
+    $packageName = "PointBench-Code-$($versions.codeVersion)"
+    $generatedAt = (Get-Date).ToUniversalTime().ToString('o')
+    $manifest = [ordered]@{
+        schema_version = 1
+        app_version = $versions.codeVersion
+        package_type = 'code'
+        package_name = $packageName
+        package_timestamp_utc = $resolvedTimestamp
+        generated_at_utc = $generatedAt
+        platform = 'windows-x64'
+        required_dependencies_version = $versions.minimumDependenciesVersion
+        archive_policy = [ordered]@{
+            format = 'exe-installer'
+            compression = 'none'
+            payload_magic = 'PBPKG001'
+        }
+        manifest_in_payload = $true
+        included = @('assets', 'backend', 'config', 'frontend', 'scripts', 'doc', 'sample_data')
+        excluded = @('runtime', 'frontend/node_modules', 'frontend/dist', 'logs', 'storage', 'outputs', 'dist', '.git', '.offline-build', 'backend/.venv', 'code-package-manifest.json is not self-hashed in files')
+        files = @($records.ToArray())
+    }
+    $manifestPath = Join-Path $buildRoot 'code-package-manifest.json'
+    [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding $false))
+    $codeFiles += [pscustomobject]@{ Source = $manifestPath; Relative = 'code-package-manifest.json' }
+
+    $extraFields = [ordered]@{
+        SchemaVersion = '2'
+        PackageName = $packageName
+        GeneratedAtUtc = $generatedAt
+        RequiredDependenciesVersion = $versions.minimumDependenciesVersion
+    }
+    New-RawInstaller -HostPath $hostExe -OutputPath $codeOutput -PackageType 'code' -Version $versions.codeVersion -RequiredDependenciesVersion $versions.minimumDependenciesVersion -Files $codeFiles -ExtraManifestFields $extraFields
 }
 
 Write-Host ''

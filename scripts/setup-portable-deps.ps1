@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$ProjectDir,
     [string]$PythonVersion = '3.12.10',
     [string]$NodeVersion = 'v24.13.1'
@@ -120,7 +120,7 @@ try {
         $env:PATH = $previousPath
     }
 
-    Write-Host '[5/5] Removing caches and verifying the portable dependencies...'
+    Write-Host '[5/6] Removing caches and verifying the portable dependencies...'
     $sitePackagesDir = Join-Path $libDir 'site-packages'
     Get-ChildItem -LiteralPath $sitePackagesDir, (Join-Path $frontendDir 'node_modules') -Directory -Recurse -Force -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -in @('__pycache__', '.cache') } |
@@ -157,6 +157,9 @@ try {
     Invoke-Checked -FilePath (Join-Path $nodeDir 'node.exe') -Arguments @(
         (Join-Path $frontendDir 'node_modules\vite\bin\vite.js'), '--version'
     ) -WorkingDirectory $frontendDir
+
+    Write-Host '[6/6] Generating the runtime fingerprint manifest...'
+    & (Join-Path $PSScriptRoot 'update-runtime-manifest.ps1') -ProjectDir $root
 
     Write-Host ''
     Write-Host '[OK] Portable dependencies installed as ordinary, unpacked files.' -ForegroundColor Green
