@@ -418,11 +418,12 @@ namespace PointBenchInstaller
 
         private static bool IsMutableDependencyFile(string relativePath)
         {
+            // Only genuine caches are treated as mutable.  Flat .pyc modules
+            // under Lib\ (the embedded Python standard library) are shipped
+            // runtime files and must still be verified.
             string normalized = (relativePath ?? String.Empty).Replace('\\', '/');
             return normalized.StartsWith("frontend/node_modules/.vite/", StringComparison.OrdinalIgnoreCase) ||
-                normalized.IndexOf("/__pycache__/", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                normalized.EndsWith(".pyc", StringComparison.OrdinalIgnoreCase) ||
-                normalized.EndsWith(".pyo", StringComparison.OrdinalIgnoreCase);
+                normalized.IndexOf("/__pycache__/", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static string ChooseInstallDirectory(string description, string requested, string defaultDirectory)

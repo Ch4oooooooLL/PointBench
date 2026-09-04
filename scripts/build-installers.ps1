@@ -51,7 +51,12 @@ function Get-DependencyFiles([string]$Root) {
         Get-ChildItem -LiteralPath $dependencyRoot -File -Recurse -Force | ForEach-Object {
             $relative = $_.FullName.Substring($Root.Length).TrimStart('\', '/')
             $normalized = $relative.Replace('\', '/')
-            if ($normalized -match '^frontend/node_modules/\.vite/' -or $normalized -match '(^|/)__pycache__/' -or $normalized -match '\.py[co]$') { return }
+            # The embedded Python standard library is expanded from
+            # python312.zip into flat .pyc files (Lib\encodings\*.pyc etc.);
+            # those are the shipped module form, not caches, so they must be
+            # packaged.  Only real caches are excluded: vite prebuild and
+            # __pycache__ directories.
+            if ($normalized -match '^frontend/node_modules/\.vite/' -or $normalized -match '(^|/)__pycache__(/|$)') { return }
             $selected.Add([pscustomobject]@{ Source = $_.FullName; Relative = $relative.Replace('\', '/') }) | Out-Null
         }
     }

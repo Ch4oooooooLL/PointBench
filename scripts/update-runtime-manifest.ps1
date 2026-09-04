@@ -71,7 +71,11 @@ foreach ($scanRoot in @((Join-Path $root 'runtime'), $nodeModules)) {
     Get-ChildItem -LiteralPath $scanRoot -File -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
         $relative = $_.FullName.Substring($root.Length).TrimStart('\', '/').Replace('\', '/')
         if ($relative -eq 'runtime/runtime-manifest.json') { return }
-        if ($relative -match '^frontend/node_modules/\.vite/' -or $relative -match '(^|/)__pycache__/' -or $relative -match '\.py[co]$') { return }
+        # Embedded Python ships its standard library as flat .pyc files
+        # (Lib\encodings\*.pyc etc.); they are required runtime modules.  Only
+        # real caches are excluded here, keeping the fingerprint identical to
+        # what scripts\build-installers.ps1 packages.
+        if ($relative -match '^frontend/node_modules/\.vite/' -or $relative -match '(^|/)__pycache__(/|$)') { return }
         $fileRecords[$relative] = [ordered]@{
             sha256 = (Get-Sha256 $_.FullName)
             size_bytes = [int64]$_.Length
@@ -105,9 +109,7 @@ $manifest = [ordered]@{
     excluded = @(
         'runtime/runtime-manifest.json is not self-hashed in files',
         'frontend/node_modules/.vite',
-        '__pycache__',
-        '*.pyc',
-        '*.pyo'
+        '__pycache__'
     )
     files = $sorted
 }
