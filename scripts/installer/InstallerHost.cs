@@ -221,12 +221,15 @@ namespace PointBenchInstaller
             string nodeModulesLink = Path.Combine(target, "frontend", "node_modules");
             CreateDirectoryJunction(nodeModulesLink, nodeModulesTarget);
 
-            string dataDirectory = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "PointBench", "Data");
-            Directory.CreateDirectory(dataDirectory);
+            // Runtime data (logs, storage, database) lives under the install
+            // directory so an application update never needs to touch user
+            // profile folders and never loses existing data.  The database is
+            // created/migrated on first startup; a prior LocalAppData data set
+            // is moved here once so existing users keep their projects.
+            string dataDirectory = Path.Combine(target, "data");
             Directory.CreateDirectory(Path.Combine(dataDirectory, "storage"));
             Directory.CreateDirectory(Path.Combine(dataDirectory, "logs"));
+            MigrateLegacyUserData(dataDirectory);
 
             UpdateProgress("正在创建桌面快捷方式", 0, 0, target, true);
             string shortcutPath = _noDesktop ? String.Empty : CreateDesktopShortcut(target);
@@ -252,6 +255,51 @@ namespace PointBenchInstaller
             CloseProgress();
             Show("PointBench 代码安装并校核完成。\r\n\r\n代码版本：" + package.Version + "\r\n依赖版本：" + dependencyVersion + "\r\n位置：" + target + "\r\n\r\n桌面快捷方式已创建。", MessageBoxIcon.Information);
             return 0;
+        }
+
+        private static void MigrateLegacyUserData(string newDataDirectory)
+        {
+            // Versions before 1.0.8 kept logs, storage and the database under
+            // %LocalAppData%\PointBench\Data.  Move any such data into the new
+            // install-local data directory once.  Only files are moved; if the
+            // destination already has content (e.g. the code was already run
+            // once), the legacy folders are left untouched to avoid clobbering
+            // newer data.
+            string legacyRoot = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "PointBench", "Data");
+            if (!Directory.Exists(legacyRoot)) return;
+
+            string newRoot = Path.GetFullPath(newDataDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string[] relativeItems = { "logs", "storage", "pointbench.db" };
+            foreach (string relative in relativeItems)
+            {
+                string source = Path.Combine(legacyRoot, relative);
+                if (!Directory.Exists(source) && !File.Exists(source)) continue;
+                string destination = Path.Combine(newRoot, relative);
+                if (Directory.Exists(destination) || File.Exists(destination)) continue;
+
+                Directory.CreateDirectory(Path.GetDirectoryName(destination));
+                Log("Migrating legacy user data: {0} -> {1}", source, destination);
+                if (Directory.Exists(source))
+                {
+                    try { Directory.Move(source, destination); }
+                    catch (IOException) { CopyDirectoryRecursive(source, destination); }
+                }
+                else
+                {
+                    File.Move(source, destination);
+                }
+            }
+        }
+
+        private static void CopyDirectoryRecursive(string source, string destination)
+        {
+            Directory.CreateDirectory(destination);
+            foreach (string file in Directory.GetFiles(source))
+                File.Copy(file, Path.Combine(destination, Path.GetFileName(file)), false);
+            foreach (string directory in Directory.GetDirectories(source))
+                CopyDirectoryRecursive(directory, Path.Combine(destination, Path.GetFileName(directory)));
         }
 
         private static bool PathsEqual(string left, string right)

@@ -1,8 +1,10 @@
 import csv
+import gc
 import json
 import math
 import re
 import shutil
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -16,6 +18,7 @@ from sqlalchemy.orm import Session, selectinload
 from app import models
 from app.database import STORAGE_DIR
 from app.services.analysis_service import compute_measurement_fields, refresh_point_abnormal_flags
+from app.services.file_service import storage_relative_path
 from app.utils.path_utils import safe_dewesoft_dir
 
 
@@ -416,7 +419,7 @@ def import_dewesoft_file(db: Session, project_id: int, cycle_count: int, run_nam
         cycle_count=cycle_count,
         run_name=run_name_value,
         filename=original_filename or upload_path.name,
-        stored_path=str(upload_path.relative_to(Path(__file__).resolve().parents[2])),
+        stored_path=storage_relative_path(upload_path),
         status="processing",
     )
     db.add(import_job)
@@ -555,7 +558,7 @@ def import_dewesoft_file(db: Session, project_id: int, cycle_count: int, run_nam
             cycle_count=cycle_count,
             run_name=run_name_value,
             filename=original_filename or upload_path.name,
-            stored_path=str(upload_path.relative_to(Path(__file__).resolve().parents[2])),
+            stored_path=storage_relative_path(upload_path),
             status="failed",
             message=str(exc),
         )
@@ -581,5 +584,18 @@ def delete_dewesoft_project_files(project_id: str) -> None:
         target = safe_dewesoft_dir(project_id)
     except Exception:
         return
-    if target.exists():
-        shutil.rmtree(target)
+    if not target.exists():
+        return
+    # dwdatareader 底层通过 Dewesoft 官方运行库(.NET 组件)读取文件，句柄可能
+    # 延迟释放。删除前先触发一次回收，失败时短时重试，避免 Windows 上偶发
+    # PermissionError 导致项目删除 500。
+    gc.collect()
+    for attempt in range(5):
+        try:
+            shutil.rmtree(target)
+            return
+        except PermissionError:
+            if attempt == 4:
+                raise
+            time.sleep(0.4 * (attempt + 1))
+            gc.collect()

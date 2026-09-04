@@ -8,16 +8,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app import models
-from app.database import STORAGE_DIR, get_db
+from app.database import get_db
 from app.schemas import CrackRecordOut
-from app.services.file_service import resolve_stored_path
+from app.services.file_service import resolve_stored_path, storage_relative_path
 from app.utils.hash_utils import file_sha256
 from app.utils.path_utils import safe_project_dir
 
 
 router = APIRouter(prefix="/api", tags=["crack-records"])
-
-BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 # 允许的图片扩展名白名单（裂纹记录上传的是图片）
 ALLOWED_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
@@ -52,10 +50,6 @@ def _validate_image_upload(file: UploadFile, content: bytes) -> None:
     )
     if not is_valid:
         raise HTTPException(status_code=400, detail="文件内容不是有效的图片（PNG/JPEG/GIF/WEBP）")
-
-
-def _relative_to_backend(path: Path) -> str:
-    return str(path.relative_to(BACKEND_ROOT))
 
 
 def _record_out(record: models.CrackRecord) -> CrackRecordOut:
@@ -152,7 +146,7 @@ async def create_project_crack_record(
         point_db_id=point.id,
         test_run_id=run.id if run else None,
         cycle_count=cycle_count,
-        stored_path=_relative_to_backend(target),
+        stored_path=storage_relative_path(target),
         filename=safe_name,
         content_type=file.content_type,
         sha256=file_sha256(target),
@@ -207,7 +201,7 @@ async def update_crack_record(
         target = target_dir / f"{uuid.uuid4().hex[:10]}_{safe_name}"
         with target.open("wb") as output:
             output.write(content)
-        record.stored_path = _relative_to_backend(target)
+        record.stored_path = storage_relative_path(target)
         record.filename = safe_name
         record.content_type = file.content_type
         record.sha256 = file_sha256(target)

@@ -2,6 +2,7 @@ import csv
 import hashlib
 import io
 import json
+import logging
 import shutil
 import uuid
 
@@ -24,6 +25,7 @@ from app.utils.path_utils import safe_project_dir
 
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
+logger = logging.getLogger("app.project_router")
 DELETE_EXPORT_DIR = STORAGE_DIR / "delete_exports"
 
 
@@ -324,10 +326,16 @@ def delete_project(
             user_agent=client_info["user_agent"],
         )
         db.commit()
-        project_storage = safe_project_dir(project_id_value)
-        if project_storage.exists():
-            shutil.rmtree(project_storage)
-        delete_dewesoft_project_files(project_id_value)
+        # 物理文件清理：数据库删除已成功，清理尽力而为。Windows 下文件可能
+        # 被外部程序短暂占用（例如用户正打开导出的记录、Dewesoft 运行库延迟
+        # 释放句柄），此时不应让删除接口报错——残留文件仅占空间，不产生脏数据。
+        try:
+            project_storage = safe_project_dir(project_id_value)
+            if project_storage.exists():
+                shutil.rmtree(project_storage)
+            delete_dewesoft_project_files(project_id_value)
+        except Exception:
+            logger.exception("Project deleted from DB but physical file cleanup failed: %s", project_id_value)
         return {"ok": True, "action": "permanently_deleted", **delete_export}
 
     # 软删除：标记项目及其关联数据

@@ -14,10 +14,10 @@ from sqlalchemy.orm import Session, selectinload
 
 from app import models
 from app.database import STORAGE_DIR
+from app.services.file_service import resolve_stored_path
 from app.utils.path_utils import safe_project_dir
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BACKUP_FILENAME = "pointprocess_backup.json"
 RECORDS_XLSX = "records.xlsx"
 
@@ -42,12 +42,8 @@ def _ext(filename: str | None, content_type: str | None = None) -> str:
     return ".bin"
 
 
-def _rel_to_project(path: Path) -> str:
-    return str(path.relative_to(PROJECT_ROOT))
-
-
 def _source_path(stored_path: str) -> Path:
-    return PROJECT_ROOT / stored_path
+    return resolve_stored_path(stored_path)
 
 
 def _copy_if_exists(source: Path, target: Path) -> None:

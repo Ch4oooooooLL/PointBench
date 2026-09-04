@@ -15,13 +15,13 @@ from app.database import STORAGE_DIR
 from app.schemas import ImportPreview, ManifestIn
 from app.services.analysis_service import compute_measurement_fields
 from app.services.dewesoft_service import delete_dewesoft_project_files
+from app.services.file_service import resolve_stored_path, storage_relative_path
 from app.utils.hash_utils import file_sha256
 from app.utils.path_utils import safe_project_dir
 from app.utils.zip_utils import is_safe_zip_path, normalize_zip_name, safe_extract, validate_zip_members
 
 
 ENCRYPTED_FILE_HINT = "如果文件在公司内网文档加密目录中，请先手动打开或解压为明文文件夹后再导入，或联系 IT 将本系统加入解密白名单。"
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BACKUP_FILENAME = "pointprocess_backup.json"
 
 
@@ -81,10 +81,6 @@ def _load_json_file(path: Path, label: str) -> dict:
 
 def _duplicates(values: list[str]) -> list[str]:
     return sorted([value for value, count in Counter(values).items() if value and count > 1])
-
-
-def _relative_to_project(path: Path) -> str:
-    return str(path.relative_to(PROJECT_ROOT))
 
 
 def _unsafe_folder_path_error(path: str) -> HTTPException:
@@ -240,8 +236,8 @@ def _build_backup_preview(
         export_id=backup.get("export_id"),
         project_id=project_id,
         zip_filename=source_name,
-        zip_stored_path=_relative_to_project(stored_path),
-        temp_dir=_relative_to_project(temp_dir),
+        zip_stored_path=storage_relative_path(stored_path),
+        temp_dir=storage_relative_path(temp_dir),
         status="previewed" if not backup_errors else "preview_failed",
         message="; ".join(backup_errors or backup_warnings),
     )
@@ -311,8 +307,8 @@ def _build_preview_from_extract(
         export_id=manifest.export_info.export_id if manifest else None,
         project_id=manifest.project.project_id if manifest else None,
         zip_filename=source_name,
-        zip_stored_path=_relative_to_project(stored_path),
-        temp_dir=_relative_to_project(temp_dir),
+        zip_stored_path=storage_relative_path(stored_path),
+        temp_dir=storage_relative_path(temp_dir),
         status="previewed" if not errors else "preview_failed",
         message="; ".join(errors + warnings),
     )
@@ -399,7 +395,7 @@ def _copy_member(source_root: Path, relative_path: str, project_root: Path) -> s
         raise HTTPException(status_code=400, detail=f"目标路径越界: {relative_path}")
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, target)
-    return _relative_to_project(target)
+    return storage_relative_path(target)
 
 
 def _confirm_backup_import(db: Session, temporary_import_id: str, temp_dir: Path, extract_dir: Path) -> models.Project:
@@ -488,7 +484,7 @@ def _confirm_backup_import_inner(
             if not path:
                 continue
             stored_path = _copy_member(extract_dir, path, project_root)
-            stored_file = PROJECT_ROOT / stored_path
+            stored_file = resolve_stored_path(stored_path)
             db.add(
                 models.MediaFile(
                     project_db_id=project.id,
@@ -547,7 +543,7 @@ def _confirm_backup_import_inner(
         if not point or not path:
             continue
         stored_path = _copy_member(extract_dir, path, project_root)
-        stored_file = PROJECT_ROOT / stored_path
+        stored_file = resolve_stored_path(stored_path)
         run = None
         if crack_data.get("test_run_id") is not None:
             run = run_by_old_id.get(int(crack_data["test_run_id"]))
@@ -621,7 +617,7 @@ def _confirm_backup_import_inner(
                 shutil.rmtree(target)
             shutil.copytree(source, target)
 
-    job = db.scalar(select(models.ImportJob).where(models.ImportJob.temp_dir == _relative_to_project(temp_dir)))
+    job = db.scalar(select(models.ImportJob).where(models.ImportJob.temp_dir == storage_relative_path(temp_dir)))
     if job:
         job.status = "imported"
         job.message = f"Imported PointProcess full backup project {project.project_id}"
@@ -715,7 +711,7 @@ def _confirm_manifest_import(db: Session, temporary_import_id: str, temp_dir: Pa
 
             for photo in point_in.photos:
                 stored_path = _copy_member(extract_dir, photo.path, project_root)
-                stored_file = PROJECT_ROOT / stored_path
+                stored_file = resolve_stored_path(stored_path)
                 sha256 = photo.sha256 or file_sha256(stored_file)
                 db.add(
                     models.MediaFile(
@@ -740,11 +736,11 @@ def _confirm_manifest_import(db: Session, temporary_import_id: str, temp_dir: Pa
                     shutil.rmtree(target)
                 shutil.copytree(source, target)
 
-        job = db.scalar(select(models.ImportJob).where(models.ImportJob.temp_dir == _relative_to_project(temp_dir)))
+        job = db.scalar(select(models.ImportJob).where(models.ImportJob.temp_dir == storage_relative_path(temp_dir)))
         if job:
             job.status = "imported"
             job.message = f"已导入项目 {project.project_id}"
-            job.zip_stored_path = _relative_to_project(imports_target)
+            job.zip_stored_path = storage_relative_path(imports_target)
 
         db.commit()
         db.refresh(project)

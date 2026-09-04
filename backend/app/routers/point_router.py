@@ -8,16 +8,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app import models
-from app.database import STORAGE_DIR, get_db
+from app.database import get_db
 from app.schemas import MediaFileOut, PointOut, PointUpdate
-from app.services.file_service import resolve_stored_path
+from app.services.file_service import resolve_stored_path, storage_relative_path
 from app.utils.hash_utils import file_sha256
 from app.utils.path_utils import safe_project_dir
 
 
 router = APIRouter(prefix="/api/points", tags=["points"])
-
-BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 # 允许的图片扩展名白名单
 ALLOWED_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
@@ -52,10 +50,6 @@ def _validate_image_upload(file: UploadFile, content: bytes) -> None:
     )
     if not is_valid:
         raise HTTPException(status_code=400, detail="文件内容不是有效的图片（PNG/JPEG/GIF/WEBP）")
-
-
-def _relative_to_backend(path: Path) -> str:
-    return str(path.relative_to(BACKEND_ROOT))
 
 
 @router.get("/{point_id}", response_model=PointOut)
@@ -169,7 +163,7 @@ async def upload_point_media(
         photo_id=f"manual-{uuid.uuid4().hex[:12]}",
         type=media_type,
         path=f"uploads/{point.id}/{safe_name}",
-        stored_path=_relative_to_backend(target),
+        stored_path=storage_relative_path(target),
         filename=safe_name,
         sha256=file_sha256(target),
         remark="手动上传",
