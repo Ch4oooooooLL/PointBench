@@ -226,10 +226,14 @@ namespace PointBenchInstaller
             // profile folders and never loses existing data.  The database is
             // created/migrated on first startup; a prior LocalAppData data set
             // is moved here once so existing users keep their projects.
+            // The migration must run before storage/logs are created here:
+            // creating them first would make the per-item destination exist
+            // and MigrateLegacyUserData would skip moving the legacy data.
             string dataDirectory = Path.Combine(target, "data");
+            Directory.CreateDirectory(dataDirectory);
+            MigrateLegacyUserData(dataDirectory);
             Directory.CreateDirectory(Path.Combine(dataDirectory, "storage"));
             Directory.CreateDirectory(Path.Combine(dataDirectory, "logs"));
-            MigrateLegacyUserData(dataDirectory);
 
             UpdateProgress("正在创建桌面快捷方式", 0, 0, target, true);
             string shortcutPath = _noDesktop ? String.Empty : CreateDesktopShortcut(target);
@@ -272,6 +276,9 @@ namespace PointBenchInstaller
 
             string newRoot = Path.GetFullPath(newDataDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             string[] relativeItems = { "logs", "storage", "pointbench.db" };
+            // SQLite WAL 伴生文件：数据库若运行中，最新数据可能还在 -wal 里，
+            // 必须与 pointbench.db 一并搬走，否则会丢失未 checkpoint 的提交。
+            bool hadDatabase = File.Exists(Path.Combine(legacyRoot, "pointbench.db"));
             foreach (string relative in relativeItems)
             {
                 string source = Path.Combine(legacyRoot, relative);
@@ -288,6 +295,18 @@ namespace PointBenchInstaller
                 }
                 else
                 {
+                    File.Move(source, destination);
+                }
+            }
+            if (hadDatabase)
+            {
+                foreach (string suffix in new[] { "-wal", "-shm" })
+                {
+                    string source = Path.Combine(legacyRoot, "pointbench.db" + suffix);
+                    if (!File.Exists(source)) continue;
+                    string destination = Path.Combine(newRoot, "pointbench.db" + suffix);
+                    if (File.Exists(destination)) continue;
+                    Log("Migrating legacy SQLite companion: {0} -> {1}", source, destination);
                     File.Move(source, destination);
                 }
             }
