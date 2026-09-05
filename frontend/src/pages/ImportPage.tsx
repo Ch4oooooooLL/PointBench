@@ -65,7 +65,8 @@ export function ImportPage() {
       });
       await refreshProjects();
       setSelectedProjectId(result.project_db_id);
-      navigate('/');
+      // 导入完成即进入项目：默认落到模型预览主页。
+      navigate('/fem-preview');
     } catch (err) {
       setError((err as Error).message);
     } finally {

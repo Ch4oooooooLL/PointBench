@@ -43,7 +43,8 @@ export function ProjectCreatePage() {
       await refreshProjects();
       setSelectedProjectId(project.id);
       setMessageTone('ok');
-      navigate('/project-detail');
+      // 创建即进入项目：默认落到模型预览主页。
+      navigate('/fem-preview');
     } catch (err) {
       setMessageTone('danger');
       setMessage(`创建失败：${(err as Error).message}`);

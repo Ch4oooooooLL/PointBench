@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { FemGroupingData, PointElementBinding } from '../types';
+import { FemGroupingData, Point, PointElementBinding } from '../types';
 
 // Keep the mesh deliberately quiet so the selected solver element stays the
 // visual focus of the preview.
@@ -43,6 +43,14 @@ interface FemViewerProps {
   pickingMode: boolean;
   /** 拾取回调（仅 pickingMode 下触发；null 表示点击了空白处）。 */
   onPickElement?: (elementId: number | null) => void;
+  /** 项目点位列表（气泡悬浮展开时展示点位基本情况）。 */
+  points: Point[];
+  /** 仅展示该点位的气泡；null 表示展示全部已绑定点位的气泡。 */
+  focusedPointDbId: number | null;
+  /** focusNonce 变化时，把镜头聚焦到当前聚焦点位绑定的单元。 */
+  focusNonce: number;
+  /** 右侧点位列表开启时为 true：顶部状态条为列表让位。 */
+  sideListOpen: boolean;
 }
 
 interface ViewerRuntime {
@@ -53,6 +61,8 @@ interface ViewerRuntime {
   fitView: (preset: ViewPreset) => void;
   back: () => void;
   rebuildPointBubbles: () => void;
+  /** 把镜头移到指定单元附近（尽量无遮挡）。 */
+  focusElement: (elementId: number) => boolean;
 }
 
 export function FemViewer({
@@ -67,6 +77,10 @@ export function FemViewer({
   pointPreview,
   pickingMode,
   onPickElement,
+  points,
+  focusedPointDbId,
+  focusNonce,
+  sideListOpen,
 }: FemViewerProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const bubbleLayerRef = useRef<HTMLDivElement>(null);
@@ -87,6 +101,8 @@ export function FemViewer({
     pointPreview,
     pickingMode,
     onPickElement,
+    points,
+    focusedPointDbId,
   });
   const runtimeRef = useRef<ViewerRuntime | null>(null);
   const bubblesRef = useRef<Map<number, BubbleRuntime>>(new Map());
@@ -102,6 +118,8 @@ export function FemViewer({
     pointPreview,
     pickingMode,
     onPickElement,
+    points,
+    focusedPointDbId,
   };
 
   useEffect(() => {
@@ -170,9 +188,12 @@ export function FemViewer({
     let modelBounds: THREE.Box3 | null = null;
     // 点位气泡锚点依赖的世界坐标参考与逐单元质心（模型加载后计算）。
     let elementCentroids: Map<number, THREE.Vector3> | null = null;
+    // 逐单元尺寸/朝向信息，聚焦单元时选取拍摄方向用。
+    let elementMeta: Map<number, { radius: number; normal: THREE.Vector3 | null }> | null = null;
     let modelCenter = new THREE.Vector3();
     let modelRadius = 1;
     let disposed = false;
+    const rayDirection = new THREE.Vector3();
 
     const colorForElement = (elementId: number): THREE.Color => {
       const options = optionsRef.current;
@@ -361,6 +382,47 @@ export function FemViewer({
       material.needsUpdate = true;
     };
 
+    /** 气泡悬浮展开的点位详情卡片（纯 DOM + textContent，避免注入）。 */
+    const buildBubbleDetail = (binding: PointElementBinding, info: Point | undefined): HTMLDivElement => {
+      const card = document.createElement('div');
+      card.className = 'point-bubble-detail';
+      const addRow = (label: string, value?: string | null) => {
+        if (!value) return undefined;
+        const row = document.createElement('div');
+        row.className = 'point-bubble-detail-row';
+        const labelSpan = document.createElement('span');
+        labelSpan.textContent = label;
+        const valueSpan = document.createElement('span');
+        valueSpan.textContent = value;
+        row.append(labelSpan, valueSpan);
+        card.appendChild(row);
+        return row;
+      };
+      addRow('编号', info ? info.point_id : binding.point_id);
+      addRow('类型', info?.point_type);
+      addRow('部件', [info?.component, info?.side].filter(Boolean).join(' · ') || null);
+      addRow('位置', info?.position_description);
+      addRow('方向', info?.direction);
+      addRow('安装', info?.install_status);
+      addRow('检查', info?.check_status);
+      const latest = info?.latest_measurement;
+      if (latest) {
+        const parts: string[] = [];
+        if (latest.amplitude_strain_ue != null) parts.push(`应变幅 ${latest.amplitude_strain_ue} με`);
+        if (latest.stress_amplitude_mpa != null) parts.push(`应力幅 ${latest.stress_amplitude_mpa} MPa`);
+        if (parts.length) addRow('最新', parts.join(' / '));
+        const statusRow = addRow('状态', latest.is_abnormal ? '异常' : '正常');
+        if (latest.is_abnormal) statusRow?.classList.add('abnormal');
+      }
+      if (!card.childElementCount) {
+        const empty = document.createElement('div');
+        empty.className = 'point-bubble-detail-row';
+        empty.textContent = '暂无点位详情';
+        card.appendChild(empty);
+      }
+      return card;
+    };
+
     /**
      * 依据当前绑定与「点位预览」开关重建气泡层。
      *
@@ -368,6 +430,7 @@ export function FemViewer({
      * 世界坐标锚点存入 bubblesRef，由 animate 循环逐帧投影到屏幕更新位置。
      * 连线终点从质心沿「远离模型中心」的水平方向 + 竖直向上偏移，偏移固定
      * 于模型坐标系，因此旋转视角时气泡跟随模型移动而不会跳动。
+     * 指定 focusedPointDbId 时只渲染该点位的气泡（右侧点位列表点选后的单点展示）。
      */
     const rebuildPointBubbles = () => {
       bubblesRef.current.clear();
@@ -377,10 +440,16 @@ export function FemViewer({
       const options = optionsRef.current;
       if (!options.pointPreview) return;
       scene.updateMatrixWorld(true);
+      const visibleBindings =
+        options.focusedPointDbId == null
+          ? options.bindings
+          : options.bindings.filter((binding) => binding.point_db_id === options.focusedPointDbId);
+      if (!visibleBindings.length) return;
+      const pointsById = new Map(options.points.map((point) => [point.id, point]));
       const svg = document.createElementNS(SVG_NS, 'svg');
       svg.setAttribute('class', 'point-bubble-svg');
       layer.appendChild(svg);
-      for (const binding of options.bindings) {
+      for (const binding of visibleBindings) {
         const centroid = elementCentroids.get(binding.element_id);
         // 模型整体替换后旧绑定可能指向已不存在的单元：跳过即可。
         if (!centroid) continue;
@@ -402,7 +471,11 @@ export function FemViewer({
         svg.appendChild(dot);
         const bubble = document.createElement('div');
         bubble.className = 'point-bubble';
-        bubble.textContent = binding.point_name || binding.point_id;
+        const name = document.createElement('span');
+        name.className = 'point-bubble-name';
+        name.textContent = binding.point_name || binding.point_id;
+        bubble.appendChild(name);
+        bubble.appendChild(buildBubbleDetail(binding, pointsById.get(binding.point_db_id)));
         bubble.title = `${binding.point_id} ${binding.point_name} · 单元 ${binding.element_id}`;
         bubble.addEventListener('click', (event) => {
           event.stopPropagation();
@@ -474,6 +547,69 @@ export function FemViewer({
       fitView(preset);
     };
 
+    /**
+     * 把镜头移到指定单元附近，尽量让它无遮挡地出现在画面中央。
+     *
+     * 从「单元法线」「远离模型中心的径向」及其与竖直方向的组合中选候选
+     * 方向，逐个做一次射线检测（从候选机位射向单元质心），第一个视线
+     * 首先命中目标单元的方向胜出；全部被遮挡时退回第一个候选（法线）。
+     * 返回是否成功定位（单元不存在时返回 false）。
+     */
+    const focusElement = (elementId: number): boolean => {
+      if (!modelMesh || !elementCentroids || !elementMeta) return false;
+      const center = elementCentroids.get(elementId);
+      const meta = elementMeta.get(elementId);
+      if (!center) return false;
+
+      const radial = new THREE.Vector3().subVectors(center, modelCenter);
+      if (radial.lengthSq() < 1e-12) radial.set(0, 1, 0);
+      radial.normalize();
+      const up = new THREE.Vector3(0, 1, 0);
+      const candidates: THREE.Vector3[] = [];
+      const pushDir = (dir: THREE.Vector3) => {
+        if (dir.lengthSq() < 1e-9) return;
+        dir.normalize();
+        if (!candidates.some((existing) => existing.dot(dir) > 0.985)) candidates.push(dir);
+      };
+      if (meta?.normal) {
+        pushDir(meta.normal.clone());
+        pushDir(meta.normal.clone().add(radial));
+        pushDir(meta.normal.clone().add(up));
+      }
+      pushDir(radial.clone());
+      pushDir(radial.clone().add(up));
+      if (!candidates.length) candidates.push(up.clone());
+
+      const radius = meta?.radius ?? modelRadius * 0.02;
+      const distance = Math.max(radius * 6, modelRadius * 0.35);
+
+      let chosen: THREE.Vector3 | null = null;
+      const previousFar = raycaster.far;
+      for (const dir of candidates) {
+        const eye = center.clone().addScaledVector(dir, distance);
+        rayDirection.subVectors(center, eye).normalize();
+        raycaster.set(eye, rayDirection);
+        raycaster.far = distance + radius * 2;
+        const hits = raycaster.intersectObject(modelMesh, false);
+        if (!hits.length || (hits[0].faceIndex != null && mapping[hits[0].faceIndex] === elementId)) {
+          chosen = dir;
+          break;
+        }
+      }
+      // 恢复 far，避免影响画布点击拾取（其依赖默认 Infinity）。
+      raycaster.far = previousFar;
+
+      const finalDir = chosen ?? candidates[0];
+      viewHistory.push(captureView());
+      if (viewHistory.length > 32) viewHistory.shift();
+      camera.position.copy(center).addScaledVector(finalDir, distance);
+      camera.up.set(0, 1, 0);
+      if (Math.abs(finalDir.y) > 0.95) camera.up.set(0, 0, 1);
+      controls.target.copy(center);
+      controls.update();
+      return true;
+    };
+
     Promise.all([
       fetch(mappingUrl).then((response) => response.json()),
       new GLTFLoader().loadAsync(glbUrl),
@@ -513,32 +649,76 @@ export function FemViewer({
         grid.position.set(modelCenter.x, modelBounds.min.y - maxDimension * 0.06, modelCenter.z);
         scene.add(grid);
 
-        // 逐单元质心：点位气泡连线起点（GLB 已三角化，mapping 把三角形
-        // 映射回求解器单元 ID，同一单元所有三角形顶点取平均即为质心）。
-        const centroidSums = new Map<number, { sum: THREE.Vector3; vertexCount: number }>();
+        // 逐单元质心/朝向/尺寸：气泡连线起点与聚焦单元视角的数据源
+        // （GLB 已三角化，mapping 把三角形映射回求解器单元 ID）。
+        const centroidSums = new Map<
+          number,
+          {
+            sum: THREE.Vector3;
+            vertexCount: number;
+            normalSum: THREE.Vector3;
+            min: THREE.Vector3;
+            max: THREE.Vector3;
+          }
+        >();
         const positionArray = geometry?.getAttribute('position').array as ArrayLike<number> | undefined;
         if (positionArray) {
           for (let triangle = 0; triangle < mapping.length; triangle += 1) {
             const elementId = mapping[triangle];
             let entry = centroidSums.get(elementId);
             if (!entry) {
-              entry = { sum: new THREE.Vector3(), vertexCount: 0 };
+              entry = {
+                sum: new THREE.Vector3(),
+                vertexCount: 0,
+                normalSum: new THREE.Vector3(),
+                min: new THREE.Vector3(Infinity, Infinity, Infinity),
+                max: new THREE.Vector3(-Infinity, -Infinity, -Infinity),
+              };
               centroidSums.set(elementId, entry);
             }
-            for (let corner = 0; corner < 3; corner += 1) {
-              const base = (triangle * 3 + corner) * 3;
-              entry.sum.x += positionArray[base];
-              entry.sum.y += positionArray[base + 1];
-              entry.sum.z += positionArray[base + 2];
-            }
+            const base = triangle * 9;
+            const ax = positionArray[base];
+            const ay = positionArray[base + 1];
+            const az = positionArray[base + 2];
+            const bx = positionArray[base + 3];
+            const by = positionArray[base + 4];
+            const bz = positionArray[base + 5];
+            const cx = positionArray[base + 6];
+            const cy = positionArray[base + 7];
+            const cz = positionArray[base + 8];
+            entry.sum.x += ax + bx + cx;
+            entry.sum.y += ay + by + cy;
+            entry.sum.z += az + bz + cz;
             entry.vertexCount += 3;
+            // 面积加权法线：(b-a)×(c-a)
+            const e1x = bx - ax;
+            const e1y = by - ay;
+            const e1z = bz - az;
+            const e2x = cx - ax;
+            const e2y = cy - ay;
+            const e2z = cz - az;
+            entry.normalSum.x += e1y * e2z - e1z * e2y;
+            entry.normalSum.y += e1z * e2x - e1x * e2z;
+            entry.normalSum.z += e1x * e2y - e1y * e2x;
+            entry.min.x = Math.min(entry.min.x, ax, bx, cx);
+            entry.min.y = Math.min(entry.min.y, ay, by, cy);
+            entry.min.z = Math.min(entry.min.z, az, bz, cz);
+            entry.max.x = Math.max(entry.max.x, ax, bx, cx);
+            entry.max.y = Math.max(entry.max.y, ay, by, cy);
+            entry.max.z = Math.max(entry.max.z, az, bz, cz);
           }
-          elementCentroids = new Map(
-            [...centroidSums.entries()].map(([elementId, entry]) => [
-              elementId,
-              entry.sum.divideScalar(entry.vertexCount),
-            ]),
-          );
+          elementCentroids = new Map();
+          elementMeta = new Map();
+          for (const [elementId, entry] of centroidSums) {
+            const centroid = entry.sum.divideScalar(entry.vertexCount);
+            elementCentroids.set(elementId, centroid);
+            const size = new THREE.Vector3().subVectors(entry.max, entry.min);
+            const normal = entry.normalSum;
+            elementMeta.set(elementId, {
+              radius: Math.max(size.length() / 2, 1e-6),
+              normal: normal.lengthSq() > 1e-12 ? normal.normalize() : null,
+            });
+          }
         }
 
         runtimeRef.current = {
@@ -549,6 +729,7 @@ export function FemViewer({
           fitView,
           back,
           rebuildPointBubbles,
+          focusElement,
         };
         applyColors(selectedRef.current);
         buildMeshLines();
@@ -591,17 +772,41 @@ export function FemViewer({
     renderer.domElement.addEventListener('pointerdown', onPointerDown);
     renderer.domElement.addEventListener('pointerup', onPointerUp);
 
+    // 视图快捷键监听在 window 上：不依赖画布聚焦，进入页面即生效。
+    // 用 event.code（物理键位）判断，不受输入法（中英文）、大小写锁定
+    // 或键盘布局影响；输入法组合中（isComposing）与焦点在可编辑控件
+    // （输入框/下拉/文本域）时不抢占。
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === '1') goView('front');
-      if (event.key.toLowerCase() === 'f' || event.key === '2') goView('iso');
-      if (event.key.toLowerCase() === 'b') back();
+      if (event.isComposing) return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)
+      ) {
+        return;
+      }
+      switch (event.code) {
+        case 'Digit1':
+          goView('front');
+          break;
+        case 'Digit2':
+        case 'KeyF':
+          goView('iso');
+          break;
+        case 'KeyB':
+          back();
+          break;
+        default:
+          return;
+      }
+      event.preventDefault();
     };
     renderer.domElement.tabIndex = 0;
     renderer.domElement.setAttribute(
       'aria-label',
       '有限元三维视图；中键拖动旋转，右键拖动平移，滚轮缩放，点击选择单元，1 正视，F/2 等轴视图（自动适应窗口），B 返回上一视图',
     );
-    renderer.domElement.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onKeyDown);
 
     const resize = () => {
       const width = Math.max(host.clientWidth, 1);
@@ -676,7 +881,7 @@ export function FemViewer({
       resizeObserver.disconnect();
       renderer.domElement.removeEventListener('pointerdown', onPointerDown);
       renderer.domElement.removeEventListener('pointerup', onPointerUp);
-      renderer.domElement.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keydown', onKeyDown);
       renderer.domElement.removeEventListener('wheel', preventNativeScroll);
       renderer.domElement.removeEventListener('mousedown', preventNativeScroll);
       renderer.domElement.removeEventListener('auxclick', preventNativeScroll);
@@ -725,17 +930,26 @@ export function FemViewer({
     return () => cancelAnimationFrame(raf);
   }, [showMesh, showBoundary, transparent, colorByGroup, grouping]);
 
-  // 绑定或气泡开关变化：重建气泡层（模型未就绪时为空操作，加载完成后会自动重建）。
+  // 绑定/气泡开关/聚焦点位/点位详情变化：重建气泡层（模型未就绪时为空
+  // 操作，加载完成后会自动重建）。
   useEffect(() => {
     runtimeRef.current?.rebuildPointBubbles();
-  }, [bindings, pointPreview]);
+  }, [bindings, pointPreview, focusedPointDbId, points]);
+
+  // focusNonce 变化：把镜头聚焦到当前聚焦点位绑定的单元（右侧列表点选）。
+  useEffect(() => {
+    if (!focusNonce) return;
+    const options = optionsRef.current;
+    const binding = options.bindings.find((item) => item.point_db_id === options.focusedPointDbId);
+    if (binding) runtimeRef.current?.focusElement(binding.element_id);
+  }, [focusNonce]);
 
   const setView = (preset: ViewPreset) => {
     runtimeRef.current?.fitView(preset);
   };
 
   return (
-    <div className="viewer-host" aria-label="有限元模型三维视图" aria-busy={viewBusy}>
+    <div className={`viewer-host${sideListOpen ? ' has-side-list' : ''}`} aria-label="有限元模型三维视图" aria-busy={viewBusy}>
       <div className="viewer-canvas" ref={hostRef} />
       {pointPreview && <div className="point-bubble-layer" ref={bubbleLayerRef} />}
       <div className="viewer-actions" aria-label="三维视图控制">

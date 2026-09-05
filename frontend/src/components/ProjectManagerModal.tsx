@@ -1,6 +1,6 @@
 import { Download, Save, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api, downloadFile } from '../api/client';
 import { useAppContext } from '../context/AppContext';
 import { DeleteProjectResult, Project } from '../types';
@@ -38,6 +38,7 @@ function isSameForm(left: ProjectForm, right: ProjectForm): boolean {
 
 export function ProjectManagerModal({ onClose }: Props) {
   const { projects, selectedProjectId, selectedProject, setSelectedProjectId, refreshProjects } = useAppContext();
+  const navigate = useNavigate();
   const [form, setForm] = useState<ProjectForm>(toForm(selectedProject));
   const [message, setMessage] = useState('');
   const [deleteExport, setDeleteExport] = useState<DeleteProjectResult | null>(null);
@@ -64,6 +65,8 @@ export function ProjectManagerModal({ onClose }: Props) {
   function selectProject(projectId: number) {
     if (!confirmDiscardChanges()) return;
     setSelectedProjectId(projectId);
+    // 进入项目后默认落到模型预览主页。
+    navigate('/fem-preview');
   }
 
   async function save() {

@@ -1,5 +1,5 @@
 import { Box, FileUp, PencilLine, RefreshCw } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { FemUploadBox } from '../components/FemUploadBox';
@@ -9,7 +9,8 @@ import { useAppContext } from '../context/AppContext';
 import { FemGroupingData, FemModelPayload, FemPreviewStats, Point, PointElementBinding } from '../types';
 
 /**
- * 模型预览：展示当前项目对应的 FEM 模型（一个项目一个模型）。
+ * 模型预览：展示当前项目对应的 FEM 模型（一个项目一个模型），也是进入
+ * 项目后的默认主页（选择/创建/导入项目后都会先落到本页）。
  *
  * 模型的导入、替换与渲染展示都在本页完成：
  * - 项目还没有 FEM 模型时，在本页直接导入（选择 .fem 文件 / 文件夹）；
@@ -18,7 +19,8 @@ import { FemGroupingData, FemModelPayload, FemPreviewStats, Point, PointElementB
  *
  * 点位绑定：把项目内的测试点位绑定到模型单元上——「编辑点位」进入绑定
  * 编辑（选点位 → 在模型上点单元 → 保存），「点位预览」开启后各点位名称
- * 以气泡悬浮在模型上，并用直线连到对应单元。
+ * 以气泡悬浮在模型上并用直线连到对应单元；右侧点位列表可单选某个点位
+ * 聚焦查看（镜头对准其绑定的单元），未绑定的点位点击即开始绑定。
  */
 export function FemPreviewPage() {
   const navigate = useNavigate();
@@ -35,6 +37,12 @@ export function FemPreviewPage() {
   const [pointPreview, setPointPreview] = useState(true);
   const [editorOpen, setEditorOpen] = useState(false);
   const [pickedElement, setPickedElement] = useState<number | null>(null);
+  // 点位列表与聚焦：focusedPointDbId 非 null 时只展示该点位的气泡
+  const [points, setPoints] = useState<Point[]>([]);
+  const [pointsLoading, setPointsLoading] = useState(false);
+  const [focusedPointDbId, setFocusedPointDbId] = useState<number | null>(null);
+  const [focusNonce, setFocusNonce] = useState(0);
+  const [editorInitialPointId, setEditorInitialPointId] = useState<number | null>(null);
 
   const loadModel = useCallback(async (projectId: number) => {
     setLoading(true);
@@ -62,6 +70,7 @@ export function FemPreviewPage() {
     if (!selectedProjectId) {
       setPayload(null);
       setBindings([]);
+      setPoints([]);
       setLoading(false);
       return undefined;
     }
@@ -70,6 +79,8 @@ export function FemPreviewPage() {
     setError('');
     setPayload(null);
     setBindings([]);
+    setPoints([]);
+    setPointsLoading(true);
     api
       .get<FemModelPayload>(`/api/projects/${selectedProjectId}/fem`)
       .then((data) => {
@@ -81,7 +92,7 @@ export function FemPreviewPage() {
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
-    // 绑定列表失败不阻塞模型展示，按空列表处理。
+    // 绑定/点位列表失败不阻塞模型展示，按空列表处理。
     api
       .get<PointElementBinding[]>(`/api/projects/${selectedProjectId}/point-bindings`, { silent: true })
       .then((data) => {
@@ -89,6 +100,17 @@ export function FemPreviewPage() {
       })
       .catch(() => {
         if (!cancelled) setBindings([]);
+      });
+    api
+      .get<Point[]>(`/api/projects/${selectedProjectId}/points`, { silent: true })
+      .then((data) => {
+        if (!cancelled) setPoints(data);
+      })
+      .catch(() => {
+        if (!cancelled) setPoints([]);
+      })
+      .finally(() => {
+        if (!cancelled) setPointsLoading(false);
       });
     return () => {
       cancelled = true;
@@ -106,10 +128,16 @@ export function FemPreviewPage() {
     ? `${selectedProjectId}:${payload.artifact_version ?? ''}:${payload.updated_at ?? ''}`
     : 'empty';
 
-  // 模型替换后旧拾取结果失效；FemViewer 也随 key 重挂载。
+  // 模型替换后旧拾取/聚焦结果失效；FemViewer 也随 key 重挂载。
   useEffect(() => {
     setPickedElement(null);
+    setFocusedPointDbId(null);
   }, [modelKey]);
+
+  // 关闭点位预览时退出单点聚焦。
+  useEffect(() => {
+    if (!pointPreview) setFocusedPointDbId(null);
+  }, [pointPreview]);
 
   // 上传完成/失败后统一回到加载态重新读取最新模型状态
   const handleUploaded = useCallback(() => {
@@ -125,7 +153,29 @@ export function FemPreviewPage() {
   const toggleEditor = useCallback(() => {
     setEditorOpen((open) => !open);
     setPickedElement(null);
+    setEditorInitialPointId(null);
   }, []);
+
+  /** 右侧点位列表点击：已绑定 → 单点聚焦并把镜头对准其单元；未绑定 → 开始绑定。 */
+  const handlePointClick = useCallback(
+    (point: Point) => {
+      const binding = bindings.find((item) => item.point_db_id === point.id);
+      if (!binding) {
+        setEditorInitialPointId(point.id);
+        setEditorOpen(true);
+        setPickedElement(null);
+        return;
+      }
+      if (focusedPointDbId === point.id) {
+        // 再次点击取消聚焦，恢复展示全部气泡。
+        setFocusedPointDbId(null);
+        return;
+      }
+      setFocusedPointDbId(point.id);
+      setFocusNonce((nonce) => nonce + 1);
+    },
+    [bindings, focusedPointDbId],
+  );
 
   return (
     <section>
@@ -185,10 +235,27 @@ export function FemPreviewPage() {
                   pointPreview={pointPreview}
                   pickingMode={editorOpen}
                   onPickElement={setPickedElement}
+                  points={points}
+                  focusedPointDbId={focusedPointDbId}
+                  focusNonce={focusNonce}
+                  sideListOpen={pointPreview}
                 />
+                {pointPreview && (
+                  <PointListPanel
+                    points={points}
+                    pointsLoading={pointsLoading}
+                    bindings={bindings}
+                    focusedPointDbId={focusedPointDbId}
+                    onPointClick={handlePointClick}
+                  />
+                )}
                 {editorOpen && selectedProjectId != null && (
                   <PointBindingEditor
                     projectId={selectedProjectId}
+                    points={points}
+                    pointsLoading={pointsLoading}
+                    initialPointDbId={editorInitialPointId}
+                    offsetForList={pointPreview}
                     bindings={bindings}
                     pickedElement={pickedElement}
                     onPickClear={() => setPickedElement(null)}
@@ -288,11 +355,80 @@ function FemReplacePanel({
 }
 
 /**
- * 点位绑定编辑弹层：悬浮在三维视图右上角，不遮挡画布——选择点位后直接
- * 在模型上左键点击目标单元，保存即写入绑定（同一点位重复保存即覆盖）。
+ * 三维预览右侧的点位列表（点位预览开启时显示）：
+ * - 已绑定点位：点击单独展示该点位气泡并把镜头对准其单元，再次点击恢复全部；
+ * - 未绑定点位：点击直接进入绑定编辑并预选该点位。
+ */
+function PointListPanel({
+  points,
+  pointsLoading,
+  bindings,
+  focusedPointDbId,
+  onPointClick,
+}: {
+  points: Point[];
+  pointsLoading: boolean;
+  bindings: PointElementBinding[];
+  focusedPointDbId: number | null;
+  onPointClick: (point: Point) => void;
+}) {
+  const bindingByPoint = useMemo(() => new Map(bindings.map((binding) => [binding.point_db_id, binding])), [bindings]);
+
+  return (
+    <div className="point-list-panel" aria-label="点位列表">
+      <div className="point-list-head">
+        <strong>点位列表</strong>
+        <span className="pill">
+          {bindings.length}/{points.length} 已绑定
+        </span>
+      </div>
+      <div className="point-list-body">
+        {pointsLoading ? (
+          <p className="point-list-empty">正在读取点位…</p>
+        ) : points.length === 0 ? (
+          <p className="point-list-empty">当前项目没有点位</p>
+        ) : (
+          points.map((point) => {
+            const bound = bindingByPoint.get(point.id);
+            const focused = focusedPointDbId === point.id;
+            return (
+              <button
+                key={point.id}
+                type="button"
+                className={`point-list-item${focused ? ' focused' : ''}${bound ? '' : ' unbound'}`}
+                onClick={() => onPointClick(point)}
+                title={
+                  bound
+                    ? `已绑定单元 ${bound.element_id}；点击单独查看，再次点击恢复全部`
+                    : '未绑定单元；点击开始绑定'
+                }
+              >
+                <span className="point-list-item-name">
+                  {point.latest_measurement?.is_abnormal && <i className="point-list-dot" />}
+                  {point.point_id} {point.point_name}
+                </span>
+                <span className="point-list-item-status">{bound ? `单元 ${bound.element_id}` : '未绑定'}</span>
+              </button>
+            );
+          })
+        )}
+      </div>
+      <p className="point-list-hint">已绑定：点击聚焦该单元，再点恢复全部；未绑定：点击开始绑定。</p>
+    </div>
+  );
+}
+
+/**
+ * 点位绑定编辑弹层：默认悬浮在三维视图右上角；右侧点位列表开启时移到
+ * 左上角避让。选择点位后直接在模型上左键点击目标单元，保存即写入绑定
+ * （同一点位重复保存即覆盖）。
  */
 function PointBindingEditor({
   projectId,
+  points,
+  pointsLoading,
+  initialPointDbId,
+  offsetForList,
   bindings,
   pickedElement,
   onPickClear,
@@ -300,37 +436,29 @@ function PointBindingEditor({
   onClose,
 }: {
   projectId: number;
+  points: Point[];
+  pointsLoading: boolean;
+  initialPointDbId: number | null;
+  offsetForList: boolean;
   bindings: PointElementBinding[];
   pickedElement: number | null;
   onPickClear: () => void;
   onBindingsChanged: () => void;
   onClose: () => void;
 }) {
-  const [points, setPoints] = useState<Point[]>([]);
-  const [loadingPoints, setLoadingPoints] = useState(true);
-  const [selectedPointDbId, setSelectedPointDbId] = useState<number | ''>('');
+  const [selectedPointDbId, setSelectedPointDbId] = useState<number | ''>(initialPointDbId ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
+  // 从点位列表点击未绑定点位进入时，预选该点位。
   useEffect(() => {
-    let cancelled = false;
-    setLoadingPoints(true);
-    api
-      .get<Point[]>(`/api/projects/${projectId}/points`, { silent: true })
-      .then((data) => {
-        if (!cancelled) setPoints(data);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(`读取点位列表失败：${(err as Error).message}`);
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingPoints(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId]);
+    if (initialPointDbId != null) {
+      setSelectedPointDbId(initialPointDbId);
+      setNotice('');
+      setError('');
+    }
+  }, [initialPointDbId]);
 
   const bindingByPoint = new Map(bindings.map((binding) => [binding.point_db_id, binding]));
   const selectedBinding = selectedPointDbId === '' ? undefined : bindingByPoint.get(selectedPointDbId);
@@ -373,7 +501,7 @@ function PointBindingEditor({
   }
 
   return (
-    <div className="point-binding-editor" role="dialog" aria-label="编辑点位绑定">
+    <div className={`point-binding-editor${offsetForList ? ' offset-left' : ''}`} role="dialog" aria-label="编辑点位绑定">
       <div className="point-binding-editor-head">
         <strong>
           <PencilLine size={15} />
@@ -388,14 +516,16 @@ function PointBindingEditor({
         <span>点位</span>
         <select
           value={selectedPointDbId}
-          disabled={loadingPoints || points.length === 0}
+          disabled={pointsLoading || points.length === 0}
           onChange={(event) => {
             setSelectedPointDbId(event.target.value === '' ? '' : Number(event.target.value));
             setNotice('');
             setError('');
           }}
         >
-          <option value="">{loadingPoints ? '正在读取点位…' : points.length === 0 ? '当前项目没有点位' : '请选择点位'}</option>
+          <option value="">
+            {pointsLoading ? '正在读取点位…' : points.length === 0 ? '当前项目没有点位' : '请选择点位'}
+          </option>
           {points.map((point) => {
             const bound = bindingByPoint.get(point.id);
             return (
