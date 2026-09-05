@@ -382,44 +382,96 @@ export function FemViewer({
       material.needsUpdate = true;
     };
 
+    /** 数值格式化：按量级取小数位，避免长浮点串。 */
+    const formatMetric = (value: number): string => {
+      const abs = Math.abs(value);
+      if (abs >= 1000) return value.toFixed(0);
+      if (abs >= 1) return value.toFixed(1);
+      return value.toFixed(2);
+    };
+
+    /** 状态值着色：明确完成 → ok；未完成 → warn；其他 → 中性。 */
+    const statusTone = (value: string, done: string): 'ok' | 'warn' | undefined => {
+      if (value === done) return 'ok';
+      if (value.startsWith('未')) return 'warn';
+      return undefined;
+    };
+
     /** 气泡悬浮展开的点位详情卡片（纯 DOM + textContent，避免注入）。 */
     const buildBubbleDetail = (binding: PointElementBinding, info: Point | undefined): HTMLDivElement => {
       const card = document.createElement('div');
       card.className = 'point-bubble-detail';
-      const addRow = (label: string, value?: string | null) => {
-        if (!value) return undefined;
+
+      const chip = (text: string, tone?: 'danger' | 'element') => {
+        const el = document.createElement('span');
+        el.className = `pbd-chip${tone ? ` ${tone}` : ''}`;
+        el.textContent = text;
+        return el;
+      };
+
+      // 头部：点位名称 + 编号/类型/异常徽标
+      const head = document.createElement('div');
+      head.className = 'pbd-head';
+      const title = document.createElement('div');
+      title.className = 'pbd-title';
+      title.textContent = binding.point_name || binding.point_id;
+      head.appendChild(title);
+      const badges = document.createElement('div');
+      badges.className = 'pbd-badges';
+      badges.appendChild(chip(info ? info.point_id : binding.point_id));
+      if (info?.point_type) badges.appendChild(chip(info.point_type));
+      if (info?.latest_measurement?.is_abnormal) badges.appendChild(chip('异常', 'danger'));
+      head.appendChild(badges);
+      card.appendChild(head);
+
+      // 最新测量：应变幅 / 应力幅两个数值块，无数据显示 --
+      const latest = info?.latest_measurement;
+      const stats = document.createElement('div');
+      stats.className = 'pbd-stats';
+      const addStat = (value: number | null | undefined, label: string) => {
+        const box = document.createElement('div');
+        box.className = 'pbd-stat';
+        const num = document.createElement('em');
+        num.textContent = value != null ? formatMetric(value) : '--';
+        const cap = document.createElement('span');
+        cap.textContent = label;
+        box.append(num, cap);
+        stats.appendChild(box);
+      };
+      addStat(latest?.amplitude_strain_ue ?? null, '应变幅 με');
+      addStat(latest?.stress_amplitude_mpa ?? null, '应力幅 MPa');
+      card.appendChild(stats);
+
+      // 基础信息行（仅展示有值的字段）
+      const rows = document.createElement('div');
+      rows.className = 'pbd-rows';
+      const addRow = (label: string, value?: string | null, tone?: 'ok' | 'warn') => {
+        if (!value) return;
         const row = document.createElement('div');
-        row.className = 'point-bubble-detail-row';
+        row.className = 'pbd-row';
         const labelSpan = document.createElement('span');
+        labelSpan.className = 'pbd-row-label';
         labelSpan.textContent = label;
         const valueSpan = document.createElement('span');
+        valueSpan.className = `pbd-row-value${tone ? ` ${tone}` : ''}`;
         valueSpan.textContent = value;
         row.append(labelSpan, valueSpan);
-        card.appendChild(row);
-        return row;
+        rows.appendChild(row);
       };
-      addRow('编号', info ? info.point_id : binding.point_id);
-      addRow('类型', info?.point_type);
       addRow('部件', [info?.component, info?.side].filter(Boolean).join(' · ') || null);
       addRow('位置', info?.position_description);
       addRow('方向', info?.direction);
-      addRow('安装', info?.install_status);
-      addRow('检查', info?.check_status);
-      const latest = info?.latest_measurement;
-      if (latest) {
-        const parts: string[] = [];
-        if (latest.amplitude_strain_ue != null) parts.push(`应变幅 ${latest.amplitude_strain_ue} με`);
-        if (latest.stress_amplitude_mpa != null) parts.push(`应力幅 ${latest.stress_amplitude_mpa} MPa`);
-        if (parts.length) addRow('最新', parts.join(' / '));
-        const statusRow = addRow('状态', latest.is_abnormal ? '异常' : '正常');
-        if (latest.is_abnormal) statusRow?.classList.add('abnormal');
-      }
-      if (!card.childElementCount) {
-        const empty = document.createElement('div');
-        empty.className = 'point-bubble-detail-row';
-        empty.textContent = '暂无点位详情';
-        card.appendChild(empty);
-      }
+      addRow('通道', info?.channels?.[0]?.channel_name ?? null);
+      addRow('安装', info?.install_status, info?.install_status ? statusTone(info.install_status, '已安装') : undefined);
+      addRow('检查', info?.check_status, info?.check_status ? statusTone(info.check_status, '已核查') : undefined);
+      if (rows.childElementCount) card.appendChild(rows);
+
+      // 底部：绑定的单元
+      const foot = document.createElement('div');
+      foot.className = 'pbd-foot';
+      foot.appendChild(chip(`绑定单元 ${binding.element_id}`, 'element'));
+      card.appendChild(foot);
+
       return card;
     };
 

@@ -4643,12 +4643,11 @@ label {
   transform: translateX(-50%);
   margin-top: 6px;
   background: #fff;
-  border: 1px solid #d9544d;
-  border-radius: 10px;
-  padding: 8px 12px;
-  box-shadow: 0 8px 24px rgba(15, 40, 60, 0.2);
-  min-width: 190px;
-  max-width: 300px;
+  border: 1px solid rgba(217, 84, 77, 0.35);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(15, 40, 60, 0.22);
+  min-width: 232px;
+  max-width: 320px;
   white-space: normal;
   font-weight: 400;
   cursor: default;
@@ -4666,30 +4665,139 @@ label {
 
 .point-bubble:hover .point-bubble-detail {
   display: block;
+  animation: pbd-in 0.15s ease-out;
 }
 
-.point-bubble-detail-row {
+@keyframes pbd-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+/* 卡片头部：点位名称 + 徽标，浅红底与气泡描边呼应。 */
+.pbd-head {
+  padding: 10px 12px 8px;
+  background: #fdf3f2;
+  border-bottom: 1px solid #f5e0dd;
+  border-radius: 11px 11px 0 0;
+}
+
+.pbd-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-main);
+  line-height: 18px;
+  margin-bottom: 6px;
+  word-break: break-all;
+}
+
+.pbd-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.pbd-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 600;
+  background: #eef2f6;
+  color: #51606d;
+}
+
+.pbd-chip.danger {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+
+.pbd-chip.element {
+  background: #fdeceb;
+  color: #c74440;
+  border: 1px solid rgba(217, 84, 77, 0.35);
+}
+
+/* 最新测量：应变幅 / 应力幅数值块。 */
+.pbd-stats {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px 2px;
+}
+
+.pbd-stat {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.pbd-stat em {
+  font-style: normal;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-main);
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pbd-stat span {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* 基础信息行。 */
+.pbd-rows {
+  padding: 8px 12px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.pbd-row {
   display: flex;
   justify-content: space-between;
   gap: 12px;
   font-size: 12px;
-  line-height: 21px;
-  color: var(--text-main);
+  line-height: 20px;
 }
 
-.point-bubble-detail-row > span:first-child {
+.pbd-row-label {
   color: var(--text-muted);
   flex: none;
 }
 
-.point-bubble-detail-row > span:last-child {
+.pbd-row-value {
+  color: var(--text-main);
   text-align: right;
   word-break: break-all;
 }
 
-.point-bubble-detail-row.abnormal > span:last-child {
-  color: var(--danger-text);
+.pbd-row-value.ok {
+  color: var(--success-text);
   font-weight: 600;
+}
+
+.pbd-row-value.warn {
+  color: var(--warning-text);
+  font-weight: 600;
+}
+
+/* 底部：绑定单元徽标。 */
+.pbd-foot {
+  padding: 2px 12px 10px;
+  display: flex;
 }
 
 /* 绑定编辑弹层：默认悬浮于视图右上角（避开顶部状态条），不遮挡画布
