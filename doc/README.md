@@ -77,8 +77,11 @@ scripts\build-installers.bat
 
 | 文件 | 说明 |
 | ---- | ---- |
+| `sample_data/POINTPROCESS_DEMO_FULL_20260905.zip` | 全要素演示包：8 点位（含照片/通道/CAE 映射）、10 轮 80 条测量数据、12 条裂缝记录、2 条 Dewesoft 导入记录、FEM 模型（含 INCLUDE 子文件与部件分组），通过完整备份导入一次性恢复 |
 | `sample_data/FRAME-FATIGUE-202606_10points_export.zip` | 10 点位示例 zip 包 |
 | `sample_data/FRAME-FATIGUE-202606_10runs_measurements.csv` | 10 次测试的 CSV 测量数据 |
+
+> 全要素演示包由 `scripts/create_full_sample.py` 生成，重新生成命令：`python scripts/create_full_sample.py`。
 
 > **注意**：CSV 测试数据导入是调试功能。进入页面左下角「设置」，开启「Debug 模式」后，项目概览页面会显示「Debug CSV 测试数据导入」工具。
 >

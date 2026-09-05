@@ -17,7 +17,7 @@ from app.services.analysis_service import compute_measurement_fields
 from app.services.dewesoft_service import delete_dewesoft_project_files
 from app.services.file_service import resolve_stored_path, storage_relative_path
 from app.utils.hash_utils import file_sha256
-from app.utils.path_utils import safe_project_dir
+from app.utils.path_utils import safe_fem_dir, safe_project_dir
 from app.utils.zip_utils import is_safe_zip_path, normalize_zip_name, safe_extract, validate_zip_members
 
 
@@ -254,7 +254,10 @@ def _build_backup_preview(
         missing_files=missing_files,
         duplicate_point_ids=duplicate_point_ids,
         duplicate_channel_names=[],
-        warnings=backup_warnings + ["Detected a PointProcess full backup. Import will restore points, photos, runs, measurements, cracks, and Dewesoft records."],
+        warnings=backup_warnings + [
+            "Detected a PointProcess full backup. Import will restore points, photos, runs, measurements, cracks, "
+            + ("Dewesoft records, and the FEM model." if (extract_dir / "fem").is_dir() else "and Dewesoft records.")
+        ],
         errors=backup_errors,
         can_import=not backup_errors,
     )
@@ -618,6 +621,8 @@ def _confirm_backup_import_inner(
                 shutil.rmtree(target)
             shutil.copytree(source, target)
 
+    _restore_fem_model_from_backup(db, project, extract_dir, backup)
+
     job = db.scalar(select(models.ImportJob).where(models.ImportJob.temp_dir == storage_relative_path(temp_dir)))
     if job:
         job.status = "imported"
@@ -626,6 +631,80 @@ def _confirm_backup_import_inner(
     db.commit()
     db.refresh(project)
     return project
+
+
+def _restore_fem_model_from_backup(db: Session, project: models.Project, extract_dir: Path, backup: dict) -> None:
+    """恢复备份包中的项目 FEM 模型（包内含 fem/ 目录时）。
+
+    优先直接复用包内渲染产物（model.glb + preview.json），与导出版本保持
+    一致；仅有源文件（fem/source/ 下存在 .fem/.dat）时重新解析生成产物。
+    恢复失败按导入失败处理，由调用方整体回滚，保证"完整备份 = 完整恢复"。
+    """
+    fem_pkg_dir = extract_dir / "fem"
+    if not fem_pkg_dir.is_dir():
+        return
+
+    from app.services.fem_model_service import build_fem_model_artifact
+
+    fem_dir = safe_fem_dir(project.project_id)
+    glb_path = fem_pkg_dir / "model.glb"
+    preview_path = fem_pkg_dir / "preview.json"
+    source_root = fem_pkg_dir / "source"
+
+    preview_stats: dict = {}
+    artifact_version: str | None = None
+    if preview_path.is_file():
+        try:
+            payload = json.loads(preview_path.read_text(encoding="utf-8"))
+            preview_stats = payload.get("stats") or {}
+            artifact_version = payload.get("artifact_version")
+        except (OSError, ValueError):
+            preview_stats = {}
+
+    if glb_path.is_file() and preview_stats:
+        # 快速路径：直接复用导出包内的渲染产物。
+        shutil.rmtree(fem_dir, ignore_errors=True)
+        shutil.copytree(fem_pkg_dir, fem_dir)
+        meta = backup.get("fem_model") or {}
+        main_filename = str(meta.get("main_filename") or preview_stats.get("source_name") or "model.fem")
+        source_name = str(meta.get("source_name") or preview_stats.get("source_name") or main_filename)
+        node_count = int(meta.get("node_count") or preview_stats.get("node_count") or 0)
+        element_count = int(meta.get("element_count") or preview_stats.get("element_count") or 0)
+        triangle_count = int(meta.get("triangle_count") or preview_stats.get("triangle_count") or 0)
+    else:
+        source_files = sorted(path for path in source_root.rglob("*") if path.is_file()) if source_root.is_dir() else []
+        if not source_files:
+            return
+        uploads = [(path.relative_to(source_root).as_posix(), path.read_bytes()) for path in source_files]
+        shutil.rmtree(fem_dir, ignore_errors=True)
+        try:
+            bundle = build_fem_model_artifact(fem_dir, uploads)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"备份包中的 FEM 模型恢复失败：{exc}") from exc
+        main_filename = bundle.source_name
+        source_name = bundle.source_name
+        node_count = bundle.node_count
+        element_count = bundle.element_count
+        triangle_count = bundle.triangle_count
+        try:
+            payload = json.loads((fem_dir / "preview.json").read_text(encoding="utf-8"))
+            artifact_version = payload.get("artifact_version")
+        except (OSError, ValueError):
+            artifact_version = None
+
+    db.add(
+        models.FemModel(
+            project_db_id=project.id,
+            main_filename=main_filename,
+            source_name=source_name,
+            node_count=node_count,
+            element_count=element_count,
+            triangle_count=triangle_count,
+            status="ready",
+            error_message=None,
+            artifact_version=artifact_version,
+        )
+    )
 
 
 def confirm_import(db: Session, temporary_import_id: str) -> models.Project:

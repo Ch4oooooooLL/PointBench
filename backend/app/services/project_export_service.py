@@ -268,6 +268,7 @@ def build_project_export_zip(
             selectinload(models.Project.crack_records).selectinload(models.CrackRecord.point),
             selectinload(models.Project.crack_records).selectinload(models.CrackRecord.run),
             selectinload(models.Project.dewesoft_imports).selectinload(models.DewesoftImport.channels),
+            selectinload(models.Project.fem_model),
         )
         .where(models.Project.id == project_id)
     ).scalar_one_or_none()
@@ -506,6 +507,18 @@ def build_project_export_zip(
             for import_job in dewesoft_imports
         ],
     }
+    if include_fem_files and project.fem_model is not None:
+        fem = project.fem_model
+        backup["fem_model"] = {
+            "main_filename": fem.main_filename,
+            "source_name": fem.source_name,
+            "node_count": fem.node_count,
+            "element_count": fem.element_count,
+            "triangle_count": fem.triangle_count,
+            "status": fem.status,
+            "error_message": fem.error_message,
+            "artifact_version": fem.artifact_version,
+        }
     report(50, "正在生成 pointprocess_backup.json…")
     (package_root / BACKUP_FILENAME).write_text(json.dumps(backup, ensure_ascii=False, indent=2), encoding="utf-8")
 
