@@ -32,7 +32,13 @@ const DONE_VISIBLE_MS = 4000;
 const FAILED_VISIBLE_MS = 10_000;
 const POLL_INTERVAL_MS = 500;
 
+// useSyncExternalStore 要求 getSnapshot 返回引用稳定的值（否则 React 会误判
+// store 每次都被修改而无限重渲染），因此这里缓存一份快照，仅在任务实际变化
+// （即 emit 前）时重建。
+let cachedSnapshots: TaskSnapshot[] = [];
+
 function emit() {
+  cachedSnapshots = [...tasks.values()];
   for (const listener of listeners) listener();
 }
 
@@ -64,7 +70,7 @@ export function subscribeTaskProgress(listener: Listener): () => void {
 }
 
 export function getTaskSnapshots(): TaskSnapshot[] {
-  return [...tasks.values()];
+  return cachedSnapshots;
 }
 
 export function getTaskSnapshot(taskId: string): TaskSnapshot | undefined {
