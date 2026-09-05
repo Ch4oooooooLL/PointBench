@@ -403,6 +403,7 @@ def _confirm_backup_import(db: Session, temporary_import_id: str, temp_dir: Path
     if backup.get("format") != "pointprocess_project_backup":
         raise HTTPException(status_code=400, detail="PointProcess backup format is invalid")
 
+    project_data = backup.get("project") or {}
     project_id = (project_data.get("project_id") or "").strip()
     project_name = (project_data.get("project_name") or "").strip()
     if not project_id or not project_name:
