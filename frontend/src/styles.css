@@ -4455,7 +4455,9 @@ label {
 .viewer-host {
   position: relative;
   width: 100%;
-  height: 560px;
+  /* 3D 预览近似 16:9 宽高比，比旧的固定 560px 高更充分利用横向空间。 */
+  aspect-ratio: 16 / 9;
+  min-height: 480px;
   border: 1px solid var(--border-color);
   border-radius: 8px;
   overflow: hidden;
@@ -4542,6 +4544,30 @@ label {
   font-size: 14px;
   padding: 20px;
   text-align: center;
+}
+
+/* 显示选项切换（网格线/边界/着色）重算期间的遮罩：复用全局加载动画，
+   并拦截画布上的鼠标输入，防止切换期间误操作或连点堆积。 */
+.viewer-busy {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: rgba(243, 246, 248, 0.72);
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: wait;
+  backdrop-filter: blur(1px);
+}
+
+.viewer-busy .chart-loading-spinner {
+  width: 26px;
+  height: 26px;
+  border-width: 3px;
 }
 
 /* ── FEM 预览：显示选项与图例 ─────────────────────────── */

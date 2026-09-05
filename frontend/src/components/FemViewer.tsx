@@ -46,6 +46,9 @@ export function FemViewer({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedElement, setSelectedElement] = useState<number | null>(null);
   const [activePreset, setActivePreset] = useState<ViewPreset>('front');
+  // 显示选项切换会触发全量重算（网格线 / 边界线 / 逐单元着色），期间显示
+  // 遮罩并阻止画布输入，避免连续点击堆积。
+  const [viewBusy, setViewBusy] = useState(false);
   const selectedRef = useRef(selectedElement);
   const optionsRef = useRef({ showMesh, showBoundary, transparent, colorByGroup, grouping });
   const runtimeRef = useRef<ViewerRuntime | null>(null);
@@ -93,8 +96,11 @@ export function FemViewer({
       if (event.cancelable) event.preventDefault();
     };
     renderer.domElement.addEventListener('wheel', preventNativeScroll, { passive: false });
-    renderer.domElement.addEventListener('mousedown', preventNativeScroll, { passive: true });
-    renderer.domElement.addEventListener('auxclick', preventNativeScroll, { passive: true });
+    // Must be non-passive: a passive listener cannot prevent the default
+    // action, so the middle-button "auto-scroll" (fast page scroll) would
+    // still kick in while the user is rotating the model.
+    renderer.domElement.addEventListener('mousedown', preventNativeScroll, { passive: false });
+    renderer.domElement.addEventListener('auxclick', preventNativeScroll, { passive: false });
 
     scene.add(new THREE.HemisphereLight('#ffffff', '#d4e0e7', 2.1));
     scene.add(new THREE.AmbientLight('#ffffff', 0.45));
@@ -501,29 +507,35 @@ export function FemViewer({
     };
   }, [glbUrl, mappingUrl]);
 
-  // Live application of view options (colors, mesh/boundary lines, transparency).
+  // 拾取选中单元：即时响应，不遮罩。
   useEffect(() => {
     runtimeRef.current?.applyColors(selectedElement);
-  }, [selectedElement, colorByGroup, grouping]);
+  }, [selectedElement]);
 
+  // 显示选项切换：重建可能很重（网格线 / 边界线 / 全量着色）。先亮起
+  // 「更新中」遮罩并让出主线程一帧，让遮罩真正绘制出来并拦截画布输入，
+  // 再执行同步重算，完成后移除遮罩。快速连续切换时前一个重建被取消，
+  // 只有最后一次生效。
   useEffect(() => {
-    runtimeRef.current?.buildMeshLines();
-  }, [showMesh]);
-
-  useEffect(() => {
-    runtimeRef.current?.buildBoundaryLines();
-  }, [showBoundary]);
-
-  useEffect(() => {
-    runtimeRef.current?.applyMaterialMode();
-  }, [transparent]);
+    const runtime = runtimeRef.current;
+    if (!runtime) return undefined;
+    setViewBusy(true);
+    const raf = requestAnimationFrame(() => {
+      runtime.applyColors(selectedRef.current);
+      runtime.buildMeshLines();
+      runtime.buildBoundaryLines();
+      runtime.applyMaterialMode();
+      setViewBusy(false);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [showMesh, showBoundary, transparent, colorByGroup, grouping]);
 
   const setView = (preset: ViewPreset) => {
     runtimeRef.current?.fitView(preset);
   };
 
   return (
-    <div className="viewer-host" aria-label="有限元模型三维视图">
+    <div className="viewer-host" aria-label="有限元模型三维视图" aria-busy={viewBusy}>
       <div className="viewer-canvas" ref={hostRef} />
       <div className="viewer-actions" aria-label="三维视图控制">
         <button aria-pressed={activePreset === 'front'} className={activePreset === 'front' ? 'active' : ''} onClick={() => setView('front')} title="快捷键 1">
@@ -537,6 +549,12 @@ export function FemViewer({
         {selectedElement != null ? `已选择单元 ${selectedElement}，点击空白处取消选择` : '点击网格选择单元'}
       </div>
       <div className="viewer-help">中键拖动旋转 · 右键拖动平移 · 滚轮缩放 · 点击选择 · 1 正视 · F 等轴适应 · B 返回</div>
+      {viewBusy && (
+        <div className="viewer-busy" role="status" aria-live="polite">
+          <div className="chart-loading-spinner" />
+          <span>正在更新显示…</span>
+        </div>
+      )}
       {loadError && (
         <div className="viewer-error" role="alert">
           模型载入失败：{loadError}
