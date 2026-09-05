@@ -43,7 +43,7 @@ export function Layout() {
               <Box size={18} />
               模型预览
             </NavLink>
-            <NavLink to="/" end>
+            <NavLink to="/overview">
               <LayoutDashboard size={18} />
               数据概览
             </NavLink>

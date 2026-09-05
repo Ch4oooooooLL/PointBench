@@ -468,7 +468,7 @@ export function PointDetailPage() {
             type="button"
             onClick={() => {
               setSelectedProjectId(point.project_db_id);
-              navigate('/');
+              navigate('/overview');
             }}
           >
             返回项目

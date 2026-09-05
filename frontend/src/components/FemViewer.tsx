@@ -14,6 +14,23 @@ type ViewPreset = 'front' | 'iso';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
+/** 聚焦单元时的候选视线偏角（度）：先取当前方向，再按小角度扰动避遮挡。 */
+const VIEW_OFFSETS: ReadonlyArray<readonly [number, number]> = [
+  [0, 0],
+  [25, 0],
+  [-25, 0],
+  [0, 25],
+  [0, -25],
+  [25, 25],
+  [25, -25],
+  [-25, 25],
+  [-25, -25],
+  [45, 0],
+  [-45, 0],
+  [0, 45],
+  [0, -45],
+];
+
 /** 一条点位绑定的气泡运行时数据：世界坐标锚点 + 每帧更新的 DOM 节点。 */
 interface BubbleRuntime {
   /** 绑定单元的质心（世界坐标），连线起点。 */
@@ -600,11 +617,41 @@ export function FemViewer({
     };
 
     /**
-     * 把镜头移到指定单元附近，尽量让它无遮挡地出现在画面中央。
-     *
-     * 从「单元法线」「远离模型中心的径向」及其与竖直方向的组合中选候选
-     * 方向，逐个做一次射线检测（从候选机位射向单元质心），第一个视线
-     * 首先命中目标单元的方向胜出；全部被遮挡时退回第一个候选（法线）。
+     * 相机平滑过渡：聚焦单元时在 ~0.4s 内缓动到目标机位，观感是"取景
+     * 微调"而不是视角跳变。用户按下鼠标/滚轮即中断，交还控制权。
+     */
+    let cameraAnim = 0;
+    const cancelCameraAnim = () => {
+      if (cameraAnim) {
+        cancelAnimationFrame(cameraAnim);
+        cameraAnim = 0;
+      }
+    };
+    const animateCameraTo = (position: THREE.Vector3, target: THREE.Vector3) => {
+      cancelCameraAnim();
+      const startPos = camera.position.clone();
+      const startTarget = controls.target.clone();
+      const startTime = performance.now();
+      const duration = 420;
+      const step = () => {
+        const t = Math.min((performance.now() - startTime) / duration, 1);
+        const k = t * t * (3 - 2 * t);
+        camera.position.lerpVectors(startPos, position, k);
+        controls.target.lerpVectors(startTarget, target, k);
+        camera.lookAt(controls.target);
+        cameraAnim = t < 1 ? requestAnimationFrame(step) : 0;
+      };
+      cameraAnim = requestAnimationFrame(step);
+    };
+    const onAnimInterrupt = () => cancelCameraAnim();
+    renderer.domElement.addEventListener('pointerdown', onAnimInterrupt);
+    renderer.domElement.addEventListener('wheel', onAnimInterrupt, { passive: true });
+
+    /**
+     * 把镜头移到指定单元附近：以当前视线方向为基准（等轴视角下就是
+     * 等轴视角的微调），只重新取景不翻转朝向；若该方向上单元被遮挡，
+     * 则在当前方向附近做小角度扰动（水平/竖直 ±25°→±45°），取第一个
+     * 能看清目标单元的方向，尽量无遮挡。全程平滑过渡。
      * 返回是否成功定位（单元不存在时返回 false）。
      */
     const focusElement = (elementId: number): boolean => {
@@ -613,31 +660,29 @@ export function FemViewer({
       const meta = elementMeta.get(elementId);
       if (!center) return false;
 
-      const radial = new THREE.Vector3().subVectors(center, modelCenter);
-      if (radial.lengthSq() < 1e-12) radial.set(0, 1, 0);
-      radial.normalize();
-      const up = new THREE.Vector3(0, 1, 0);
-      const candidates: THREE.Vector3[] = [];
-      const pushDir = (dir: THREE.Vector3) => {
-        if (dir.lengthSq() < 1e-9) return;
-        dir.normalize();
-        if (!candidates.some((existing) => existing.dot(dir) > 0.985)) candidates.push(dir);
-      };
-      if (meta?.normal) {
-        pushDir(meta.normal.clone());
-        pushDir(meta.normal.clone().add(radial));
-        pushDir(meta.normal.clone().add(up));
-      }
-      pushDir(radial.clone());
-      pushDir(radial.clone().add(up));
-      if (!candidates.length) candidates.push(up.clone());
-
       const radius = meta?.radius ?? modelRadius * 0.02;
       const distance = Math.max(radius * 6, modelRadius * 0.35);
 
-      let chosen: THREE.Vector3 | null = null;
+      // 基准方向 = 当前视线方向（从观察目标指向相机）。
+      const base = new THREE.Vector3().subVectors(camera.position, controls.target);
+      if (base.lengthSq() < 1e-12) base.set(1, 0.82, 1);
+      base.normalize();
+      // 扰动轴：以世界竖直方向构造一对与视线正交的水平/竖直轴。
+      const worldUp = new THREE.Vector3(0, 1, 0);
+      if (Math.abs(base.dot(worldUp)) > 0.95) worldUp.set(0, 0, 1);
+      const axisH = new THREE.Vector3().crossVectors(worldUp, base).normalize();
+      const axisV = new THREE.Vector3().crossVectors(base, axisH).normalize();
+      const rotateDir = (azimuthDeg: number, polarDeg: number) =>
+        base
+          .clone()
+          .applyAxisAngle(axisV, THREE.MathUtils.degToRad(azimuthDeg))
+          .applyAxisAngle(axisH, THREE.MathUtils.degToRad(polarDeg))
+          .normalize();
+
+      let chosen = base.clone();
       const previousFar = raycaster.far;
-      for (const dir of candidates) {
+      for (const [azimuth, polar] of VIEW_OFFSETS) {
+        const dir = rotateDir(azimuth, polar);
         const eye = center.clone().addScaledVector(dir, distance);
         rayDirection.subVectors(center, eye).normalize();
         raycaster.set(eye, rayDirection);
@@ -651,14 +696,9 @@ export function FemViewer({
       // 恢复 far，避免影响画布点击拾取（其依赖默认 Infinity）。
       raycaster.far = previousFar;
 
-      const finalDir = chosen ?? candidates[0];
       viewHistory.push(captureView());
       if (viewHistory.length > 32) viewHistory.shift();
-      camera.position.copy(center).addScaledVector(finalDir, distance);
-      camera.up.set(0, 1, 0);
-      if (Math.abs(finalDir.y) > 0.95) camera.up.set(0, 0, 1);
-      controls.target.copy(center);
-      controls.update();
+      animateCameraTo(center.clone().addScaledVector(chosen, distance), center.clone());
       return true;
     };
 
@@ -929,10 +969,13 @@ export function FemViewer({
     return () => {
       disposed = true;
       cancelAnimationFrame(frame);
+      cancelCameraAnim();
       bubblesRef.current.clear();
       resizeObserver.disconnect();
       renderer.domElement.removeEventListener('pointerdown', onPointerDown);
       renderer.domElement.removeEventListener('pointerup', onPointerUp);
+      renderer.domElement.removeEventListener('pointerdown', onAnimInterrupt);
+      renderer.domElement.removeEventListener('wheel', onAnimInterrupt);
       window.removeEventListener('keydown', onKeyDown);
       renderer.domElement.removeEventListener('wheel', preventNativeScroll);
       renderer.domElement.removeEventListener('mousedown', preventNativeScroll);

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { createBrowserRouter, RouterProvider } from 'react-router-dom';
+import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Layout } from './components/Layout';
 import { AppProvider } from './context/AppContext';
@@ -23,7 +23,9 @@ const router = createBrowserRouter([
     path: '/',
     element: <Layout />,
     children: [
-      { index: true, element: <ProjectOverviewPage /> },
+      // 直接访问站点时默认进入模型预览主页；数据概览拆分到 /overview。
+      { index: true, element: <Navigate to="/fem-preview" replace /> },
+      { path: 'overview', element: <ProjectOverviewPage /> },
       { path: 'project-detail', element: <ProjectRowsPage /> },
       { path: 'crack-records', element: <CrackRecordsPage /> },
       { path: 'projects/new', element: <ProjectCreatePage /> },

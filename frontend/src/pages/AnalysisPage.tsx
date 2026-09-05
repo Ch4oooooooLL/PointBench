@@ -86,7 +86,7 @@ export function AnalysisPage() {
           type="button"
           onClick={() => {
             setSelectedProjectId(Number(projectId));
-            navigate('/');
+            navigate('/overview');
           }}
         >
           返回项目
