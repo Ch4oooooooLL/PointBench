@@ -398,7 +398,7 @@ export function FemViewer({
         svg.appendChild(line);
         const dot = document.createElementNS(SVG_NS, 'circle');
         dot.setAttribute('class', 'point-bubble-dot');
-        dot.setAttribute('r', '3.5');
+        dot.setAttribute('r', '5');
         svg.appendChild(dot);
         const bubble = document.createElement('div');
         bubble.className = 'point-bubble';
@@ -615,29 +615,35 @@ export function FemViewer({
     resize();
 
     // 点位气泡逐帧投影：把世界坐标锚点/悬挂点换算为屏幕坐标并写到 DOM。
+    // 必须以 canvas 自身的显示框为投影基准而不是宿主容器：canvas 的 CSS
+    // 尺寸由样式表决定，可能与宿主尺寸（=缓冲区/DPR）不一致，用错基准
+    // 会让气泡与单元整体错位。
     const bubbleAnchor = new THREE.Vector3();
     const bubbleTip = new THREE.Vector3();
     const updateBubbles = () => {
       if (!bubblesRef.current.size) return;
-      const width = host.clientWidth || 1;
-      const height = host.clientHeight || 1;
+      const canvasRect = renderer.domElement.getBoundingClientRect();
+      const hostRect = host.getBoundingClientRect();
+      if (canvasRect.width < 2 || canvasRect.height < 2) return;
+      const baseX = canvasRect.left - hostRect.left;
+      const baseY = canvasRect.top - hostRect.top;
       for (const item of bubblesRef.current.values()) {
         bubbleAnchor.copy(item.anchor).project(camera);
         bubbleTip.copy(item.tip).project(camera);
-        const anchorX = (bubbleAnchor.x * 0.5 + 0.5) * width;
-        const anchorY = (-bubbleAnchor.y * 0.5 + 0.5) * height;
-        const tipX = (bubbleTip.x * 0.5 + 0.5) * width;
-        const tipY = (-bubbleTip.y * 0.5 + 0.5) * height;
+        const anchorX = baseX + (bubbleAnchor.x * 0.5 + 0.5) * canvasRect.width;
+        const anchorY = baseY + (-bubbleAnchor.y * 0.5 + 0.5) * canvasRect.height;
+        const tipX = baseX + (bubbleTip.x * 0.5 + 0.5) * canvasRect.width;
+        const tipY = baseY + (-bubbleTip.y * 0.5 + 0.5) * canvasRect.height;
         // 投影 z 超出 [-1, 1] 表示点在相机背后或裁剪面之外，连同出界的一并隐藏。
         const visible =
           bubbleAnchor.z > -1 &&
           bubbleAnchor.z < 1 &&
           bubbleTip.z > -1 &&
           bubbleTip.z < 1 &&
-          tipX > -80 &&
-          tipX < width + 80 &&
-          tipY > -80 &&
-          tipY < height + 80;
+          tipX > baseX - 80 &&
+          tipX < baseX + canvasRect.width + 80 &&
+          tipY > baseY - 80 &&
+          tipY < baseY + canvasRect.height + 80;
         const display = visible ? '' : 'none';
         item.bubble.style.display = display;
         item.line.style.display = display;

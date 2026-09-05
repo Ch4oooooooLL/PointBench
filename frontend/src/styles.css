@@ -4472,6 +4472,11 @@ label {
 .viewer-canvas canvas {
   display: block;
   outline: none;
+  /* 画布按宿主尺寸显示：绘制缓冲区已按 devicePixelRatio 放大，若不约束
+     CSS 尺寸，画布会按缓冲区像素大小显示，在浏览器缩放/高分屏下溢出
+     容器（画面放大裁切），叠加的点位气泡也会因此与单元错位。 */
+  width: 100%;
+  height: 100%;
 }
 
 .viewer-actions {
@@ -4588,18 +4593,20 @@ label {
   inset: 0;
   width: 100%;
   height: 100%;
+  /* 连线端点按 canvas 实际显示框计算，允许越过 SVG 自身盒子渲染。 */
+  overflow: visible;
 }
 
 .point-bubble-line {
   stroke: #d9544d;
-  stroke-width: 1.5;
-  stroke-dasharray: 4 3;
+  stroke-width: 2;
+  stroke-dasharray: 5 3;
 }
 
 .point-bubble-dot {
   fill: #d9544d;
   stroke: #fff;
-  stroke-width: 1.5;
+  stroke-width: 2;
 }
 
 .point-bubble {
@@ -4607,16 +4614,17 @@ label {
   /* 悬挂点在气泡下方 6px：连线的终点即气泡正下方。 */
   transform: translate(-50%, calc(-100% - 6px));
   background: rgba(255, 255, 255, 0.96);
-  border: 1px solid #d9544d;
+  border: 1.5px solid #d9544d;
   color: var(--text-main);
   border-radius: 999px;
-  padding: 2px 10px;
-  font-size: 12px;
-  line-height: 18px;
+  padding: 5px 16px;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
   white-space: nowrap;
   pointer-events: auto;
   cursor: pointer;
-  box-shadow: 0 2px 8px rgba(15, 40, 60, 0.14);
+  box-shadow: 0 2px 10px rgba(15, 40, 60, 0.18);
   user-select: none;
 }
 
