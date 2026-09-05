@@ -1,4 +1,4 @@
-import { Box, FileUp, RefreshCw } from 'lucide-react';
+import { Box, FileUp, PencilLine, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
@@ -6,7 +6,7 @@ import { FemUploadBox } from '../components/FemUploadBox';
 import { FemViewer } from '../components/FemViewer';
 import { ProjectSelector } from '../components/ProjectSelector';
 import { useAppContext } from '../context/AppContext';
-import { FemGroupingData, FemModelPayload, FemPreviewStats } from '../types';
+import { FemGroupingData, FemModelPayload, FemPreviewStats, Point, PointElementBinding } from '../types';
 
 /**
  * 模型预览：展示当前项目对应的 FEM 模型（一个项目一个模型）。
@@ -15,6 +15,10 @@ import { FemGroupingData, FemModelPayload, FemPreviewStats } from '../types';
  * - 项目还没有 FEM 模型时，在本页直接导入（选择 .fem 文件 / 文件夹）；
  * - 已有模型或模型渲染失败时，在本页重新上传，即对该项目的 FEM 整体
  *   替换并重新解析渲染（后端产物原子替换，完成后视图自动刷新）。
+ *
+ * 点位绑定：把项目内的测试点位绑定到模型单元上——「编辑点位」进入绑定
+ * 编辑（选点位 → 在模型上点单元 → 保存），「点位预览」开启后各点位名称
+ * 以气泡悬浮在模型上，并用直线连到对应单元。
  */
 export function FemPreviewPage() {
   const navigate = useNavigate();
@@ -26,6 +30,11 @@ export function FemPreviewPage() {
   const [showBoundary, setShowBoundary] = useState(false);
   const [transparent, setTransparent] = useState(false);
   const [colorByGroup, setColorByGroup] = useState(true);
+  // 点位绑定与气泡预览
+  const [bindings, setBindings] = useState<PointElementBinding[]>([]);
+  const [pointPreview, setPointPreview] = useState(true);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [pickedElement, setPickedElement] = useState<number | null>(null);
 
   const loadModel = useCallback(async (projectId: number) => {
     setLoading(true);
@@ -40,9 +49,19 @@ export function FemPreviewPage() {
     }
   }, []);
 
+  const reloadBindings = useCallback(async (projectId: number) => {
+    try {
+      const data = await api.get<PointElementBinding[]>(`/api/projects/${projectId}/point-bindings`, { silent: true });
+      setBindings(data);
+    } catch {
+      setBindings([]);
+    }
+  }, []);
+
   useEffect(() => {
     if (!selectedProjectId) {
       setPayload(null);
+      setBindings([]);
       setLoading(false);
       return undefined;
     }
@@ -50,6 +69,7 @@ export function FemPreviewPage() {
     setLoading(true);
     setError('');
     setPayload(null);
+    setBindings([]);
     api
       .get<FemModelPayload>(`/api/projects/${selectedProjectId}/fem`)
       .then((data) => {
@@ -60,6 +80,15 @@ export function FemPreviewPage() {
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
+      });
+    // 绑定列表失败不阻塞模型展示，按空列表处理。
+    api
+      .get<PointElementBinding[]>(`/api/projects/${selectedProjectId}/point-bindings`, { silent: true })
+      .then((data) => {
+        if (!cancelled) setBindings(data);
+      })
+      .catch(() => {
+        if (!cancelled) setBindings([]);
       });
     return () => {
       cancelled = true;
@@ -77,12 +106,25 @@ export function FemPreviewPage() {
     ? `${selectedProjectId}:${payload.artifact_version ?? ''}:${payload.updated_at ?? ''}`
     : 'empty';
 
+  // 模型替换后旧拾取结果失效；FemViewer 也随 key 重挂载。
+  useEffect(() => {
+    setPickedElement(null);
+  }, [modelKey]);
+
   // 上传完成/失败后统一回到加载态重新读取最新模型状态
   const handleUploaded = useCallback(() => {
-    if (selectedProjectId) void loadModel(selectedProjectId);
-  }, [loadModel, selectedProjectId]);
+    if (selectedProjectId) {
+      void loadModel(selectedProjectId);
+      void reloadBindings(selectedProjectId);
+    }
+  }, [loadModel, reloadBindings, selectedProjectId]);
   const handleError = useCallback((message: string) => {
     setError(message);
+  }, []);
+
+  const toggleEditor = useCallback(() => {
+    setEditorOpen((open) => !open);
+    setPickedElement(null);
   }, []);
 
   return (
@@ -111,6 +153,10 @@ export function FemPreviewPage() {
             <div className="section-head">
               <h2>三维预览</h2>
               <div className="section-actions">
+                <button className={`button${editorOpen ? ' primary' : ''}`} type="button" onClick={toggleEditor}>
+                  <PencilLine size={15} />
+                  {editorOpen ? '退出点位编辑' : '编辑点位'}
+                </button>
                 <button className="button" type="button" onClick={() => loadModel(selectedProject.id)}>
                   <RefreshCw size={15} />
                   刷新
@@ -122,18 +168,37 @@ export function FemPreviewPage() {
               <ToggleSwitch checked={showBoundary} onChange={setShowBoundary} label="显示边界" />
               <ToggleSwitch checked={transparent} onChange={setTransparent} label="半透明显示" />
               <ToggleSwitch checked={colorByGroup} onChange={setColorByGroup} label="按分组着色" disabled={!hasGrouping} />
+              <ToggleSwitch checked={pointPreview} onChange={setPointPreview} label="点位预览" />
             </div>
             {payload?.glb_url && payload?.mapping_url ? (
-              <FemViewer
-                key={modelKey}
-                glbUrl={payload.glb_url}
-                mappingUrl={payload.mapping_url}
-                grouping={grouping}
-                showMesh={showMesh}
-                showBoundary={showBoundary}
-                transparent={transparent}
-                colorByGroup={colorByGroup}
-              />
+              <div className="viewer-stage">
+                <FemViewer
+                  key={modelKey}
+                  glbUrl={payload.glb_url}
+                  mappingUrl={payload.mapping_url}
+                  grouping={grouping}
+                  showMesh={showMesh}
+                  showBoundary={showBoundary}
+                  transparent={transparent}
+                  colorByGroup={colorByGroup}
+                  bindings={bindings}
+                  pointPreview={pointPreview}
+                  pickingMode={editorOpen}
+                  onPickElement={setPickedElement}
+                />
+                {editorOpen && selectedProjectId != null && (
+                  <PointBindingEditor
+                    projectId={selectedProjectId}
+                    bindings={bindings}
+                    pickedElement={pickedElement}
+                    onPickClear={() => setPickedElement(null)}
+                    onBindingsChanged={() => {
+                      if (selectedProjectId) void reloadBindings(selectedProjectId);
+                    }}
+                    onClose={toggleEditor}
+                  />
+                )}
+              </div>
             ) : (
               <div className="alert danger">模型产物缺失，请重新上传 FEM 文件。</div>
             )}
@@ -218,6 +283,151 @@ function FemReplacePanel({
         <FemUploadBox projectId={selectedProjectId} replace onUploaded={onUploaded} onError={onError} />
       ) : null}
       <p className="fem-upload-hint">若上传文件解析失败，会保留当前已渲染模型不变。</p>
+    </div>
+  );
+}
+
+/**
+ * 点位绑定编辑弹层：悬浮在三维视图右上角，不遮挡画布——选择点位后直接
+ * 在模型上左键点击目标单元，保存即写入绑定（同一点位重复保存即覆盖）。
+ */
+function PointBindingEditor({
+  projectId,
+  bindings,
+  pickedElement,
+  onPickClear,
+  onBindingsChanged,
+  onClose,
+}: {
+  projectId: number;
+  bindings: PointElementBinding[];
+  pickedElement: number | null;
+  onPickClear: () => void;
+  onBindingsChanged: () => void;
+  onClose: () => void;
+}) {
+  const [points, setPoints] = useState<Point[]>([]);
+  const [loadingPoints, setLoadingPoints] = useState(true);
+  const [selectedPointDbId, setSelectedPointDbId] = useState<number | ''>('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingPoints(true);
+    api
+      .get<Point[]>(`/api/projects/${projectId}/points`, { silent: true })
+      .then((data) => {
+        if (!cancelled) setPoints(data);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(`读取点位列表失败：${(err as Error).message}`);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingPoints(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  const bindingByPoint = new Map(bindings.map((binding) => [binding.point_db_id, binding]));
+  const selectedBinding = selectedPointDbId === '' ? undefined : bindingByPoint.get(selectedPointDbId);
+
+  async function save() {
+    if (selectedPointDbId === '' || pickedElement == null) return;
+    const point = points.find((item) => item.id === selectedPointDbId);
+    setSaving(true);
+    setError('');
+    setNotice('');
+    try {
+      await api.put<PointElementBinding>(`/api/projects/${projectId}/point-bindings`, {
+        point_db_id: selectedPointDbId,
+        element_id: pickedElement,
+      });
+      onBindingsChanged();
+      setNotice(`已保存：${point ? `${point.point_id} ${point.point_name}` : '点位'} → 单元 ${pickedElement}`);
+      onPickClear();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function unbind() {
+    if (selectedPointDbId === '' || !selectedBinding) return;
+    setSaving(true);
+    setError('');
+    setNotice('');
+    try {
+      await api.delete(`/api/projects/${projectId}/point-bindings/${selectedPointDbId}`);
+      onBindingsChanged();
+      setNotice('已解除绑定');
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="point-binding-editor" role="dialog" aria-label="编辑点位绑定">
+      <div className="point-binding-editor-head">
+        <strong>
+          <PencilLine size={15} />
+          编辑点位绑定
+        </strong>
+        <button className="text-button" type="button" onClick={onClose}>
+          完成
+        </button>
+      </div>
+      <p className="point-binding-hint">选择点位，然后在模型上左键点击要绑定的单元（模型可旋转缩放）。</p>
+      <label className="point-binding-field">
+        <span>点位</span>
+        <select
+          value={selectedPointDbId}
+          disabled={loadingPoints || points.length === 0}
+          onChange={(event) => {
+            setSelectedPointDbId(event.target.value === '' ? '' : Number(event.target.value));
+            setNotice('');
+            setError('');
+          }}
+        >
+          <option value="">{loadingPoints ? '正在读取点位…' : points.length === 0 ? '当前项目没有点位' : '请选择点位'}</option>
+          {points.map((point) => {
+            const bound = bindingByPoint.get(point.id);
+            return (
+              <option key={point.id} value={point.id}>
+                {point.point_id} {point.point_name}
+                {bound ? `（已绑定单元 ${bound.element_id}）` : ''}
+              </option>
+            );
+          })}
+        </select>
+      </label>
+      <div className="point-binding-picked">
+        <span>当前选中单元</span>
+        <strong>{pickedElement != null ? `单元 ${pickedElement}` : '未选择（点击模型拾取）'}</strong>
+      </div>
+      {error && <div className="alert danger">{error}</div>}
+      {notice && <div className="alert ok">{notice}</div>}
+      <div className="point-binding-actions">
+        <button
+          className="button primary"
+          type="button"
+          disabled={selectedPointDbId === '' || pickedElement == null || saving}
+          onClick={save}
+        >
+          保存绑定
+        </button>
+        {selectedBinding && (
+          <button className="button" type="button" disabled={saving} onClick={unbind}>
+            解除绑定
+          </button>
+        )}
+      </div>
     </div>
   );
 }

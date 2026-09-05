@@ -186,6 +186,15 @@ export interface FemModelPayload {
   has_artifact?: boolean;
 }
 
+// ── 点位 ↔ FEM 单元绑定（模型预览页气泡展示） ──────────────────────────────
+
+export interface PointElementBinding {
+  point_db_id: number;
+  point_id: string;
+  point_name: string;
+  element_id: number;
+}
+
 // ── 后端任务进度（全局右下角悬浮窗） ───────────────────────────────────────
 
 export interface TaskStatusPayload {

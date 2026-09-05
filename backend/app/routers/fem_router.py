@@ -5,10 +5,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app import models
 from app.database import get_db
 from app.models import Project
+from app.schemas import PointBindingUpsert
 from app.services import task_progress
 from app.services.fem_model_service import (
     FemModelError,
@@ -125,3 +128,80 @@ def get_project_fem_preview_json(project_id: int, db: Session = Depends(get_db))
     if not preview_path.is_file():
         raise HTTPException(status_code=404, detail="该项目的 FEM 预览信息不存在")
     return FileResponse(preview_path, media_type="application/json")
+
+
+# ── 点位 ↔ FEM 单元绑定（模型预览页气泡展示依据） ──────────────────────────
+
+
+def _binding_payload(binding: models.PointElementBinding, point: models.TestPoint) -> dict:
+    return {
+        "point_db_id": binding.point_db_id,
+        "point_id": point.point_id,
+        "point_name": point.point_name,
+        "element_id": binding.element_id,
+    }
+
+
+@router.get("/{project_id}/point-bindings")
+def list_point_bindings(project_id: int, db: Session = Depends(get_db)) -> list[dict]:
+    """列出项目内全部点位-单元绑定（附点位编号/名称，供前端气泡展示）。"""
+    project = _get_project(project_id, db)
+    rows = db.execute(
+        select(models.PointElementBinding, models.TestPoint)
+        .join(models.TestPoint, models.PointElementBinding.point_db_id == models.TestPoint.id)
+        .where(models.PointElementBinding.project_db_id == project.id)
+        .where(models.TestPoint.deleted_at.is_(None))
+        .order_by(models.TestPoint.point_id)
+    ).all()
+    return [_binding_payload(binding, point) for binding, point in rows]
+
+
+@router.put("/{project_id}/point-bindings")
+def upsert_point_binding(project_id: int, payload: PointBindingUpsert, db: Session = Depends(get_db)) -> dict:
+    """绑定/更新一个点到单元的绑定（一个点位只保留一条绑定记录）。"""
+    project = _get_project(project_id, db)
+    point = db.execute(
+        select(models.TestPoint).where(
+            models.TestPoint.id == payload.point_db_id,
+            models.TestPoint.project_db_id == project.id,
+            models.TestPoint.deleted_at.is_(None),
+        )
+    ).scalar_one_or_none()
+    if not point:
+        raise HTTPException(status_code=404, detail="点位不存在或不属于当前项目")
+
+    binding = db.scalar(
+        select(models.PointElementBinding).where(
+            models.PointElementBinding.project_db_id == project.id,
+            models.PointElementBinding.point_db_id == point.id,
+        )
+    )
+    if binding:
+        binding.element_id = payload.element_id
+    else:
+        binding = models.PointElementBinding(
+            project_db_id=project.id,
+            point_db_id=point.id,
+            element_id=payload.element_id,
+        )
+        db.add(binding)
+    db.commit()
+    db.refresh(binding)
+    return _binding_payload(binding, point)
+
+
+@router.delete("/{project_id}/point-bindings/{point_db_id}")
+def delete_point_binding(project_id: int, point_db_id: int, db: Session = Depends(get_db)) -> dict:
+    """解除一个点位的单元绑定。"""
+    project = _get_project(project_id, db)
+    binding = db.scalar(
+        select(models.PointElementBinding).where(
+            models.PointElementBinding.project_db_id == project.id,
+            models.PointElementBinding.point_db_id == point_db_id,
+        )
+    )
+    if not binding:
+        raise HTTPException(status_code=404, detail="该点位尚未绑定单元")
+    db.delete(binding)
+    db.commit()
+    return {"ok": True}

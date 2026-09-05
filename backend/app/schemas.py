@@ -275,6 +275,13 @@ class PointCreate(BaseModel):
     remark: str | None = None
 
 
+class PointBindingUpsert(BaseModel):
+    """点位绑定 FEM 单元（upsert：同一点位重复提交即覆盖）。"""
+
+    point_db_id: int
+    element_id: int = Field(ge=1)
+
+
 class TestRunCreate(BaseModel):
     run_name: str = Field(min_length=1)
     cycle_count: int = Field(ge=0, le=10_000_000_000)

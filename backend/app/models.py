@@ -106,6 +106,34 @@ class TestPoint(Base, SoftDeleteMixin):
     cae_mappings: Mapped[list["CaeMapping"]] = relationship(back_populates="point", cascade="all, delete-orphan")
     measurements: Mapped[list["MeasurementRecord"]] = relationship(back_populates="point", cascade="all, delete-orphan")
     crack_records: Mapped[list["CrackRecord"]] = relationship(back_populates="point", cascade="all, delete-orphan")
+    element_binding: Mapped["PointElementBinding | None"] = relationship(
+        back_populates="point", cascade="all, delete-orphan", uselist=False
+    )
+
+
+class PointElementBinding(Base):
+    """点位与 FEM 模型单元的绑定关系（模型预览页气泡展示依据）。
+
+    约束：一个点位在同一项目内只绑定一个单元；同一单元可被多个点位引用。
+    ``element_id`` 存求解器单元 ID，与渲染产物 mapping.json 中的
+    ``triangle_element_ids`` 同一命名空间。
+    """
+
+    __tablename__ = "point_element_bindings"
+    __table_args__ = (UniqueConstraint("project_db_id", "point_db_id", name="uq_point_element_binding"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_db_id: Mapped[int] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    point_db_id: Mapped[int] = mapped_column(
+        ForeignKey("test_points.id", ondelete="CASCADE"), index=True
+    )
+    element_id: Mapped[int] = mapped_column(Integer, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
+
+    point: Mapped[TestPoint] = relationship(back_populates="element_binding")
 
 
 class SensorChannel(Base):
