@@ -515,14 +515,14 @@ export function FemViewer({
 
         // 逐单元质心：点位气泡连线起点（GLB 已三角化，mapping 把三角形
         // 映射回求解器单元 ID，同一单元所有三角形顶点取平均即为质心）。
-        const centroidSums = new Map<number, { sum: THREE.Vector3; count: number }>();
+        const centroidSums = new Map<number, { sum: THREE.Vector3; vertexCount: number }>();
         const positionArray = geometry?.getAttribute('position').array as ArrayLike<number> | undefined;
         if (positionArray) {
           for (let triangle = 0; triangle < mapping.length; triangle += 1) {
             const elementId = mapping[triangle];
             let entry = centroidSums.get(elementId);
             if (!entry) {
-              entry = { sum: new THREE.Vector3(), count: 0 };
+              entry = { sum: new THREE.Vector3(), vertexCount: 0 };
               centroidSums.set(elementId, entry);
             }
             for (let corner = 0; corner < 3; corner += 1) {
@@ -531,12 +531,12 @@ export function FemViewer({
               entry.sum.y += positionArray[base + 1];
               entry.sum.z += positionArray[base + 2];
             }
-            entry.count += 1;
+            entry.vertexCount += 3;
           }
           elementCentroids = new Map(
             [...centroidSums.entries()].map(([elementId, entry]) => [
               elementId,
-              entry.sum.divideScalar(entry.count),
+              entry.sum.divideScalar(entry.vertexCount),
             ]),
           );
         }
