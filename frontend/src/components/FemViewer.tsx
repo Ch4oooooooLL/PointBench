@@ -71,6 +71,19 @@ export function FemViewer({ glbUrl, mappingUrl, grouping, showEdges, transparent
     controls.enableZoom = true;
     controls.enablePan = true;
 
+    // While the cursor is over the 3D canvas, prevent the browser's native
+    // actions from hijacking gestures that OrbitControls owns: page scroll on
+    // wheel, and the forward/back history navigation on middle-button drag /
+    // middle-click (the "auto-scroll" cursor the user sees on Windows).
+    // Without this, wheel zoom and middle-drag rotate would also scroll the
+    // page (the model view then travels under the frozen cursor).
+    const preventNativeScroll = (event: Event) => {
+      if (event.cancelable) event.preventDefault();
+    };
+    renderer.domElement.addEventListener('wheel', preventNativeScroll, { passive: false });
+    renderer.domElement.addEventListener('mousedown', preventNativeScroll, { passive: true });
+    renderer.domElement.addEventListener('auxclick', preventNativeScroll, { passive: true });
+
     scene.add(new THREE.HemisphereLight('#ffffff', '#d4e0e7', 2.1));
     scene.add(new THREE.AmbientLight('#ffffff', 0.45));
     const key = new THREE.DirectionalLight('#ffffff', 2.35);
@@ -327,6 +340,9 @@ export function FemViewer({ glbUrl, mappingUrl, grouping, showEdges, transparent
       renderer.domElement.removeEventListener('pointerdown', onPointerDown);
       renderer.domElement.removeEventListener('pointerup', onPointerUp);
       renderer.domElement.removeEventListener('keydown', onKeyDown);
+      renderer.domElement.removeEventListener('wheel', preventNativeScroll);
+      renderer.domElement.removeEventListener('mousedown', preventNativeScroll);
+      renderer.domElement.removeEventListener('auxclick', preventNativeScroll);
       if (edgeLines) {
         edgeLines.geometry.dispose();
         if (edgeLines.material instanceof THREE.Material) edgeLines.material.dispose();

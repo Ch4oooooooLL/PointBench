@@ -4430,6 +4430,27 @@ label {
   align-items: center;
 }
 
+/* 无模型时的空态：提示 + 引导去导入页 */
+.fem-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  min-height: 240px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+/* 3D 下方的 PID/属性颜色图例 */
+.fem-info-legend {
+  margin: 14px 0;
+  padding: 12px 14px;
+  background: #f8fafc;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+
 /* 三维预览画布 */
 .viewer-host {
   position: relative;
