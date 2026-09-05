@@ -138,11 +138,15 @@ def build_fem_model_artifact(
     uploads: list[tuple[str, bytes]],
     *,
     on_progress: Callable[[float, str], None] | None = None,
+    artifact_version: str | None = None,
 ) -> FemArtifactBundle:
     """写入上传文件、解析并生成 GLB/mapping/preview 产物。
 
     返回持久化后的模型产物信息；发生任何错误时抛出 :class:`FemModelError`。
     注意：调用方负责失败时清理 fem_dir。
+    artifact_version：产物版本号；不传时用当前秒级时间戳（preview 与
+    preview.json 均一致）。替换式导入应传入单调递增版本，保证前端能识别
+    模型已被替换而刷新视图。
     """
 
     if not uploads:
@@ -214,7 +218,7 @@ def build_fem_model_artifact(
     }
     grouping = _build_group_data(model)
 
-    artifact_version = time.strftime("%Y%m%d%H%M%S")
+    artifact_version = artifact_version or time.strftime("%Y%m%d%H%M%S")
     _write_roundtrip_json(
         fem_dir / "preview.json",
         stats,
@@ -237,6 +241,20 @@ def build_fem_model_artifact(
     )
 
 
+def _artifact_version(previous: str | None = None) -> str:
+    """生成单调递增的产物版本号。
+
+    同一项目重复导入会整体替换并重新渲染，产物版本必须每次变化，
+    前端才能据此刷新三维视图。时间戳同一秒内重复导入时向后递增，
+    避免版本号回退或保持不变。
+    """
+    stamp = time.strftime("%Y%m%d%H%M%S")
+    if previous is None or stamp > previous:
+        return stamp
+    # 同一秒内再次导入：把上一版本当作十进制整数 +1，保证严格递增
+    return str(int(previous) + 1)
+
+
 def create_or_replace_fem_model(
     project: Any,
     uploads: list[tuple[str, bytes]],
@@ -254,11 +272,16 @@ def create_or_replace_fem_model(
     staging = fem_dir.with_name(f"{fem_dir.name}.staging-{int(time.time() * 1000)}")
     shutil.rmtree(staging, ignore_errors=True)
     staging.mkdir(parents=True, exist_ok=True)
+    # 替换式导入：先取旧记录版本号，产物与数据库记录写入同一个单调递增版本，
+    # 前端才能识别「模型已被替换」并刷新三维视图。
+    model_record = db.query(FemModel).filter(FemModel.project_db_id == project.id).first()
+    artifact_version = _artifact_version(model_record.artifact_version if model_record else None)
     try:
         bundle = build_fem_model_artifact(
             staging,
             uploads,
             on_progress=on_progress,
+            artifact_version=artifact_version,
         )
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
@@ -268,7 +291,6 @@ def create_or_replace_fem_model(
     shutil.move(str(staging), str(fem_dir))
 
     model_record = db.query(FemModel).filter(FemModel.project_db_id == project.id).first()
-    artifact_version = time.strftime("%Y%m%d%H%M%S")
     try:
         if model_record is None:
             model_record = FemModel(

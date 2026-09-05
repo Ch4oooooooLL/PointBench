@@ -216,8 +216,8 @@ def test_full_sample_zip_imports_end_to_end(client: TestClient, tmp_path: Path) 
         # FEM 模型：导入时由 fem/source 重新解析生成
         fem_payload = client.get(f"/api/projects/{project_db_id}/fem").json()
         assert fem_payload["status"] == "ready", fem_payload
-        assert fem_payload["stats"]["node_count"] == 164
-        assert fem_payload["stats"]["element_count"] == 132
+        assert fem_payload["stats"]["node_count"] == 148
+        assert fem_payload["stats"]["element_count"] == 116
         groups = fem_payload["grouping"]["groups"]
         assert fem_payload["grouping"]["coloring_mode"] == "component"
         assert {group["name"] for group in groups} == {"左纵梁", "右纵梁", "前横梁", "中部横梁", "后横梁", "焊缝加强板"}

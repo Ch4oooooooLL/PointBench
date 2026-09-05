@@ -1,6 +1,7 @@
 {
   "zip_path": "C:\\Users\\Chao\\Desktop\\DOC\\CODE\\PointProcess\\sample_data\\POINTPROCESS_DEMO_FULL_20260905.zip",
   "project_id": "POINTPROCESS-DEMO-FULL-20260905",
+  "fem_mode": "simple (第一版骨架模型, frame_assembly_simple.fem)",
   "point_count": 8,
   "photo_count": 16,
   "test_run_count": 10,
@@ -10,13 +11,13 @@
   "dewesoft_import_count": 2,
   "dewesoft_channel_count": 18,
   "fem_stats": {
-    "node_count": 164,
-    "element_count": 132,
+    "node_count": 148,
+    "element_count": 116,
     "component_count": 6,
     "included_files": 1
   },
   "package_file_count": 37,
-  "zip_size_bytes": 49424,
+  "zip_size_bytes": 49144,
   "coverage": [
     "project create/list/detail via full backup import",
     "8 points with channels, CAE mappings, photos and tags",
@@ -25,7 +26,9 @@
     "12 crack timeline records linked to points and runs",
     "2 Dewesoft import records with matched/unmatched channels",
     "raw/ and attachments/ folder copy",
-    "FEM model with INCLUDE sub-file and HyperMesh component grouping"
+    "FEM model (simple skeleton) with INCLUDE sub-file and component grouping",
+    "replace demo: import this package, then upload the complex FEM replacement package"
   ],
-  "import_guide": "系统内选择 导入 → 上传该 zip → 预览 → 确认导入，即可一次性恢复全部内容（含 FEM 模型）"
+  "import_guide": "系统内选择 导入 → 上传该 zip → 预览 → 确认导入，即可一次性恢复全部内容（含 FEM 模型）",
+  "replacement_guide": "在项目 FEM 预览页点击「重新导入模型文件夹」，选择复杂替换包解压后的 fem_v2_replace 文件夹，即可替换为复杂模型并重新渲染"
 }

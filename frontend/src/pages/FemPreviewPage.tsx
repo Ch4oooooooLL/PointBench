@@ -2,6 +2,7 @@ import { Box, FileUp, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
+import { FemUploadBox } from '../components/FemUploadBox';
 import { FemViewer } from '../components/FemViewer';
 import { ProjectSelector } from '../components/ProjectSelector';
 import { useAppContext } from '../context/AppContext';
@@ -10,9 +11,10 @@ import { FemGroupingData, FemModelPayload, FemPreviewStats } from '../types';
 /**
  * 模型预览：展示当前项目对应的 FEM 模型（一个项目一个模型）。
  *
- * 模型导入（选择 .fem 文件 / 文件夹）在「导入项目」页进行，产物连同渲染
- * 产物一起持久化在项目目录；本页面每次打开（含冷启动）直接读取产物展示，
- * 无需重新解析。再次导入 = 整体覆盖并重新解析渲染。
+ * 模型的导入、替换与渲染展示都在本页完成：
+ * - 项目还没有 FEM 模型时，在本页直接导入（选择 .fem 文件 / 文件夹）；
+ * - 已有模型或模型渲染失败时，在本页重新上传，即对该项目的 FEM 整体
+ *   替换并重新解析渲染（后端产物原子替换，完成后视图自动刷新）。
  */
 export function FemPreviewPage() {
   const navigate = useNavigate();
@@ -69,11 +71,19 @@ export function FemPreviewPage() {
   const hasModel = payload?.status === 'ready' && stats != null;
   const hasGrouping = grouping != null && grouping.coloring_mode !== 'none' && grouping.groups.length > 0;
   const noProject = !selectedProject;
-  // 产物按 (artifact_version, updated_at) 标识；同一项目重新导入后 key 变化，
+  // 产物按 (artifact_version, updated_at) 标识；同一项目替换后 key 变化，
   // 强制 FemViewer 重新加载（GLB 下载地址相同但内容已替换）。
   const modelKey = hasModel
     ? `${selectedProjectId}:${payload.artifact_version ?? ''}:${payload.updated_at ?? ''}`
     : 'empty';
+
+  // 上传完成/失败后统一回到加载态重新读取最新模型状态
+  const handleUploaded = useCallback(() => {
+    if (selectedProjectId) void loadModel(selectedProjectId);
+  }, [loadModel, selectedProjectId]);
+  const handleError = useCallback((message: string) => {
+    setError(message);
+  }, []);
 
   return (
     <section>
@@ -94,15 +104,7 @@ export function FemPreviewPage() {
           <div className="chart-loading-spinner" />
           <p>正在读取已保存的模型…</p>
         </div>
-      ) : !hasModel ? (
-        <div className="empty panel fem-empty">
-          <p>当前项目还没有 FEM 模型。</p>
-          <button className="button primary" type="button" onClick={() => navigate('/import')}>
-            <FileUp size={16} />
-            去导入 FEM 模型
-          </button>
-        </div>
-      ) : (
+      ) : hasModel ? (
         <>
           {/* 三维预览：展示控件常驻顶部 */}
           <div className="panel fem-viewer-panel">
@@ -133,14 +135,90 @@ export function FemPreviewPage() {
                 colorByGroup={colorByGroup}
               />
             ) : (
-              <div className="alert danger">模型产物缺失，请重新导入 FEM 文件。</div>
+              <div className="alert danger">模型产物缺失，请重新上传 FEM 文件。</div>
             )}
           </div>
 
+          {/* 替换入口：项目内再次上传 = 整体替换并重新渲染 */}
+          <FemReplacePanel
+            projectName={selectedProject.project_name}
+            onUploaded={handleUploaded}
+            onError={handleError}
+          />
+
           <FemModelInfo stats={stats} updatedAt={payload?.updated_at ?? null} grouping={grouping} />
         </>
+      ) : (
+        <FemUploadPanel projectName={selectedProject.project_name} onUploaded={handleUploaded} onError={handleError} />
       )}
     </section>
+  );
+}
+
+/** 项目还没有 FEM 模型时的导入面板：在本页直接导入。 */
+function FemUploadPanel({
+  projectName,
+  onUploaded,
+  onError,
+}: {
+  projectName: string;
+  onUploaded: () => void;
+  onError: (message: string) => void;
+}) {
+  const navigate = useNavigate();
+  const { selectedProjectId } = useAppContext();
+  return (
+    <div className="panel fem-replace-panel">
+      <div className="section-head">
+        <h2>
+          <FileUp size={18} />
+          导入 FEM 模型
+        </h2>
+        <span className="pill">{projectName}</span>
+      </div>
+      <p className="fem-block-note">当前项目还没有 FEM 模型。选择 .fem 文件或文件夹后，将解析渲染并保存到该项目，可从本页随时查看。</p>
+      {selectedProjectId != null ? (
+        <FemUploadBox projectId={selectedProjectId} onUploaded={onUploaded} onError={onError} />
+      ) : null}
+      <p className="fem-upload-hint">
+        解析与渲染在后台进行，进度见右下角悬浮窗。若要连同项目的点位/测量数据一起导入，请前往
+        <button className="text-button" type="button" onClick={() => navigate('/import')}>
+          导入项目页
+        </button>
+        。
+      </p>
+    </div>
+  );
+}
+
+/** 已有模型时的替换面板：文案与操作项明确为“替换当前模型并重新渲染”。 */
+function FemReplacePanel({
+  projectName,
+  onUploaded,
+  onError,
+}: {
+  projectName: string;
+  onUploaded: () => void;
+  onError: (message: string) => void;
+}) {
+  const { selectedProjectId } = useAppContext();
+  return (
+    <div className="panel fem-replace-panel">
+      <div className="section-head">
+        <h2>
+          <RefreshCw size={18} />
+          替换 FEM 模型
+        </h2>
+        <span className="pill">{projectName}</span>
+      </div>
+      <p className="fem-block-note">
+        当前项目已存在 FEM 模型。再次上传将<strong>整体替换</strong>该项目现有模型并重新解析渲染，替换成功后下方三维视图自动更新。
+      </p>
+      {selectedProjectId != null ? (
+        <FemUploadBox projectId={selectedProjectId} replace onUploaded={onUploaded} onError={onError} />
+      ) : null}
+      <p className="fem-upload-hint">若上传文件解析失败，会保留当前已渲染模型不变。</p>
+    </div>
   );
 }
 

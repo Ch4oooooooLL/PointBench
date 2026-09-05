@@ -4,6 +4,7 @@
 
 - ``POINTPROCESS_DEMO_FULL_<date>.zip``            完整备份导入包
 - ``POINTPROCESS_DEMO_FULL_<date>_summary.json``   包内容摘要
+- ``POINTPROCESS_DEMO_COMPLEX_FEM_REPLACEMENT_<date>.zip``  复杂 FEM 替换包（--mode fem-replacement）
 
 包内同时携带 ``manifest.json``（应用兼容视图）与 ``pointprocess_backup.json``
 （完整迁移数据），并包含 ``fem/`` 源文件目录（主文件 + INCLUDE 子文件）。
@@ -19,6 +20,13 @@
 用法::
 
     python scripts/create_full_sample.py [--out sample_data] [--seed 20260905]
+    python scripts/create_full_sample.py --mode fem-replacement   # 复杂 FEM 替换包
+
+``--mode full``（默认）把第一版骨架 FEM（``frame_assembly_simple.fem``）装入完整
+演示包，用于先导入项目；``--mode fem-replacement`` 单独生成第二版高保真复杂 FEM
+（``frame_assembly_v2.fem``，更多节点/单元/部件与 CQUAD4+CTRIA3+CROD 混合单元），
+内置 ``fem_v2_replace/`` 文件夹可在 FEM 预览页整体上传，把项目内已渲染的骨架模型
+替换为复杂模型并重新渲染。
 
 脚本在打包前会用后端 FEM 解析器实际解析生成的模型文件，确保随包分发的
 FEM 可被系统直接解析。
@@ -135,102 +143,132 @@ def _fmt(value: float) -> str:
     return f"{value:.1f}"
 
 
-class _TubeBuilder:
-    """沿轴向扫掠矩形截面管件，生成 GRID + CQUAD4（4 个面）。"""
+class _MeshBuilder:
+    """FEM 板壳网格生成器。
+
+    所有 id 全局单调递增；``begin_section`` 起记录当前部件/子文件的
+    grid 与 element 行。CQUAD4 使用常规 8 字段格式（解析器同样支持紧凑格式）。
+    """
 
     def __init__(self) -> None:
-        self.next_node = 1
-        self.next_elem = 1
+        self._next_node = 1
+        self._next_elem = 1
+        self._grids: list[str] = []
+        self._elems: list[str] = []
 
-    def build(
+    def begin_section(self) -> None:
+        self._grids = []
+        self._elems = []
+
+    def grid(self, x: float, y: float, z: float) -> int:
+        nid = self._next_node
+        self._next_node += 1
+        self._grids.append(_card("GRID", nid, "", _fmt(x), _fmt(y), _fmt(z)))
+        return nid
+
+    def quad_cards(self, pid: int, ids: list[int]) -> None:
+        eid = self._next_elem
+        self._next_elem += 1
+        self._elems.append(_card("CQUAD4", eid, pid, *ids))
+
+    def quad(self, pid: int, p0, p1, p2, p3) -> None:
+        nids = [self.grid(*pp) for pp in (p0, p1, p2, p3)]
+        self.quad_cards(pid, nids)
+
+    def tria(self, pid: int, p0, p1, p2) -> None:
+        nids = [self.grid(*pp) for pp in (p0, p1, p2)]
+        self.tria_cards(pid, nids)
+
+    def tria_cards(self, pid: int, ids: list[int]) -> None:
+        eid = self._next_elem
+        self._next_elem += 1
+        self._elems.append(_card("CTRIA3", eid, pid, *ids))
+
+    def ring(
         self,
         stations: list[float],
-        axis: str,
-        center: float,
-        width: float,
-        z0: float,
-        z1: float,
+        *,
+        center: tuple[float, float],
+        rx: float,
+        ry: float,
         pid: int,
-    ) -> tuple[list[str], list[str]]:
-        """返回 (grid 行, cquad4 行)。axis 为 "x" 或 "y"。"""
-        grid_lines: list[str] = []
-        elem_lines: list[str] = []
-        corner_nodes: list[list[int]] = []
-        for station in stations:
-            ids: list[int] = []
-            low, high = center - width / 2, center + width / 2
-            for perp, z in ((low, z0), (high, z0), (high, z1), (low, z1)):
-                if axis == "x":
-                    coords = (station, perp, z)
-                else:
-                    coords = (perp, station, z)
-                grid_lines.append(_card("GRID", self.next_node, "", _fmt(coords[0]), _fmt(coords[1]), _fmt(coords[2])))
-                ids.append(self.next_node)
-                self.next_node += 1
-            corner_nodes.append(ids)
+    ) -> None:
+        """沿 z 轴扫掠矩形截面，每相邻两站生成 4 个 CQUAD4 面。"""
+        cx, cy = center
+        rect = [(-rx, -ry), (rx, -ry), (rx, ry), (-rx, ry)]
+        station_nodes: list[list[int]] = []
+        for z in stations:
+            station_nodes.append([self.grid(cx + dx, cy + dy, z) for dx, dy in rect])
         for index in range(len(stations) - 1):
-            a, b = corner_nodes[index], corner_nodes[index + 1]
-            for c1, c2 in ((0, 1), (1, 2), (2, 3), (3, 0)):
-                elem_lines.append(_card("CQUAD4", self.next_elem, pid, a[c1], a[c2], b[c2], b[c1]))
-                self.next_elem += 1
-        return grid_lines, elem_lines
+            a, b = station_nodes[index], station_nodes[index + 1]
+            self.quad_cards(pid, [a[0], a[1], b[1], b[0]])
+            self.quad_cards(pid, [a[1], a[2], b[2], b[1]])
+            self.quad_cards(pid, [a[2], a[3], b[3], b[2]])
+            self.quad_cards(pid, [a[3], a[0], b[0], b[3]])
+
+    def grids(self) -> list[str]:
+        return self._grids
+
+    def elems(self) -> list[str]:
+        return self._elems
 
 
-def build_fem_source_files() -> dict[str, str]:
-    """生成 FEM 源文件文本：frame_assembly.fem（主） + parts/rails.fem（INCLUDE）。"""
-    builder = _TubeBuilder()
+def _linspace_stations(start: float, end: float, spacing: float) -> list[float]:
+    count = max(2, round((end - start) / spacing) + 1)
+    return [start + (end - start) * index / (count - 1) for index in range(count)]
 
-    # 纵梁：沿 X 方向，截面 60×80，位于 y=±160
-    rail_stations = [float(-600 + 120 * i) for i in range(11)]
-    left_grids, left_elems = builder.build(rail_stations, "x", 160.0, 60.0, 0.0, 80.0, pid=1)
-    right_grids, right_elems = builder.build(rail_stations, "x", -160.0, 60.0, 0.0, 80.0, pid=2)
 
-    # 横梁：沿 Y 方向连接两纵梁内壁（y=-130..130），截面 50×60
-    cross_stations = [-130.0, -65.0, 0.0, 65.0, 130.0]
-    cross_defs: list[tuple[str, int, str, list[str], list[str]]] = []
-    for comp_id, comp_name, hw_color, x_center, pid in (
-        (3, "前横梁", 3, -300.0, 3),
-        (4, "中部横梁", 4, 0.0, 4),
-        (5, "后横梁", 2, 300.0, 5),
-    ):
-        grids, elems = builder.build(cross_stations, "y", x_center, 50.0, 0.0, 60.0, pid=pid)
-        cross_defs.append((comp_name, comp_id, hw_color, grids, elems))
+def _component(name: str, comp_id: int, hw_color: int, lines: list[str]) -> list[str]:
+    return [
+        f"$$ ---- {name} ----",
+        f'$HMNAME COMP {comp_id} "{name}"',
+        f"$HWCOLOR COMP {comp_id} {hw_color}",
+        f"$HMCOMP ID {comp_id}",
+        *lines,
+        "$",
+    ]
 
-    # 焊缝加强板：前/后横梁与纵梁交接处的竖直加强板
-    gusset_grids: list[str] = []
-    gusset_elems: list[str] = []
-    for x_center in (-300.0, 300.0):
-        for y_center in (160.0, -160.0):
-            ids = []
-            for perp_y, z in ((y_center - 30, 0.0), (y_center + 30, 0.0), (y_center + 30, 80.0), (y_center - 30, 80.0)):
-                gusset_grids.append(_card("GRID", builder.next_node, "", _fmt(x_center), _fmt(perp_y), _fmt(z)))
-                ids.append(builder.next_node)
-                builder.next_node += 1
-            gusset_elems.append(_card("CQUAD4", builder.next_elem, 0, *ids))
-            builder.next_elem += 1
 
-    rails_deck = "\n".join(
-        [
-            "$$ 纵梁子文件（由 frame_assembly.fem INCLUDE）",
-            '$HMNAME COMP 1 "左纵梁"',
-            "$HWCOLOR COMP 1 5",
-            "$HMCOMP ID 1",
-            *left_grids,
-            *left_elems,
-            '$HMNAME COMP 2 "右纵梁"',
-            "$HWCOLOR COMP 2 1",
-            "$HMCOMP ID 2",
-            *right_grids,
-            *right_elems,
-            "",
-        ]
-    )
+def build_simple_fem_source_files() -> dict[str, str]:
+    """第一版演示 FEM：骨架级车架模型（全部 CQUAD4）。
+
+    - 主文件 frame_assembly_simple.fem + INCLUDE parts/rails_simple.fem
+    - 左右纵梁为矩形截面扫掠管，3 根横梁 + 4 块焊缝加强板，共 6 个部件
+    - 用于先导入项目，随后在项目内用第二版（复杂）模型整体替换
+    """
+    builder = _MeshBuilder()
+
+    def _rail_include() -> str:
+        sections: list[str] = []
+        for side_name, y_center, comp_id, hw_color, pid in (
+            ("左纵梁", 160.0, 1, 5, 1),
+            ("右纵梁", -160.0, 2, 1, 2),
+        ):
+            builder.begin_section()
+            builder.ring(
+                _linspace_stations(-600.0, 600.0, 150.0),
+                center=(0.0, y_center),
+                rx=60.0,
+                ry=80.0,
+                pid=pid,
+            )
+            sections.extend(
+                [
+                    f'$HMNAME COMP {comp_id} "{side_name}"',
+                    f"$HWCOLOR COMP {comp_id} {hw_color}",
+                    f"$HMCOMP ID {comp_id}",
+                    *builder.grids(),
+                    *builder.elems(),
+                    "",
+                ]
+            )
+        return "\n".join(["$$ 左右纵梁子文件（第一版）", *sections])
 
     main_sections: list[str] = [
-        "$$ ==================================================",
-        "$$ PointProcess 全要素演示 — 车架疲劳台架 FEM 模型",
+        "$$ =================================================",
+        "$$ PointProcess 车架演示 - 第一版骨架模型（用于替换演示）",
         "$$ 单位: mm / N / MPa   生成: scripts/create_full_sample.py",
-        "$$ ==================================================",
+        "$$ =================================================",
         "BEGIN BULK",
         "$",
         "$$ ---- 材料: 普通钢材 ----",
@@ -245,45 +283,204 @@ def build_fem_source_files() -> dict[str, str]:
         _card("PSHELL", 6, 1, "5.0"),
         "$",
         "$$ ---- 纵梁（INCLUDE 子文件，部件 1/2）----",
-        "INCLUDE parts/rails.fem",
+        "INCLUDE parts/rails_simple.fem",
         "$",
     ]
-    for comp_name, comp_id, hw_color, grids, elems in cross_defs:
-        main_sections.extend(
-            [
-                f"$$ ---- {comp_name} ----",
-                f'$HMNAME COMP {comp_id} "{comp_name}"',
-                f"$HWCOLOR COMP {comp_id} {hw_color}",
-                f"$HMCOMP ID {comp_id}",
-                *grids,
-                *elems,
-                "$",
-            ]
+    for name, comp_id, hw_color, pid, x_center in (
+        ("前横梁", 3, 3, 3, -300.0),
+        ("中部横梁", 4, 4, 4, 0.0),
+        ("后横梁", 5, 2, 5, 300.0),
+    ):
+        builder.begin_section()
+        builder.ring(
+            [0.0, 60.0, 130.0, 200.0, 260.0],
+            center=(x_center, 0.0),
+            rx=50.0,
+            ry=60.0,
+            pid=pid,
         )
-    main_sections.extend(
-        [
-            "$$ ---- 焊缝加强板 ----",
-            '$HMNAME COMP 6 "焊缝加强板"',
-            "$HWCOLOR COMP 6 6",
-            "$HMCOMP ID 6",
-            *gusset_grids,
-            *gusset_elems,
-            "",
-            "ENDDATA",
-            "",
-        ]
-    )
+        main_sections.extend(_component(name, comp_id, hw_color, [*builder.grids(), *builder.elems()]))
+    # 焊缝加强板：前/后横梁与纵梁交接处 4 块竖直板
+    builder.begin_section()
+    for x_center in (-300.0, 300.0):
+        for y_center in (160.0, -160.0):
+            builder.quad(
+                6,
+                (x_center, y_center - 30.0, 0.0),
+                (x_center, y_center + 30.0, 0.0),
+                (x_center, y_center + 30.0, 80.0),
+                (x_center, y_center - 30.0, 80.0),
+            )
+    main_sections.extend(_component("焊缝加强板", 6, 6, [*builder.grids(), *builder.elems()]))
+    main_sections.extend(["", "ENDDATA", ""])
     return {
-        "frame_assembly.fem": "\n".join(main_sections),
-        "parts/rails.fem": rails_deck,
+        "frame_assembly_simple.fem": "\n".join(main_sections),
+        "parts/rails_simple.fem": _rail_include(),
     }
 
 
-def validate_fem_source(source_dir: Path) -> dict[str, int]:
+def build_complex_fem_source_files() -> dict[str, str]:
+    """第二版演示 FEM：高保真车架模型（更复杂，用于整体替换演示）。
+
+    与第一版对比：
+    - 部件更多：左右纵梁（盖板+腹板多 PID）、8 根等距横梁、前后保险杠、
+      四角立柱与保险杠连杆，共 14 个部件
+    - 单元类型更丰富：CQUAD4 壳 + CTRIA3 过渡 + CROD 梁（圆形截面属性）
+    - 纵梁为闭口箱型截面（上/下盖板 + 内/外腹板），网格更细
+    - 横梁 8 根等距布置，PID 随序号交替（5.0/6.0 板厚）
+    - 立柱顶用 CTRIA3 封口，连杆用 CROD
+    """
+    builder = _MeshBuilder()
+
+    def _rail_deck() -> str:
+        sections: list[str] = []
+        for side_name, y_center, comp_id, hw_color in (
+            ("左纵梁", 160.0, 1, 5),
+            ("右纵梁", -160.0, 2, 1),
+        ):
+            builder.begin_section()
+            # 闭口箱型截面：每站 4 个角点（底/顶 × 内/外），相邻站间直接构面。
+            # 上/下盖板 PID=1（板厚 3.0），内/外腹板 PID=3（板厚 4.0）。
+            prev: list[int] | None = None
+            for x in _linspace_stations(-600.0, 600.0, 60.0):
+                n_bl = builder.grid(x, y_center - 30.0, 0.0)
+                n_br = builder.grid(x, y_center + 30.0, 0.0)
+                n_tl = builder.grid(x, y_center - 30.0, 80.0)
+                n_tr = builder.grid(x, y_center + 30.0, 80.0)
+                if prev is not None:
+                    p_bl, p_br, p_tl, p_tr = prev
+                    builder.quad_cards(1, [p_bl, p_br, n_br, n_bl])  # 下盖板
+                    builder.quad_cards(1, [p_tl, p_tr, n_tr, n_tl])  # 上盖板
+                    builder.quad_cards(3, [p_bl, p_tl, n_tl, n_bl])  # 外腹板
+                    builder.quad_cards(3, [p_br, p_tr, n_tr, n_br])  # 内腹板
+                prev = [n_bl, n_br, n_tl, n_tr]
+            sections.extend(
+                [
+                    f'$HMNAME COMP {comp_id} "{side_name}"',
+                    f"$HWCOLOR COMP {comp_id} {hw_color}",
+                    f"$HMCOMP ID {comp_id}",
+                    *builder.grids(),
+                    *builder.elems(),
+                    "",
+                ]
+            )
+        return "\n".join(["$$ 左右纵梁子文件（第二版，箱型截面多 PID）", *sections])
+
+    mats = [
+        _card("MAT1", 1, "2.06+5", "7.91+4", ".3", "7.85-9"),
+        _card("MAT1", 2, "7.0+4", "2.7+4", ".33", "2.7-9"),
+    ]
+    props = [
+        _card("PSHELL", 1, 1, "3.0"),
+        _card("PSHELL", 2, 1, "3.0"),
+        _card("PSHELL", 3, 1, "4.0"),
+        _card("PSHELL", 4, 1, "5.0"),
+        _card("PSHELL", 5, 1, "6.0"),
+        _card("PSHELL", 6, 1, "8.0"),
+        _card("PSHELL", 7, 2, "3.0"),
+        _card("PBARL", 11, 1, "ROD"),
+        "+       " + "".join(str(v).rjust(8) for v in (2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)),
+        "+       " + "".join(str(v).rjust(8) for v in (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)),
+    ]
+
+    def _cross_beam(x_center: float, comp_id: int, hw_color: int, pid: int) -> list[str]:
+        builder.begin_section()
+        builder.ring(
+            [0.0, 40.0, 100.0, 160.0, 220.0, 260.0],
+            center=(x_center, 0.0),
+            rx=45.0,
+            ry=55.0,
+            pid=pid,
+        )
+        return _component(f"横梁{comp_id - 10}", comp_id, hw_color, [*builder.grids(), *builder.elems()])
+
+    def _bumper(x_sign: float, comp_id: int, hw_color: int, name: str) -> list[str]:
+        builder.begin_section()
+        builder.ring(
+            [-180.0, -80.0, 0.0, 80.0, 180.0],
+            center=(x_sign * 620.0, 0.0),
+            rx=40.0,
+            ry=45.0,
+            pid=6,
+        )
+        return _component(name, comp_id, hw_color, [*builder.grids(), *builder.elems()])
+
+    def _pillars_and_rods() -> list[str]:
+        builder.begin_section()
+        pillar_top: list[int] = []
+        rod_lines: list[str] = []
+        for x_sign in (1.0, -1.0):
+            for y_sign in (1.0, -1.0):
+                y0, y1 = y_sign * 120.0, y_sign * 160.0
+                x0 = x_sign * 600.0
+                # 立柱四面（朝向保险杠的面）+ 顶部 CTRIA3 封口
+                n_bot = [
+                    builder.grid(x0, y0, 80.0),
+                    builder.grid(x0, y1, 80.0),
+                    builder.grid(x0, y1, 190.0),
+                    builder.grid(x0, y0, 190.0),
+                ]
+                builder.quad_cards(6, [n_bot[0], n_bot[1], n_bot[2], n_bot[3]])
+                n_top = [
+                    builder.grid(x0 + 10.0, y0 + 10.0, 190.0),
+                    builder.grid(x0 + 10.0, y1 - 10.0, 190.0),
+                ]
+                # 顶部横向板 + 斜封口（CTRIA3，基于既有节点）
+                builder.quad_cards(6, [n_bot[3], n_bot[2], n_top[1], n_top[0]])
+                builder.tria_cards(6, [n_bot[0], n_top[0], n_top[1]])
+                builder.tria_cards(6, [n_bot[0], n_top[1], n_bot[1]])
+                pillar_top.append(n_top[0])
+                pillar_top.append(n_top[1])
+        # 保险杠连杆：立柱顶部 → 保险杠端部上缘（CROD）
+        rod_targets = [
+            (x_sign * 660.0, y_sign * 120.0, 160.0)
+            for x_sign in (1.0, -1.0)
+            for y_sign in (1.0, -1.0)
+        ]
+        for index, target in enumerate(rod_targets):
+            g2 = builder.grid(*target)
+            eid = builder._next_elem
+            builder._next_elem += 1
+            rod_lines.append(_card("CROD", eid, 11, pillar_top[index], g2))
+        return _component("四角立柱与连杆", 9, 3, [*builder.grids(), *builder.elems(), *rod_lines])
+
+    sections: list[str] = [
+        "$$ =================================================",
+        "$$ PointProcess 车架演示 - 第二版高保真模型（用于整体替换）",
+        "$$ 单元: CQUAD4 壳 + CTRIA3 过渡 + CROD 梁",
+        "$$ 部件: 左右纵梁 / 8 根横梁 / 前后保险杠 / 立柱连杆",
+        "$$ 单位: mm / N / MPa   生成: scripts/create_full_sample.py",
+        "$$ =================================================",
+        "BEGIN BULK",
+        "$",
+        "$$ ---- 材料 ----",
+        *mats,
+        "$",
+        "$$ ---- 属性 ----",
+        *props,
+        "$",
+        "$$ ---- 左右纵梁（INCLUDE）----",
+        "INCLUDE parts/rails_v2.fem",
+        "$",
+    ]
+    for index in range(1, 9):
+        x_center = -560.0 + (index - 1) * 160.0
+        sections.extend(_cross_beam(x_center, 10 + index, 3 if index <= 4 else 2, 4 if index % 2 else 5))
+    sections.extend(_bumper(1.0, 7, 5, "前保险杠"))
+    sections.extend(_bumper(-1.0, 8, 6, "后保险杠"))
+    sections.extend(_pillars_and_rods())
+    sections.extend(["", "ENDDATA", ""])
+    return {
+        "frame_assembly_v2.fem": "\n".join(sections),
+        "parts/rails_v2.fem": _rail_deck(),
+    }
+
+
+def validate_fem_source(source_dir: Path, main_filename: str = "frame_assembly.fem") -> dict[str, int]:
     """用后端解析器实际解析生成的 FEM，确保随包模型可被系统导入。"""
     from app.services.fem.parser import FemModelProvider
 
-    main_path = source_dir / "frame_assembly.fem"
+    main_path = source_dir / main_filename
     model = FemModelProvider(main_path, include_root=source_dir).load()
     stats = {
         "node_count": len(model.nodes),
@@ -639,6 +836,7 @@ def build_backup(
     manifest: dict[str, Any],
     now: str,
     fem_stats: dict[str, int],
+    main_filename: str = "frame_assembly.fem",
 ) -> dict[str, Any]:
     manifest_point_by_id = {point["point_id"]: point for point in manifest["points"]}
     backup_points = []
@@ -735,8 +933,8 @@ def build_backup(
         "crack_records": dataset["crack_records"],
         "dewesoft_imports": dataset["dewesoft_imports"],
         "fem_model": {
-            "main_filename": "frame_assembly.fem",
-            "source_name": "frame_assembly.fem",
+            "main_filename": main_filename,
+            "source_name": main_filename,
             "node_count": fem_stats["node_count"],
             "element_count": fem_stats["element_count"],
             "triangle_count": fem_stats["element_count"] * 2,
@@ -821,16 +1019,56 @@ def build_records_xlsx(dataset: dict[str, Any], manifest: dict[str, Any]) -> byt
 #  打包
 # ═══════════════════════════════════════════════════════════════
 
+FULL_ZIP_NAME = "POINTPROCESS_DEMO_FULL_20260905.zip"
+FULL_SUMMARY_NAME = "POINTPROCESS_DEMO_FULL_20260905_summary.json"
+FEM_REPLACEMENT_ZIP_NAME = "POINTPROCESS_DEMO_COMPLEX_FEM_REPLACEMENT_20260905.zip"
+FEM_REPLACEMENT_SUMMARY_NAME = "POINTPROCESS_DEMO_COMPLEX_FEM_REPLACEMENT_20260905_summary.json"
+FEM_REPLACE_FOLDER = "fem_v2_replace"
+SIMPLE_FEM_MAIN = "frame_assembly_simple.fem"
+COMPLEX_FEM_MAIN = "frame_assembly_v2.fem"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="生成 PointProcess 全要素演示数据包")
     parser.add_argument("--out", default=str(ROOT / "sample_data"), help="输出目录（默认 sample_data/）")
     parser.add_argument("--seed", type=int, default=20260905, help="随机种子")
+    parser.add_argument(
+        "--mode",
+        choices=("full", "fem-replacement"),
+        default="full",
+        help="full=全要素演示包（内置第一版骨架 FEM，供先导入项目后整体替换演示）；"
+        "fem-replacement=单独生成第二版高保真复杂 FEM 替换包",
+    )
     args = parser.parse_args()
-    random.seed(args.seed)
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    if args.mode == "fem-replacement":
+        _build_fem_replacement_package(out_dir)
+        return
+    _build_full_package(out_dir, args.seed)
+
+
+def _stage_and_validate(out_dir: Path, fem_files: dict[str, str], main_filename: str) -> dict[str, int]:
+    """把 FEM 源文件写入临时目录，用后端解析器实际解析并返回统计。"""
+    import shutil
+
+    staging = out_dir / ".fem_validate_tmp"
+    shutil.rmtree(staging, ignore_errors=True)
+    for relative, text in fem_files.items():
+        target = staging / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+    try:
+        return validate_fem_source(staging, main_filename=main_filename)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
+def _build_full_package(out_dir: Path, seed: int) -> None:
+    """完整备份导入包：项目 + 点位/测量/裂缝/Dewesoft + 第一版骨架 FEM。"""
+    random.seed(seed)
     tz = timezone(timedelta(hours=8))
     now_dt = datetime(2026, 9, 5, 10, 0, tzinfo=tz)
     now = now_dt.isoformat()
@@ -838,26 +1076,15 @@ def main() -> None:
 
     dataset = build_dataset(now, start_time)
 
-    # FEM 源文件：生成后立即用后端解析器校验，确保可被系统导入
-    fem_files = build_fem_source_files()
-    staging = out_dir / ".fem_validate_tmp"
-    source_dir = staging / "parts"
-    staging.mkdir(parents=True, exist_ok=True)
-    (staging / "frame_assembly.fem").write_text(fem_files["frame_assembly.fem"], encoding="utf-8")
-    source_dir.mkdir(parents=True, exist_ok=True)
-    (source_dir / "rails.fem").write_text(fem_files["parts/rails.fem"], encoding="utf-8")
-    try:
-        fem_stats = validate_fem_source(staging)
-    finally:
-        import shutil
-
-        shutil.rmtree(staging, ignore_errors=True)
+    # FEM 源文件：第一版骨架模型（先导入项目，演示后续用复杂模型整体替换）
+    fem_files = build_simple_fem_source_files()
+    fem_stats = _stage_and_validate(out_dir, fem_files, SIMPLE_FEM_MAIN)
     print(f"FEM 校验通过: {fem_stats}")
     for relative, text in fem_files.items():
         dataset["package_files"][f"fem/source/{relative}"] = text.encode("utf-8")
 
     manifest = build_manifest(dataset, now, fem_stats)
-    backup = build_backup(dataset, manifest, now, fem_stats)
+    backup = build_backup(dataset, manifest, now, fem_stats, main_filename=SIMPLE_FEM_MAIN)
     dataset["package_files"]["records.xlsx"] = build_records_xlsx(dataset, manifest)
     dataset["package_files"]["raw/readme.txt"] = "示例原始数据目录（演示数据）\n".encode("utf-8")
     dataset["package_files"]["attachments/试验大纲.txt"] = (
@@ -868,7 +1095,7 @@ def main() -> None:
         "4. 每 8,000 次循环记录一轮应变极值并巡检裂缝\n"
     ).encode("utf-8")
 
-    zip_path = out_dir / "POINTPROCESS_DEMO_FULL_20260905.zip"
+    zip_path = out_dir / FULL_ZIP_NAME
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as package:
         package.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
         package.writestr("pointprocess_backup.json", json.dumps(backup, ensure_ascii=False, indent=2))
@@ -878,6 +1105,7 @@ def main() -> None:
     summary = {
         "zip_path": str(zip_path),
         "project_id": PROJECT_ID,
+        "fem_mode": "simple (第一版骨架模型, frame_assembly_simple.fem)",
         "point_count": len(dataset["points"]),
         "photo_count": sum(len(point["photos"]) for point in dataset["points"]),
         "test_run_count": len(dataset["runs"]),
@@ -899,11 +1127,13 @@ def main() -> None:
             "12 crack timeline records linked to points and runs",
             "2 Dewesoft import records with matched/unmatched channels",
             "raw/ and attachments/ folder copy",
-            "FEM model with INCLUDE sub-file and HyperMesh component grouping",
+            "FEM model (simple skeleton) with INCLUDE sub-file and component grouping",
+            "replace demo: import this package, then upload the complex FEM replacement package",
         ],
         "import_guide": "系统内选择 导入 → 上传该 zip → 预览 → 确认导入，即可一次性恢复全部内容（含 FEM 模型）",
+        "replacement_guide": "在项目 FEM 预览页点击「重新导入模型文件夹」，选择复杂替换包解压后的 fem_v2_replace 文件夹，即可替换为复杂模型并重新渲染",
     }
-    summary_path = out_dir / "POINTPROCESS_DEMO_FULL_20260905_summary.json"
+    summary_path = out_dir / FULL_SUMMARY_NAME
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(f"ZIP     → {zip_path}")
@@ -913,6 +1143,65 @@ def main() -> None:
         f"| 测量 {summary['measurement_count']}（异常 {summary['abnormal_measurement_count']}）"
         f"| 裂缝 {summary['crack_record_count']} | Dewesoft {summary['dewesoft_import_count']}"
     )
+
+
+def _build_fem_replacement_package(out_dir: Path) -> None:
+    """单独生成第二版（复杂）FEM 源文件替换包。
+
+    包内 ``fem_v2_replace/`` 文件夹（frame_assembly_v2.fem + parts/rails_v2.fem）
+    可在 FEM 预览页整体上传：把项目内第一版骨架模型替换为复杂模型并重新渲染。
+    """
+    import shutil
+    import tempfile
+
+    fem_files = build_complex_fem_source_files()
+    with tempfile.TemporaryDirectory() as td:
+        folder = Path(td) / FEM_REPLACE_FOLDER
+        for relative, text in fem_files.items():
+            target = folder / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8")
+        fem_stats = validate_fem_source(folder, main_filename=COMPLEX_FEM_MAIN)
+    print(f"复杂 FEM 校验通过: {fem_stats}")
+
+    readme = (
+        "PointProcess 复杂 FEM 替换包（第二版高保真车架模型）\n"
+        "====================================================\n\n"
+        "用途：整体替换项目内已导入/已渲染的 FEM 模型。\n\n"
+        "操作步骤：\n"
+        "  1) 先导入演示全要素包 POINTPROCESS_DEMO_FULL_20260905.zip（内含第一版骨架模型）；\n"
+        "  2) 解压本 zip 得到文件夹 fem_v2_replace；\n"
+        "  3) 打开该项目的 FEM 预览页，点击「重新导入模型文件夹」，选择整个 fem_v2_replace\n"
+        "     文件夹上传；\n"
+        "  4) 后端解析渲染完成后，页面模型即被替换为复杂模型并重新渲染。\n\n"
+        "模型内容（与第一版对比）：\n"
+        "  - 主文件 frame_assembly_v2.fem + INCLUDE parts/rails_v2.fem\n"
+        "  - 箱型截面左右纵梁（上/下盖板 + 内/外腹板，多 PID 板厚）\n"
+        "  - 8 根等距横梁（PID 交替 5.0/6.0）、前后保险杠、四角立柱与顶部封口\n"
+        "  - CROD 连杆（圆形截面 PBARL 属性）、CTRIA3 过渡封口\n"
+        "  - 钢材 + 铝合金两种材料，约 {node} 节点 / {elem} 单元\n"
+        "".format(node=fem_stats["node_count"], elem=fem_stats["element_count"])
+    ).encode("utf-8")
+
+    zip_path = out_dir / FEM_REPLACEMENT_ZIP_NAME
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as package:
+        for relative, text in fem_files.items():
+            package.writestr(f"{FEM_REPLACE_FOLDER}/{relative}", text)
+        package.writestr("README-复杂FEM替换说明.txt", readme)
+
+    summary = {
+        "zip_path": str(zip_path),
+        "fem_mode": "complex (第二版高保真模型, frame_assembly_v2.fem)",
+        "fem_stats": fem_stats,
+        "file_count": 2 + len(fem_files),
+        "zip_size_bytes": zip_path.stat().st_size,
+        "usage_guide": "解压后选择整个 fem_v2_replace 文件夹，在 FEM 预览页「重新导入模型文件夹」上传",
+    }
+    summary_path = out_dir / FEM_REPLACEMENT_SUMMARY_NAME
+    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    print(f"ZIP     → {zip_path}")
+    print(f"SUMMARY → {summary_path}")
 
 
 if __name__ == "__main__":

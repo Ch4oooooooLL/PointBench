@@ -64,6 +64,24 @@ SMALL_FEM = "\n".join(
     ]
 )
 
+REPLACEMENT_FEM = "\n".join(
+    [
+        "$$ replacement deck (fewer nodes, different source)",
+        "BEGIN BULK",
+        '$HMNAME COMP                   1"frame_v2"',
+        "$HWCOLOR COMP 1 2",
+        "$HMCOMP ID 1",
+        _card("GRID", 1, "", 0.0, 0.0, 0.0),
+        _card("GRID", 2, "", 20.0, 0.0, 0.0),
+        _card("GRID", 3, "", 20.0, 20.0, 0.0),
+        _card("GRID", 4, "", 0.0, 20.0, 0.0),
+        _card("GRID", 5, "", 0.0, 0.0, 20.0),
+        _card("CQUAD4", 1, 1, 1, 2, 3, 4),
+        _card("CTRIA3", 2, 1, 1, 4, 5),
+        "ENDDATA",
+    ]
+)
+
 
 def _upload_fem(client: TestClient, project_db_id: int) -> dict:
     resp = client.post(
@@ -222,6 +240,83 @@ def test_export_zip_toggles(client: TestClient) -> None:
     assert any(name.startswith("fem/source/") for name in names)
     assert any(name == "fem/model.glb" for name in names)
     assert any(name == "fem/preview.json" for name in names)
+
+    client.delete(f"/api/projects/{project['id']}")
+
+
+def test_fem_upload_replaces_existing_model(client: TestClient) -> None:
+    """同一项目再次上传 FEM 应整体替换并重新渲染（记录与产物都更新）。"""
+    project = _create_project(client, _unique_project_id())
+
+    def _wait_ready(db_id: int) -> dict:
+        for _ in range(100):
+            import time
+
+            payload = client.get(f"/api/projects/{db_id}/fem").json()
+            if payload["status"] == "ready":
+                return payload
+            time.sleep(0.05)
+        raise AssertionError("FEM 任务未在预期时间内完成")
+
+    def _wait_source(db_id: int, source_name: str) -> dict:
+        for _ in range(200):
+            import time
+
+            payload = client.get(f"/api/projects/{db_id}/fem").json()
+            if payload["status"] == "ready" and (payload["stats"] or {}).get("source_name") == source_name:
+                return payload
+            time.sleep(0.05)
+        raise AssertionError(f"FEM 未替换为 {source_name}")
+
+    # 第一次上传
+    task = _upload_fem(client, project["id"])
+    for _ in range(100):
+        status = client.get(task["poll_url"]).json()
+        if status["status"] != "running":
+            break
+        import time
+
+        time.sleep(0.05)
+    assert status["status"] == "succeeded", status
+    first = _wait_source(project["id"], "model.fem")
+    first_version = first["artifact_version"]
+    first_dir = safe_fem_dir(project["project_id"])
+    assert (first_dir / "source" / "model.fem").is_file()
+
+    # 再次上传不同文件 → 替换并重新渲染
+    replace_task = client.post(
+        f"/api/projects/{project['id']}/fem",
+        files=[("files", ("model_v2.fem", REPLACEMENT_FEM.encode("utf-8"), "text/plain"))],
+    )
+    assert replace_task.status_code == 200, replace_task.text
+    replace_payload = replace_task.json()
+    for _ in range(100):
+        replace_status = client.get(replace_payload["poll_url"]).json()
+        if replace_status["status"] != "running":
+            break
+        import time
+
+        time.sleep(0.05)
+    assert replace_status["status"] == "succeeded", replace_status
+
+    second = _wait_source(project["id"], "model_v2.fem")
+    assert second["stats"]["node_count"] == 5
+    assert second["stats"]["element_count"] == 2
+    # 产物版本单调递增 → 前端 modelKey 变化强制重载视图
+    assert second["artifact_version"] > first_version
+    # 旧源文件被替换，仅保留新源文件
+    assert not (first_dir / "source" / "model.fem").exists()
+    assert (first_dir / "source" / "model_v2.fem").is_file()
+
+    # 数据库记录同步替换
+    db = SessionLocal()
+    try:
+        record = db.query(models.FemModel).filter(models.FemModel.project_db_id == project["id"]).one()
+        assert record.main_filename == "model_v2.fem"
+        assert record.node_count == 5
+        assert record.element_count == 2
+    finally:
+        db.close()
 
     client.delete(f"/api/projects/{project['id']}")
 

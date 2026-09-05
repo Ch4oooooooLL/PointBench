@@ -4832,6 +4832,24 @@ label {
   margin: -8px 0 16px;
 }
 
+/* 段落内嵌的文本按钮（用于跨页跳转引导）。 */
+.text-button {
+  border: none;
+  background: none;
+  color: var(--primary);
+  font-size: inherit;
+  font-weight: 500;
+  padding: 0 2px;
+  cursor: pointer;
+  vertical-align: baseline;
+  transition: var(--transition-fast);
+}
+
+.text-button:hover {
+  color: var(--primary-hover);
+  text-decoration: underline;
+}
+
 /* ── 导入页 FEM 区块 ─────────────────────────────────────── */
 .import-divider {
   margin: 26px 0 16px;
