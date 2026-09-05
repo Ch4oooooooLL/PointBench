@@ -20,7 +20,8 @@ export function FemPreviewPage() {
   const [payload, setPayload] = useState<FemModelPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [showEdges, setShowEdges] = useState(false);
+  const [showMesh, setShowMesh] = useState(false);
+  const [showBoundary, setShowBoundary] = useState(false);
   const [transparent, setTransparent] = useState(false);
   const [colorByGroup, setColorByGroup] = useState(true);
 
@@ -115,7 +116,8 @@ export function FemPreviewPage() {
               </div>
             </div>
             <div className="viewer-options">
-              <ToggleSwitch checked={showEdges} onChange={setShowEdges} label="显示网格边界" />
+              <ToggleSwitch checked={showMesh} onChange={setShowMesh} label="显示网格" />
+              <ToggleSwitch checked={showBoundary} onChange={setShowBoundary} label="显示边界" />
               <ToggleSwitch checked={transparent} onChange={setTransparent} label="半透明显示" />
               <ToggleSwitch checked={colorByGroup} onChange={setColorByGroup} label="按分组着色" disabled={!hasGrouping} />
             </div>
@@ -125,7 +127,8 @@ export function FemPreviewPage() {
                 glbUrl={payload.glb_url}
                 mappingUrl={payload.mapping_url}
                 grouping={grouping}
-                showEdges={showEdges}
+                showMesh={showMesh}
+                showBoundary={showBoundary}
                 transparent={transparent}
                 colorByGroup={colorByGroup}
               />

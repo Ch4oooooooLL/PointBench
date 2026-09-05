@@ -8,38 +8,50 @@ import { FemGroupingData } from '../types';
 // visual focus of the preview.
 const BASE_COLOR = new THREE.Color('#6f899a');
 const SELECTED_COLOR = new THREE.Color('#d9544d');
-const EDGE_COLOR = new THREE.Color('#1f2937');
-type ViewPreset = 'front' | 'iso' | 'fit';
+const GRID_LINE_COLOR = new THREE.Color('#4b6b7d');
+const BOUNDARY_LINE_COLOR = new THREE.Color('#1f2937');
+type ViewPreset = 'front' | 'iso';
 
 interface FemViewerProps {
   glbUrl: string;
   mappingUrl: string;
   grouping: FemGroupingData | null;
-  showEdges: boolean;
+  /** 显示完整单元网格线。 */
+  showMesh: boolean;
+  /** 显示模型自由边界线（仅被一个三角形使用的边）。 */
+  showBoundary: boolean;
   transparent: boolean;
   colorByGroup: boolean;
 }
 
 interface ViewerRuntime {
   applyColors: (elementId: number | null) => void;
-  buildEdges: () => void;
+  buildMeshLines: () => void;
+  buildBoundaryLines: () => void;
   applyMaterialMode: () => void;
   fitView: (preset: ViewPreset) => void;
-  fit: () => void;
   back: () => void;
 }
 
-export function FemViewer({ glbUrl, mappingUrl, grouping, showEdges, transparent, colorByGroup }: FemViewerProps) {
+export function FemViewer({
+  glbUrl,
+  mappingUrl,
+  grouping,
+  showMesh,
+  showBoundary,
+  transparent,
+  colorByGroup,
+}: FemViewerProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedElement, setSelectedElement] = useState<number | null>(null);
   const [activePreset, setActivePreset] = useState<ViewPreset>('front');
   const selectedRef = useRef(selectedElement);
-  const optionsRef = useRef({ showEdges, transparent, colorByGroup, grouping });
+  const optionsRef = useRef({ showMesh, showBoundary, transparent, colorByGroup, grouping });
   const runtimeRef = useRef<ViewerRuntime | null>(null);
 
   selectedRef.current = selectedElement;
-  optionsRef.current = { showEdges, transparent, colorByGroup, grouping };
+  optionsRef.current = { showMesh, showBoundary, transparent, colorByGroup, grouping };
 
   useEffect(() => {
     const host = hostRef.current;
@@ -96,7 +108,8 @@ export function FemViewer({ glbUrl, mappingUrl, grouping, showEdges, transparent
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
     let modelMesh: THREE.Mesh | null = null;
-    let edgeLines: THREE.LineSegments | null = null;
+    let meshLines: THREE.LineSegments | null = null;
+    let boundaryLines: THREE.LineSegments | null = null;
     let material: THREE.MeshStandardMaterial | null = null;
     let geometry: THREE.BufferGeometry | null = null;
     let mapping: number[] = [];
@@ -131,25 +144,147 @@ export function FemViewer({ glbUrl, mappingUrl, grouping, showEdges, transparent
       color.needsUpdate = true;
     };
 
-    const buildEdges = () => {
-      if (edgeLines) {
-        edgeLines.geometry.dispose();
-        if (edgeLines.material instanceof THREE.Material) edgeLines.material.dispose();
-        scene.remove(edgeLines);
-        edgeLines = null;
+    const removeLineSegments = (lines: THREE.LineSegments | null) => {
+      if (!lines) return;
+      lines.geometry.dispose();
+      if (lines.material instanceof THREE.Material) lines.material.dispose();
+      scene.remove(lines);
+    };
+
+    /**
+     * Build the full solver-element mesh lines.
+     *
+     * The GLB geometry is triangulated, and `mapping` tells which element each
+     * triangle belongs to.  Within one element, an edge shared by two of its
+     * triangles is a triangulation diagonal (e.g. a CQUAD split into two
+     * coplanar triangles) and must be hidden; every other edge is a real
+     * element edge and is drawn.  A plain EdgesGeometry cannot do this because
+     * it drops all coplanar edges, so flat-sheet models only showed the outer
+     * silhouette instead of the full mesh.
+     */
+    const collectEdges = (countPerElement: boolean) => {
+      if (!geometry) return null;
+      const position = geometry.getAttribute('position');
+      const array = position.array as Float32Array;
+      // Only build element-local usage counts when requested; the boundary
+      // pass needs model-wide counts instead.
+      const usage = new Map<number, Map<string, number>>();
+      const coordsText = new Map<number, string>();
+      const coordText = (vertex: number) => {
+        let text = coordsText.get(vertex);
+        if (text === undefined) {
+          const base = vertex * 3;
+          text = `${array[base]},${array[base + 1]},${array[base + 2]}`;
+          coordsText.set(vertex, text);
+        }
+        return text;
+      };
+      const edgeKey = (a: number, b: number) => {
+        // Canonical ordering by coordinates so both triangle directions and
+        // duplicated (non-indexed) vertices of the same geometric edge hash
+        // to one key.
+        const aBase = a * 3;
+        const bBase = b * 3;
+        const dx = array[aBase] - array[bBase];
+        if (dx !== 0) return dx < 0 ? `${coordText(a)}|${coordText(b)}` : `${coordText(b)}|${coordText(a)}`;
+        const dy = array[aBase + 1] - array[bBase + 1];
+        if (dy !== 0) return dy < 0 ? `${coordText(a)}|${coordText(b)}` : `${coordText(b)}|${coordText(a)}`;
+        return array[aBase + 2] <= array[bBase + 2]
+          ? `${coordText(a)}|${coordText(b)}`
+          : `${coordText(b)}|${coordText(a)}`;
+      };
+      const triangleCount = mapping.length;
+      for (let triangle = 0; triangle < triangleCount; triangle += 1) {
+        const elementId = countPerElement ? mapping[triangle] : 0;
+        let elementEdges = usage.get(elementId);
+        if (!elementEdges) {
+          elementEdges = new Map<string, number>();
+          usage.set(elementId, elementEdges);
+        }
+        const base = triangle * 3;
+        for (let corner = 0; corner < 3; corner += 1) {
+          const a = base + corner;
+          const b = base + ((corner + 1) % 3);
+          const key = edgeKey(a, b);
+          elementEdges.set(key, (elementEdges.get(key) ?? 0) + 1);
+        }
+      }
+      return { usage, coordText, edgeKey, triangleCount };
+    };
+
+    const buildMeshLines = () => {
+      if (meshLines) {
+        removeLineSegments(meshLines);
+        meshLines = null;
       }
       if (!geometry || !modelMesh) return;
-      if (!optionsRef.current.showEdges) return;
-      const edges = new THREE.EdgesGeometry(geometry, 1);
+      const options = optionsRef.current;
+      if (!options.showMesh) return;
+      const collected = collectEdges(true);
+      if (!collected) return;
+      // Keep an edge only when it is used by a single triangle of its element
+      // (a triangulation diagonal is used twice).
+      const kept = new Set<string>();
+      for (const elementEdges of collected.usage.values()) {
+        for (const [edge, count] of elementEdges) {
+          if (count === 1) kept.add(edge);
+        }
+      }
+      const lineGeometry = edgeKeysToGeometry(kept);
+      if (!lineGeometry) return;
       const lines = new THREE.LineSegments(
-        edges,
-        new THREE.LineBasicMaterial({ color: EDGE_COLOR, transparent: true, opacity: 0.6 }),
+        lineGeometry,
+        new THREE.LineBasicMaterial({ color: GRID_LINE_COLOR, transparent: true, opacity: 0.6 }),
       );
       lines.position.copy(modelMesh.position);
       lines.rotation.copy(modelMesh.rotation);
       lines.scale.copy(modelMesh.scale);
       scene.add(lines);
-      edgeLines = lines;
+      meshLines = lines;
+    };
+
+    const buildBoundaryLines = () => {
+      if (boundaryLines) {
+        removeLineSegments(boundaryLines);
+        boundaryLines = null;
+      }
+      if (!geometry || !modelMesh) return;
+      const options = optionsRef.current;
+      if (!options.showBoundary) return;
+      const collected = collectEdges(false);
+      if (!collected) return;
+      // A free edge of the whole surface is used by exactly one triangle.
+      const freeEdges = new Set<string>();
+      for (const [edge, count] of collected.usage.get(0) ?? []) {
+        if (count === 1) freeEdges.add(edge);
+      }
+      const lineGeometry = edgeKeysToGeometry(freeEdges);
+      if (!lineGeometry) return;
+      const lines = new THREE.LineSegments(
+        lineGeometry,
+        new THREE.LineBasicMaterial({ color: BOUNDARY_LINE_COLOR, transparent: true, opacity: 0.9 }),
+      );
+      lines.position.copy(modelMesh.position);
+      lines.rotation.copy(modelMesh.rotation);
+      lines.scale.copy(modelMesh.scale);
+      scene.add(lines);
+      boundaryLines = lines;
+    };
+
+    const edgeKeysToGeometry = (keys: Set<string>) => {
+      const vertices: number[] = [];
+      for (const edge of keys) {
+        const separator = edge.indexOf('|');
+        if (separator <= 0) continue;
+        const first = edge.slice(0, separator).split(',').map(Number);
+        const second = edge.slice(separator + 1).split(',').map(Number);
+        if (first.length !== 3 || second.length !== 3) continue;
+        vertices.push(...first, ...second);
+      }
+      if (vertices.length === 0) return null;
+      const lineGeometry = new THREE.BufferGeometry();
+      lineGeometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+      return lineGeometry;
     };
 
     const applyMaterialMode = () => {
@@ -178,12 +313,6 @@ export function FemViewer({ glbUrl, mappingUrl, grouping, showEdges, transparent
       camera.quaternion.copy(snapshot.quaternion);
       controls.target.copy(snapshot.target);
       controls.update();
-    };
-    const fit = () => {
-      if (!modelBounds) return;
-      viewHistory.push(captureView());
-      if (viewHistory.length > 32) viewHistory.shift();
-      fitView('front');
     };
     const back = () => {
       const previous = viewHistory.pop();
@@ -219,6 +348,13 @@ export function FemViewer({ glbUrl, mappingUrl, grouping, showEdges, transparent
       controls.maxDistance = maxDimension * 12;
       controls.update();
       setActivePreset(preset);
+    };
+
+    const goView = (preset: ViewPreset) => {
+      if (!modelBounds) return;
+      viewHistory.push(captureView());
+      if (viewHistory.length > 32) viewHistory.shift();
+      fitView(preset);
     };
 
     Promise.all([
@@ -258,9 +394,10 @@ export function FemViewer({ glbUrl, mappingUrl, grouping, showEdges, transparent
         const grid = new THREE.GridHelper(maxDimension * 3, 24, '#b9cbd6', '#dce6ec');
         grid.position.set(modelCenter.x, modelBounds.min.y - maxDimension * 0.06, modelCenter.z);
         scene.add(grid);
-        runtimeRef.current = { applyColors, buildEdges, applyMaterialMode, fitView, fit, back };
+        runtimeRef.current = { applyColors, buildMeshLines, buildBoundaryLines, applyMaterialMode, fitView, back };
         applyColors(selectedRef.current);
-        buildEdges();
+        buildMeshLines();
+        buildBoundaryLines();
         applyMaterialMode();
         fitView('front');
       })
@@ -302,15 +439,14 @@ export function FemViewer({ glbUrl, mappingUrl, grouping, showEdges, transparent
     renderer.domElement.addEventListener('pointerup', onPointerUp);
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() === 'f') fit();
+      if (event.key === '1') goView('front');
+      if (event.key.toLowerCase() === 'f' || event.key === '2') goView('iso');
       if (event.key.toLowerCase() === 'b') back();
-      if (event.key === '1') fitView('front');
-      if (event.key === '2') fitView('iso');
     };
     renderer.domElement.tabIndex = 0;
     renderer.domElement.setAttribute(
       'aria-label',
-      '有限元三维视图；中键拖动旋转，右键拖动平移，滚轮缩放，点击选择单元，F 适应视图，B 返回上一视图，1 正视，2 等轴视图',
+      '有限元三维视图；中键拖动旋转，右键拖动平移，滚轮缩放，点击选择单元，1 正视，F/2 等轴视图（自动适应窗口），B 返回上一视图',
     );
     renderer.domElement.addEventListener('keydown', onKeyDown);
 
@@ -343,10 +479,13 @@ export function FemViewer({ glbUrl, mappingUrl, grouping, showEdges, transparent
       renderer.domElement.removeEventListener('wheel', preventNativeScroll);
       renderer.domElement.removeEventListener('mousedown', preventNativeScroll);
       renderer.domElement.removeEventListener('auxclick', preventNativeScroll);
-      if (edgeLines) {
-        edgeLines.geometry.dispose();
-        if (edgeLines.material instanceof THREE.Material) edgeLines.material.dispose();
-        scene.remove(edgeLines);
+      if (meshLines) {
+        removeLineSegments(meshLines);
+        meshLines = null;
+      }
+      if (boundaryLines) {
+        removeLineSegments(boundaryLines);
+        boundaryLines = null;
       }
       controls.dispose();
       renderer.dispose();
@@ -362,22 +501,25 @@ export function FemViewer({ glbUrl, mappingUrl, grouping, showEdges, transparent
     };
   }, [glbUrl, mappingUrl]);
 
-  // Live application of view options (colors, edges, transparency).
+  // Live application of view options (colors, mesh/boundary lines, transparency).
   useEffect(() => {
     runtimeRef.current?.applyColors(selectedElement);
   }, [selectedElement, colorByGroup, grouping]);
 
   useEffect(() => {
-    runtimeRef.current?.buildEdges();
-  }, [showEdges]);
+    runtimeRef.current?.buildMeshLines();
+  }, [showMesh]);
+
+  useEffect(() => {
+    runtimeRef.current?.buildBoundaryLines();
+  }, [showBoundary]);
 
   useEffect(() => {
     runtimeRef.current?.applyMaterialMode();
   }, [transparent]);
 
   const setView = (preset: ViewPreset) => {
-    if (preset === 'fit') runtimeRef.current?.fit();
-    else runtimeRef.current?.fitView(preset);
+    runtimeRef.current?.fitView(preset);
   };
 
   return (
@@ -387,17 +529,14 @@ export function FemViewer({ glbUrl, mappingUrl, grouping, showEdges, transparent
         <button aria-pressed={activePreset === 'front'} className={activePreset === 'front' ? 'active' : ''} onClick={() => setView('front')} title="快捷键 1">
           正视
         </button>
-        <button aria-pressed={activePreset === 'iso'} className={activePreset === 'iso' ? 'active' : ''} onClick={() => setView('iso')} title="快捷键 2">
-          等轴
-        </button>
-        <button aria-pressed={activePreset === 'fit'} className={activePreset === 'fit' ? 'active' : ''} onClick={() => setView('fit')} title="快捷键 F">
-          适应
+        <button aria-pressed={activePreset === 'iso'} className={activePreset === 'iso' ? 'active' : ''} onClick={() => setView('iso')} title="快捷键 F / 2">
+          等轴（适应窗口）
         </button>
       </div>
       <div className="viewer-status">
         {selectedElement != null ? `已选择单元 ${selectedElement}，点击空白处取消选择` : '点击网格选择单元'}
       </div>
-      <div className="viewer-help">中键拖动旋转 · 右键拖动平移 · 滚轮缩放 · 点击选择 · F 适应 · B 返回</div>
+      <div className="viewer-help">中键拖动旋转 · 右键拖动平移 · 滚轮缩放 · 点击选择 · 1 正视 · F 等轴适应 · B 返回</div>
       {loadError && (
         <div className="viewer-error" role="alert">
           模型载入失败：{loadError}
