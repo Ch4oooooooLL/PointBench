@@ -175,7 +175,7 @@ export function ProjectOverviewPage() {
     <section>
       <div className="page-head">
         <div>
-          <h1>项目概览</h1>
+          <h1>数据概览</h1>
           <p>选择当前项目，查看点位规模、测试进展、异常状态和全点位应力趋势。</p>
         </div>
         <ProjectSelector />

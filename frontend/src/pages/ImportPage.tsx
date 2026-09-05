@@ -1,16 +1,25 @@
 import { CheckCircle2, FileArchive, FolderOpen } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
+import { FemUploadBox } from '../components/FemUploadBox';
+import { ProjectSelector } from '../components/ProjectSelector';
 import { useAppContext } from '../context/AppContext';
 import { ImportPreview } from '../types';
 
 export function ImportPage() {
   const navigate = useNavigate();
-  const { refreshProjects, setSelectedProjectId } = useAppContext();
+  const { refreshProjects, setSelectedProjectId, selectedProject, selectedProjectId } = useAppContext();
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [femMessage, setFemMessage] = useState('');
+  const [femError, setFemError] = useState('');
+
+  useEffect(() => {
+    setFemMessage('');
+    setFemError('');
+  }, [selectedProjectId]);
 
   async function upload(file?: File) {
     if (!file) return;
@@ -64,13 +73,55 @@ export function ImportPage() {
     }
   }
 
+  async function handleFemUploaded() {
+    if (!selectedProject) return;
+    setFemError('');
+    setFemMessage(`FEM 模型已导入并关联到项目「${selectedProject.project_name}」，可在左侧「模型预览」中查看。`);
+  }
+
   return (
     <section>
       <div className="page-head">
         <div>
           <h1>导入项目</h1>
-          <p>上传 Android App 导出的 zip 数据包，或选择手动解压后的非嵌套文件夹，先预览校验，再确认写入数据库。</p>
+          <p>为当前项目导入 FEM 模型，或上传 App 导出的 zip 数据包 / 解压文件夹创建新项目。</p>
         </div>
+        <ProjectSelector />
+      </div>
+
+      {/* FEM 模型导入（关联到右上角当前项目） */}
+      <div className="panel">
+        <div className="section-head">
+          <h2>
+            <FolderOpen size={18} />
+            导入 FEM 模型
+          </h2>
+          <span className="pill">{selectedProject ? selectedProject.project_name : '未选择项目'}</span>
+        </div>
+        <p className="fem-block-note">
+          FEM 模型将关联到「当前项目」并在解析渲染后保存到该项目目录（可从左侧「模型预览」随时查看）。
+          {!selectedProject && ' 请先在右上角选择目标项目。'}
+        </p>
+        {selectedProject ? (
+          <FemUploadBox
+            projectId={selectedProject.id}
+            onUploaded={handleFemUploaded}
+            onError={(message) => {
+              setFemMessage('');
+              setFemError(message);
+            }}
+          />
+        ) : (
+          <div className="empty">请先在右上角选择要关联 FEM 模型的项目。</div>
+        )}
+        {femMessage && <div className="alert fem-included">{femMessage}</div>}
+        {femError && <div className="alert danger">{femError}</div>}
+      </div>
+
+      {/* App 项目数据导入（zip / 解压文件夹） */}
+      <div className="import-divider">
+        <h2>导入项目数据包</h2>
+        <p>上传 Android App 导出的 zip 数据包，或选择手动解压后的非嵌套文件夹，先预览校验，再确认写入数据库。</p>
       </div>
       <div className="alert warn">
         公司内网文档加密可能导致浏览器上传到密文字节，从而出现 zip 不可读取。遇到这种情况，请先手动打开或解压为明文文件夹，再使用“选择解压文件夹”导入。

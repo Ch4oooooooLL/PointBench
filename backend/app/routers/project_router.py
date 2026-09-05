@@ -602,13 +602,72 @@ def export_project_csv(project_id: int, db: Session = Depends(get_db)) -> Respon
     )
 
 
-@router.get("/{project_id}/export.zip")
-def export_project_zip(project_id: int, db: Session = Depends(get_db)) -> FileResponse:
+@router.post("/{project_id}/export")
+async def export_project_zip(
+    project_id: int,
+    payload: dict | None = None,
+    db: Session = Depends(get_db),
+) -> dict:
+    """按勾选项打包导出项目 zip。
+
+    前端先调用本接口启动后台打包任务并轮询进度；任务完成后通过
+    ``GET /api/tasks/{task_id}`` 拿到 result.download_url 下载 zip。
+    """
     project = db.get(models.Project, project_id)
     if not project or project.deleted_at is not None:
         raise HTTPException(status_code=404, detail="项目不存在")
-    try:
-        zip_path, zip_name = build_project_export_zip(db, project_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail="项目不存在") from exc
-    return FileResponse(zip_path, filename=zip_name, media_type="application/zip")
+    data = payload or {}
+    include_dewesoft = bool(data.get("include_dewesoft", True))
+    include_fem = bool(data.get("include_fem", True))
+
+    from app.services import task_progress
+
+    task_id = task_progress.start_task("项目导出")
+    task_progress.report_task_progress(task_id, progress=0, message="正在准备导出…")
+
+    def run_export() -> None:
+        from app.database import SessionLocal
+
+        worker_db = SessionLocal()
+        try:
+            zip_path, zip_name = build_project_export_zip(
+                worker_db,
+                project_id,
+                include_dewesoft=include_dewesoft,
+                include_fem=include_fem,
+                on_progress=lambda percent, message: task_progress.report_task_progress(
+                    task_id, progress=percent, message=message
+                ),
+            )
+            # 移动到可下载位置（delete_exports 目录同款机制）。
+            target_dir = DELETE_EXPORT_DIR
+            target_dir.mkdir(parents=True, exist_ok=True)
+            target = target_dir / zip_name
+            shutil.move(str(zip_path), target)
+            shutil.rmtree(zip_path.parent, ignore_errors=True)
+            task_progress.succeed_task(
+                task_id,
+                result={"download_url": f"/api/projects/exports/{zip_name}", "filename": zip_name},
+                message="导出完成",
+            )
+        except Exception:
+            logger.exception("project export failed project_id=%s", project_id)
+            task_progress.fail_task(task_id, error="导出失败，请查看后端日志")
+        finally:
+            worker_db.close()
+
+    import asyncio
+
+    asyncio.create_task(asyncio.to_thread(run_export))
+    return {"task_id": task_id, "status": "running", "poll_url": f"/api/tasks/{task_id}"}
+
+
+@router.get("/exports/{filename}")
+def download_project_export(filename: str) -> FileResponse:
+    """下载已生成的导出 zip（导出任务完成后的 download_url）。"""
+    if "/" in filename or "\\" in filename or not filename.endswith(".zip"):
+        raise HTTPException(status_code=400, detail="无效导出文件名")
+    path = DELETE_EXPORT_DIR / filename
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="导出文件不存在或已过期")
+    return FileResponse(path, filename=filename, media_type="application/zip")

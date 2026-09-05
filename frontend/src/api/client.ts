@@ -61,6 +61,8 @@ export function setRequestTimeoutMs(ms: number) {
 
 export interface ApiRequestOptions extends RequestInit {
   timeoutMs?: number;
+  /** 静默请求：不参与全局“后端处理中”计数（用于进度轮询等高频小请求）。 */
+  silent?: boolean;
 }
 
 function createTimeoutAbort(timeoutMs: number, externalSignal?: AbortSignal | null) {
@@ -131,7 +133,7 @@ async function throwResponseError(response: Response, url: string, method: strin
 async function request<T>(url: string, options?: ApiRequestOptions): Promise<T> {
   const method = options?.method ?? 'GET';
   const timeoutMs = options?.timeoutMs ?? requestTimeoutMs;
-  const finishBackendRequest = beginBackendRequest();
+  const finishBackendRequest = options?.silent ? () => undefined : beginBackendRequest();
   const timeout = createTimeoutAbort(timeoutMs, options?.signal);
   try {
     let response: Response;

@@ -22,6 +22,7 @@ from app.routers import (
     measurement_router,
     media_router,
     point_router,
+    progress_router,
     project_router,
     settings_router,
 )
@@ -197,6 +198,7 @@ if AUTH_ENABLED:
 
     app.include_router(auth_router.router)
 app.include_router(import_router.router)
+app.include_router(progress_router.router)
 app.include_router(fem_router.router)
 app.include_router(project_router.router)
 app.include_router(point_router.router)

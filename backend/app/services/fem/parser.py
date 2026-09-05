@@ -39,11 +39,22 @@ _HMNAME_COMP_RE = re.compile(r'^\$HMNAME\s+COMP\s+(\d+)\s*"([^"]*)"', re.IGNOREC
 _HWCOLOR_COMP_RE = re.compile(r"^\$HWCOLOR\s+COMP\s+(\d+)\s+(\d+)", re.IGNORECASE)
 _HMCOMP_ID_RE = re.compile(r"^\$HMCOMP\s+ID\s+(\d+)", re.IGNORECASE)
 _ELEMENTPROP_RE = re.compile(r"^\$ELEMENTPROP\s+(\d+)\s+(\d+)", re.IGNORECASE)
+_COMPACT_FLOAT_RE = re.compile(r"^([+-]?(?:\d+(?:\.\d*)?|\.\d+))([+-]\d+)$")
 
 
 def _as_int(value: Any, *, field_name: str) -> int:
     if isinstance(value, bool):
         raise ModelParseError(f"{field_name} must be an integer, not bool")
+    if isinstance(value, str):
+        # Fast path for the overwhelmingly common decimal-string case.  IDs
+        # within float-precision range compare identically, so the extra
+        # float() round-trip below is skipped.
+        try:
+            integer = int(value)
+        except ValueError as exc:
+            raise ModelParseError(f"{field_name} must be an integer, got {value!r}") from exc
+        if -9007199254740992 <= integer <= 9007199254740992:
+            return integer
     try:
         integer = int(value)
     except (TypeError, ValueError) as exc:
@@ -62,12 +73,16 @@ def _parse_float(value: Any, *, field_name: str) -> float:
 
     if isinstance(value, bytes):
         value = value.decode("ascii", errors="replace")
-    text = str(value).strip().replace("D", "E").replace("d", "e")
+    text = str(value).strip()
     if not text:
         raise ModelParseError(f"{field_name} is empty")
-    # Nastran permits compact exponents such as ``1.25-3`` for 1.25e-3.
-    if "e" not in text.lower():
-        compact = re.match(r"^([+-]?(?:\d+(?:\.\d*)?|\.\d+))([+-]\d+)$", text)
+    if "d" in text or "D" in text:
+        text = text.replace("D", "E").replace("d", "e")
+    # Nastran permits compact exponents such as ``1.25-3`` for 1.25e-3.  The
+    # pattern needs a sign after the first character, so the common plain
+    # decimal case skips the regex entirely.
+    if "e" not in text.lower() and ("+" in text[1:] or "-" in text[1:]):
+        compact = _COMPACT_FLOAT_RE.match(text)
         if compact:
             text = f"{compact.group(1)}e{compact.group(2)}"
     try:
@@ -132,6 +147,8 @@ def _large_field_values(line: str) -> list[str]:
 def _strip_inline_comment(line: str) -> str:
     """Remove an inline ``$`` comment while preserving quoted dollar signs."""
 
+    if "$" not in line:
+        return line
     quote: str | None = None
     index = 0
     while index < len(line):
@@ -579,7 +596,6 @@ class FemModelProvider(FEModelProvider):
         pending_mode = ""
         pending_line_number = 0
         pending_source_path: Path | None = None
-
         def flush_pending() -> None:
             nonlocal pending_fields, pending_card, pending_mode, pending_line_number, pending_source_path
             if pending_fields is not None:
@@ -631,11 +647,27 @@ class FemModelProvider(FEModelProvider):
             required = required_field_count(pending_card)
             return required is not None and len(pending_fields) < required
 
+        total_rows = len(source_lines)
+        row_index = 0
+
+        def report_parse_progress() -> None:
+            if self.on_progress is None or not total_rows:
+                return
+            self.on_progress(
+                phase="parse",
+                done=min(row_index, total_rows),
+                total=total_rows,
+                message=f"正在解析 FEM 卡片 {min(row_index, total_rows)}/{total_rows}",
+            )
+
         for source_path, line_number, raw_line in source_lines:
+            row_index += 1
+            if (row_index & 0x3FFF) == 0:
+                report_parse_progress()
             line = _strip_inline_comment(raw_line.rstrip("\r\n"))
             stripped_line = line.lstrip()
             is_comment_or_blank = (
-                not line.strip()
+                not stripped_line
                 or stripped_line.startswith("$")
                 or stripped_line.startswith("#")
                 or stripped_line.startswith("//")
@@ -694,6 +726,26 @@ class FemModelProvider(FEModelProvider):
                 large_source_path = source_path
                 continue
 
+            # Standard fixed-field GRID rows dominate large decks and are
+            # parsed straight from their columns.  Non-fixed layouts (free
+            # field with commas, short hand-written whitespace rows) fall
+            # through to the generic per-card parser below, which keeps the
+            # canonical error messages for every malformed variant.
+            if head == "GRID" and "," not in line[:16]:
+                if self._try_parse_fixed_grid(line, line_number, nodes):
+                    continue
+            # Row-complete element cards (no continuation rows) use the same
+            # fixed-column shortcut.  ``$HMCOMP`` component membership is
+            # recorded here exactly as the generic dispatcher does.
+            if head in {"CQUAD4", "CTRIA3", "CQUAD8", "CTRIA6", "CROD", "CBAR", "CBEAM", "CONROD"} and "," not in line[:16]:
+                if self._try_parse_fixed_element(line, line_number, elements):
+                    if current_component_id is not None:
+                        try:
+                            element_comp_block[_as_int(line[8:16], field_name="EID")] = current_component_id
+                        except ModelParseError:
+                            pass
+                    continue
+
             card = _card_name(line)
             fields = _read_card_fields(line, card)
             mode = "free" if "," in line[:16] else "fixed" if _standard_fixed_row(line) else "whitespace"
@@ -706,12 +758,19 @@ class FemModelProvider(FEModelProvider):
             if mode == "fixed":
                 while len(fields) > 1 and not fields[-1].strip():
                     fields.pop()
-            pending_fields = list(fields)
+            pending_fields = fields
             pending_card = card
             pending_mode = mode
             pending_line_number = line_number
             pending_source_path = source_path
 
+        if self.on_progress is not None and total_rows:
+            self.on_progress(
+                phase="parse",
+                done=total_rows,
+                total=total_rows,
+                message=f"正在解析 FEM 卡片 {total_rows}/{total_rows}",
+            )
         flush_large()
         flush_pending()
 
@@ -832,7 +891,11 @@ class FemModelProvider(FEModelProvider):
                 raise ModelProviderError(f"cannot read FEM source {resolved}: {exc}") from exc
             next_stack = (*stack, resolved)
             for line_number, raw_line in enumerate(text.splitlines(), start=1):
-                include_value = self._extract_include(raw_line)
+                include_value = None
+                # The overwhelming majority of lines carry no INCLUDE card;
+                # skip the regex unless the row looks like one.
+                if raw_line[:7].upper().startswith("INCLUDE") or raw_line[1:8].upper().startswith("INCLUDE"):
+                    include_value = self._extract_include(raw_line)
                 if include_value is None:
                     lines.append((resolved, line_number, raw_line))
                     continue
@@ -851,6 +914,7 @@ class FemModelProvider(FEModelProvider):
             read_bytes += done_bytes
             if self.on_progress is not None and total_bytes:
                 self.on_progress(
+                    phase="read",
                     done=min(read_bytes, total_bytes),
                     total=total_bytes,
                     message=f"正在读取 FEM 输入 {path.name}",
@@ -880,6 +944,95 @@ class FemModelProvider(FEModelProvider):
         return candidate
 
     @staticmethod
+    def _try_parse_fixed_grid(line: str, line_number: int, nodes: dict[int, Node]) -> bool:
+        """Try to parse a standard fixed-field GRID row from its columns.
+
+        Small-field GRID layout: ID in columns 8-15, CP in 16-23 and X/Y/Z in
+        columns 24-31/32-39/40-47.  Returns True when the row was consumed;
+        otherwise False so the caller runs the generic per-card parser (which
+        produces the canonical error messages for every malformed variant).
+        """
+
+        if "," in line[:16] or len(line) < 48:
+            return False
+        identifier = line[8:16].strip()
+        x_field = line[24:32].strip()
+        y_field = line[32:40].strip()
+        z_field = line[40:48].strip()
+        if not identifier or not x_field or not y_field or not z_field:
+            return False
+        try:
+            node_id = int(identifier)
+            x_value = float(x_field)
+            y_value = float(y_field)
+            z_value = float(z_field)
+        except ValueError:
+            return False
+        if not -9007199254740992 <= node_id <= 9007199254740992:
+            return False
+        if node_id in nodes:
+            raise ModelParseError(f"duplicate GRID ID {node_id} at line {line_number}")
+        nodes[node_id] = Node._from_parsed(node_id, (x_value, y_value, z_value))
+        return True
+
+    @staticmethod
+    def _try_parse_fixed_element(line: str, line_number: int, elements: dict[int, Element]) -> bool:
+        """Try to parse a standard fixed-field element row from its columns.
+
+        Supported here are the row-complete cards whose full connectivity sits
+        on the first physical row (no mid-side/continuation rows): the shells
+        CTRIA3/CQUAD4 and the bars CROD/CBAR/CBEAM/CONROD.  Row layouts (after
+        the eight-character card name):
+          CTRIA3/CQUAD4: EID, PID, then 3/4 nodes starting at column 24;
+          CROD/CBAR/CBEAM: EID, PID, GA, GB starting at column 24;
+          CONROD: EID, G1 (column 16), G2 (column 24) — no property card.
+        Solids and mid-side shells may continue onto further rows, so they
+        stay on the generic continuation-aware path.  Returns True when the
+        row was consumed; otherwise False for the generic parser (which keeps
+        the canonical error messages for every malformed variant).
+        """
+
+        if "," in line[:16]:
+            return False
+        try:
+            element_id = int(line[8:16])
+            if line[0:8].strip() != "CONROD":
+                property_id = int(line[16:24])
+                base = 24
+            else:
+                property_id = 0
+                base = 16
+            node_values: list[int] = []
+            card = line[0:8].strip()
+            if card in {"CQUAD4", "CTRIA3"}:
+                count = 4 if card == "CQUAD4" else 3
+                if len(line) < base + count * 8:
+                    return False
+                for offset in range(count):
+                    field = line[base + offset * 8 : base + offset * 8 + 8].strip()
+                    if not field:
+                        return False
+                    node_values.append(int(field))
+            else:
+                if len(line) < 40:
+                    return False
+                ga_field = line[24:32].strip()
+                gb_field = line[32:40].strip()
+                if not ga_field or not gb_field:
+                    return False
+                node_values = [int(ga_field), int(gb_field)]
+            if not all(-9007199254740992 <= value <= 9007199254740992 for value in [element_id, property_id, *node_values]):
+                return False
+        except ValueError:
+            return False
+        FemModelProvider._add_element(
+            elements,
+            Element._from_parsed(element_id, card, tuple(node_values), property_id),
+            line_number,
+        )
+        return True
+
+    @staticmethod
     def _parse_grid(fields: Sequence[str], line_number: int, nodes: dict[int, Node]) -> None:
         # Standard small-field GRID: card, ID, CP, X, Y, Z, CD, ...
         # Whitespace/free-field fallback: card, ID, CP, X, Y, Z, ...
@@ -895,7 +1048,7 @@ class FemModelProvider(FEModelProvider):
             z_field = _field(fields, 4, card="GRID", line_number=line_number)
         if node_id in nodes:
             raise ModelParseError(f"duplicate GRID ID {node_id} at line {line_number}")
-        nodes[node_id] = Node(
+        nodes[node_id] = Node._from_parsed(
             node_id,
             (
                 _parse_float(x_field, field_name="GRID X"),
@@ -920,7 +1073,7 @@ class FemModelProvider(FEModelProvider):
         )
         FemModelProvider._add_element(
             elements,
-            Element(element_id, card, node_ids, property_id),
+            Element._from_parsed(element_id, card, node_ids, property_id),
             line_number,
         )
 
@@ -978,7 +1131,7 @@ class FemModelProvider(FEModelProvider):
         node_ids = tuple(node_ids_list)
         FemModelProvider._add_element(
             elements,
-            Element(element_id, card, node_ids, property_id),
+            Element._from_parsed(element_id, card, node_ids, property_id),
             line_number,
         )
 
@@ -1005,7 +1158,7 @@ class FemModelProvider(FEModelProvider):
             )
         FemModelProvider._add_element(
             elements,
-            Element(element_id, card, node_ids, property_id),
+            Element._from_parsed(element_id, card, node_ids, property_id),
             line_number,
         )
 

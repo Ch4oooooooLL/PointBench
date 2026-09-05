@@ -87,14 +87,23 @@ def _triangulate(face: tuple[int, ...]) -> tuple[tuple[int, int, int], ...]:
     return tuple((face[0], face[index], face[index + 1]) for index in range(1, len(face) - 1))
 
 
-def build_triangle_mesh(model: "CanonicalFEModel") -> MeshArtifact:
+def build_triangle_mesh(
+    model: "CanonicalFEModel",
+    *,
+    on_progress: Callable[..., None] | None = None,
+) -> MeshArtifact:
     """Build a pickable surface mesh while preserving original Element IDs."""
 
     faces: list[tuple[tuple[int, ...], int]] = []
     solid_candidates: list[tuple[tuple[int, ...], int]] = []
     solid_face_counts: dict[tuple[int, ...], int] = {}
 
+    total_elements = len(model.elements)
+    scanned = 0
     for element_id in sorted(model.elements):
+        scanned += 1
+        if on_progress is not None and (scanned & 0xFFF) == 0:
+            on_progress(done=scanned, total=total_elements, message=f"正在生成几何网格 {scanned}/{total_elements}")
         element = model.elements[element_id]
         card = element.element_type.upper()
         nodes = tuple(element.node_ids)
@@ -150,7 +159,7 @@ def write_glb(
 ) -> MeshArtifact:
     """Write GLB plus JSON mapping, returning the generated in-memory artifact."""
 
-    artifact = build_triangle_mesh(model)
+    artifact = build_triangle_mesh(model, on_progress=on_progress)
     if not artifact.triangles:
         raise ValueError("canonical model contains no supported surface triangles")
     glb_positions = tuple(glb_coordinate(xyz) for xyz in artifact.positions)

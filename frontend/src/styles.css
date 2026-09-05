@@ -4585,3 +4585,285 @@ label {
   color: var(--text-muted);
   font-size: 12px;
 }
+
+/* ── 全局右下角任务进度悬浮窗 ────────────────────────────── */
+.task-progress-widget {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 1500;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: min(360px, calc(100vw - 36px));
+  pointer-events: none;
+}
+
+.task-progress-card {
+  pointer-events: auto;
+  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  box-shadow: var(--shadow-md);
+  padding: 10px 12px;
+  min-width: 280px;
+  animation: taskWidgetIn 0.18s ease-out;
+}
+
+@keyframes taskWidgetIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.task-progress-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.task-progress-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  flex: none;
+  color: var(--primary);
+  background: var(--primary-light);
+}
+
+.task-progress-running .task-progress-icon {
+  animation: taskIconPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes taskIconPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+.task-progress-succeeded .task-progress-icon {
+  color: var(--success-text);
+  background: var(--success-bg);
+}
+
+.task-progress-failed .task-progress-icon {
+  color: var(--danger-text);
+  background: var(--danger-bg);
+}
+
+.task-progress-title {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-progress-dismiss {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-light);
+  cursor: pointer;
+  padding: 0;
+  transition: var(--transition-fast);
+}
+
+.task-progress-dismiss:hover {
+  background: var(--bg-subtle);
+  color: var(--text-main);
+}
+
+.task-progress-track {
+  margin-top: 9px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+}
+
+.task-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--primary), #2dd4bf);
+  transition: width 0.35s ease;
+}
+
+.task-progress-failed .task-progress-fill {
+  background: linear-gradient(90deg, #f59e0b, #ef4444);
+}
+
+.task-progress-meta {
+  margin-top: 6px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.task-progress-meta > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-progress-percent {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.task-progress-result {
+  margin-top: 4px;
+  color: var(--success-text);
+}
+
+.task-progress-result.is-error {
+  color: var(--danger-text);
+}
+
+.task-progress-more {
+  pointer-events: none;
+  align-self: flex-end;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+
+/* ── 模型预览页（FemPreviewPage） ─────────────────────────── */
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.fem-loading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.fem-loading .chart-loading-spinner {
+  width: 22px;
+  height: 22px;
+  border-width: 2px;
+  flex: none;
+}
+
+.fem-loading p {
+  margin: 0;
+}
+
+.fem-upload-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: -8px 0 16px;
+}
+
+/* ── 导入页 FEM 区块 ─────────────────────────────────────── */
+.import-divider {
+  margin: 26px 0 16px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border-color);
+}
+
+.import-divider h2 {
+  margin: 0;
+}
+
+.fem-block-note {
+  margin: -4px 0 14px;
+  font-size: 13px;
+}
+
+/* ── 导出项目弹窗（ExportProjectDialog） ──────────────────── */
+.export-dialog {
+  width: min(520px, 94vw);
+}
+
+.export-options {
+  display: grid;
+  gap: 10px;
+  margin: 4px 0 14px;
+}
+
+.export-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-subtle);
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.export-option:hover {
+  border-color: var(--primary-border);
+}
+
+.export-option.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.export-option input {
+  margin: 3px 0 0;
+  accent-color: var(--primary);
+  width: 15px;
+  height: 15px;
+  flex: none;
+}
+
+.export-option strong {
+  display: block;
+  font-size: 14px;
+  color: var(--text-main);
+}
+
+.export-option span {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.export-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.export-dialog-footer .export-hint {
+  font-size: 12px;
+  color: var(--text-light);
+}

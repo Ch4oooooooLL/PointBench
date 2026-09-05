@@ -173,6 +173,36 @@ export interface FemPreviewResult {
   grouping: FemGroupingData;
 }
 
+// ── 项目级 FEM 模型（模型预览页） ──────────────────────────────────────────
+
+export interface FemModelPayload {
+  status: 'none' | 'ready';
+  stats: FemPreviewStats | null;
+  grouping: FemGroupingData | null;
+  glb_url: string | null;
+  mapping_url: string | null;
+  artifact_version?: string | null;
+  updated_at?: string | null;
+  has_artifact?: boolean;
+}
+
+// ── 后端任务进度（全局右下角悬浮窗） ───────────────────────────────────────
+
+export interface TaskStatusPayload {
+  task_id: string;
+  label: string;
+  status: 'running' | 'succeeded' | 'failed';
+  progress: number; // 0-100
+  message: string;
+  result?: { download_url?: string; filename?: string } | null;
+}
+
+export interface TaskStartResult {
+  task_id: string;
+  status: 'running';
+  poll_url: string;
+}
+
 export interface TrendItem {
   run_id: number;
   run_name: string;

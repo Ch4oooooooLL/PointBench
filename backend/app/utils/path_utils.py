@@ -50,3 +50,8 @@ def safe_dewesoft_dir(project_id: str) -> Path:
         raise HTTPException(status_code=400, detail="非法 Dewesoft 存储路径")
 
     return path
+
+
+def safe_fem_dir(project_id: str) -> Path:
+    """返回项目 FEM 模型目录（storage/projects/<project_id>/fem）的安全路径。"""
+    return safe_project_dir(project_id) / "fem"

@@ -146,14 +146,14 @@ export function SettingsPage() {
         {activeCategory === 'chart' && (
           <div className="settings-section">
             <h2>图表显示</h2>
-            <p>调整项目概览中全点位应力幅趋势图的高度。</p>
+            <p>调整数据概览中全点位应力幅趋势图的高度。</p>
             <div className="settings-grid">
               <label>普通视图高度 px<input type="number" min="360" max="760" value={overviewHeight} onChange={(event) => setOverviewHeight(event.target.value)} /></label>
               <label>放大视图高度 px<input type="number" min="480" max="860" value={overviewExpandedHeight} onChange={(event) => setOverviewExpandedHeight(event.target.value)} /></label>
               <label>放大视图宽度 px<input type="number" min="720" max="1920" value={expandedChartWidth} onChange={(event) => setExpandedChartWidth(event.target.value)} /></label>
             </div>
             <h2 style={{ marginTop: 20 }}>异常筛选</h2>
-            <p>项目概览趋势图右上角的「仅异常」开关，筛选历史应力幅超过初始值上下范围的点位。</p>
+            <p>数据概览趋势图右上角的「仅异常」开关，筛选历史应力幅超过初始值上下范围的点位。</p>
             <div className="settings-grid">
               <label>仅异常范围 MPa<input type="number" min="0" value={abnormalRangeMpa} onChange={(event) => setAbnormalRangeMpa(event.target.value)} /></label>
             </div>

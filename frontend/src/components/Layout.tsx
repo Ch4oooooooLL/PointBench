@@ -2,6 +2,7 @@ import { ActivitySquare, BookOpen, Box, Camera, FilePlus2, FileUp, LayoutDashboa
 import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAppContext } from '../context/AppContext';
+import { TaskProgressWidget } from './TaskProgressWidget';
 
 const FIRST_USE_COOKIE = 'pointbench_first_use_notice_seen';
 const FIRST_USE_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
@@ -38,9 +39,13 @@ export function Layout() {
             </div>
           </div>
           <nav>
+            <NavLink to="/fem-preview">
+              <Box size={18} />
+              模型预览
+            </NavLink>
             <NavLink to="/" end>
               <LayoutDashboard size={18} />
-              项目概览
+              数据概览
             </NavLink>
             <NavLink to="/project-detail">
               <ListChecks size={18} />
@@ -57,10 +62,6 @@ export function Layout() {
             <NavLink to="/import">
               <FileUp size={18} />
               导入项目
-            </NavLink>
-            <NavLink to="/fem-preview">
-              <Box size={18} />
-              FEM 预览
             </NavLink>
             <NavLink to="/help">
               <BookOpen size={18} />
@@ -91,6 +92,7 @@ export function Layout() {
       {firstUseNoticeOpen && (
         <FirstUseNoticeModal onOpenGuide={openUsageGuide} onOpenWorkflow={openWorkflowGuide} onSkip={closeFirstUseNotice} />
       )}
+      <TaskProgressWidget />
     </div>
   );
 }

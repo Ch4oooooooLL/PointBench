@@ -50,6 +50,32 @@ class Project(Base, SoftDeleteMixin):
     test_runs: Mapped[list["TestRun"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     dewesoft_imports: Mapped[list["DewesoftImport"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     crack_records: Mapped[list["CrackRecord"]] = relationship(back_populates="project", cascade="all, delete-orphan")
+    fem_model: Mapped["FemModel | None"] = relationship(
+        back_populates="project", cascade="all, delete-orphan", uselist=False
+    )
+
+
+class FemModel(Base):
+    """一个项目对应的一条 FEM 模型记录（导入的 .fem 解析结果与渲染产物索引）。"""
+
+    __tablename__ = "fem_models"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_db_id: Mapped[int] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    main_filename: Mapped[str] = mapped_column(String(500))
+    source_name: Mapped[str] = mapped_column(String(500))
+    node_count: Mapped[int] = mapped_column(Integer, default=0)
+    element_count: Mapped[int] = mapped_column(Integer, default=0)
+    triangle_count: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(32), default="ready")
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    artifact_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
+
+    project: Mapped[Project] = relationship(back_populates="fem_model")
 
 
 class TestPoint(Base, SoftDeleteMixin):

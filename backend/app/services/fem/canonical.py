@@ -60,6 +60,24 @@ class Node:
                 _as_int(self.coordinate_system, field_name="coordinate_system"),
             )
 
+    @classmethod
+    def _from_parsed(
+        cls, node_id: int, coordinates: tuple[float, float, float]
+    ) -> "Node":
+        """Parser fast-path constructor.
+
+        Caller guarantees *node_id* is a real int and *coordinates* are three
+        floats; the validation in :meth:`__post_init__` is skipped so the FEM
+        parser (which already canonicalizes every value) does not re-check.
+        """
+
+        node = object.__new__(cls)
+        object.__setattr__(node, "node_id", node_id)
+        object.__setattr__(node, "coordinates", coordinates)
+        object.__setattr__(node, "metadata", {})
+        object.__setattr__(node, "coordinate_system", None)
+        return node
+
     @property
     def id(self) -> int:
         """Short ID alias used by mesh consumers."""
@@ -144,6 +162,30 @@ class Element:
                 "component_id",
                 _as_int(self.component_id, field_name="component_id"),
             )
+
+    @classmethod
+    def _from_parsed(
+        cls,
+        element_id: int,
+        element_type: str,
+        node_ids: tuple[int, ...],
+        property_id: int | None,
+    ) -> "Element":
+        """Parser fast-path constructor.
+
+        Caller guarantees all IDs are real ints and *element_type* is already
+        upper-cased; the validation in :meth:`__post_init__` is skipped so the
+        FEM parser (which already canonicalizes every value) does not re-check.
+        """
+
+        element = object.__new__(cls)
+        object.__setattr__(element, "element_id", element_id)
+        object.__setattr__(element, "element_type", element_type)
+        object.__setattr__(element, "node_ids", node_ids)
+        object.__setattr__(element, "property_id", property_id)
+        object.__setattr__(element, "metadata", {})
+        object.__setattr__(element, "component_id", None)
+        return element
 
     @property
     def id(self) -> int:

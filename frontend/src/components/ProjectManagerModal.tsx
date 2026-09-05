@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { api, downloadFile } from '../api/client';
 import { useAppContext } from '../context/AppContext';
 import { DeleteProjectResult, Project } from '../types';
+import { ExportProjectDialog } from './ExportProjectDialog';
 
 interface Props {
   onClose: () => void;
@@ -40,12 +41,14 @@ export function ProjectManagerModal({ onClose }: Props) {
   const [form, setForm] = useState<ProjectForm>(toForm(selectedProject));
   const [message, setMessage] = useState('');
   const [deleteExport, setDeleteExport] = useState<DeleteProjectResult | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     setForm(toForm(selectedProject));
     setMessage('');
     setDeleteExport(null);
+    setExportOpen(false);
   }, [selectedProject]);
 
   const hasUnsavedChanges = selectedProject ? !isSameForm(form, toForm(selectedProject)) : false;
@@ -98,7 +101,7 @@ export function ProjectManagerModal({ onClose }: Props) {
     }
   }
 
-  async function downloadProjectExport(format: 'zip' | 'json' | 'csv') {
+  async function downloadProjectExport(format: 'json' | 'csv') {
     if (!selectedProject) return;
     setBusy(true);
     setMessage('');
@@ -183,7 +186,7 @@ export function ProjectManagerModal({ onClose }: Props) {
 
                 <div className="manager-actions">
                   <button className="button primary" disabled={busy} onClick={save}><Save size={18} />保存修改</button>
-                  <button className="button primary" type="button" disabled={busy} onClick={() => downloadProjectExport('zip')}><Download size={18} />导出项目</button>
+                  <button className="button primary" type="button" disabled={busy} onClick={() => setExportOpen(true)}><Download size={18} />导出项目</button>
                   <button className="button" type="button" disabled={busy} onClick={() => downloadProjectExport('json')}><Download size={18} />导出 JSON</button>
                   <button className="button" type="button" disabled={busy} onClick={() => downloadProjectExport('csv')}><Download size={18} />导出 CSV</button>
                   <button className="button danger-button" disabled={busy} onClick={remove}><Trash2 size={18} />删除项目</button>
@@ -204,6 +207,13 @@ export function ProjectManagerModal({ onClose }: Props) {
           </div>
         </div>
       </div>
+      {exportOpen && selectedProject && (
+        <ExportProjectDialog
+          projectId={selectedProject.id}
+          projectName={selectedProject.project_name}
+          onClose={() => setExportOpen(false)}
+        />
+      )}
     </div>
   );
 }
