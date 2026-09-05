@@ -1,13 +1,13 @@
 {
   "zip_path": "C:\\Users\\Chao\\Desktop\\DOC\\CODE\\PointProcess\\sample_data\\POINTPROCESS_DEMO_COMPLEX_FEM_REPLACEMENT_20260905.zip",
-  "fem_mode": "complex (第二版高保真模型, frame_assembly_v2.fem)",
+  "fem_mode": "complex single-file (第二版高保真模型, frame_assembly_v2.fem)",
   "fem_stats": {
     "node_count": 428,
     "element_count": 372,
     "component_count": 13,
-    "included_files": 1
+    "included_files": 0
   },
-  "file_count": 4,
-  "zip_size_bytes": 8427,
-  "usage_guide": "解压后选择整个 fem_v2_replace 文件夹，在 FEM 预览页「重新导入模型文件夹」上传"
+  "file_count": 3,
+  "zip_size_bytes": 8169,
+  "usage_guide": "解压后选择 frame_assembly_v2.fem 单个文件，在 FEM 预览页「重新导入 .fem 文件」上传"
 }

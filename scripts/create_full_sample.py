@@ -25,8 +25,8 @@
 ``--mode full``（默认）把第一版骨架 FEM（``frame_assembly_simple.fem``）装入完整
 演示包，用于先导入项目；``--mode fem-replacement`` 单独生成第二版高保真复杂 FEM
 （``frame_assembly_v2.fem``，更多节点/单元/部件与 CQUAD4+CTRIA3+CROD 混合单元），
-内置 ``fem_v2_replace/`` 文件夹可在 FEM 预览页整体上传，把项目内已渲染的骨架模型
-替换为复杂模型并重新渲染。
+该文件为自包含单文件（无 INCLUDE 依赖），可在 FEM 预览页直接选择上传，把项目内
+已渲染的骨架模型替换为复杂模型并重新渲染。
 
 脚本在打包前会用后端 FEM 解析器实际解析生成的模型文件，确保随包分发的
 FEM 可被系统直接解析。
@@ -319,7 +319,7 @@ def build_simple_fem_source_files() -> dict[str, str]:
     }
 
 
-def build_complex_fem_source_files() -> dict[str, str]:
+def build_complex_fem_source_files(single_file: bool = False) -> dict[str, str]:
     """第二版演示 FEM：高保真车架模型（更复杂，用于整体替换演示）。
 
     与第一版对比：
@@ -329,6 +329,9 @@ def build_complex_fem_source_files() -> dict[str, str]:
     - 纵梁为闭口箱型截面（上/下盖板 + 内/外腹板），网格更细
     - 横梁 8 根等距布置，PID 随序号交替（5.0/6.0 板厚）
     - 立柱顶用 CTRIA3 封口，连杆用 CROD
+
+    ``single_file=True`` 时把纵梁（子文件内容）直接内联进主文件，返回
+    ``{"frame_assembly_v2.fem": ...}`` 单一自包含模型，无需随附子文件。
     """
     builder = _MeshBuilder()
 
@@ -364,7 +367,7 @@ def build_complex_fem_source_files() -> dict[str, str]:
                     "",
                 ]
             )
-        return "\n".join(["$$ 左右纵梁子文件（第二版，箱型截面多 PID）", *sections])
+        return "\n".join(["$$ 左右纵梁（箱型截面，盖板+腹板多 PID）", *sections])
 
     mats = [
         _card("MAT1", 1, "2.06+5", "7.91+4", ".3", "7.85-9"),
@@ -444,6 +447,9 @@ def build_complex_fem_source_files() -> dict[str, str]:
             rod_lines.append(_card("CROD", eid, 11, pillar_top[index], g2))
         return _component("四角立柱与连杆", 9, 3, [*builder.grids(), *builder.elems(), *rod_lines])
 
+    # 纵梁网格先生成（id 从 1 起、文本靠前），无论内联还是 INCLUDE 都保持连续。
+    rails_text = _rail_deck()
+
     sections: list[str] = [
         "$$ =================================================",
         "$$ PointProcess 车架演示 - 第二版高保真模型（用于整体替换）",
@@ -459,10 +465,13 @@ def build_complex_fem_source_files() -> dict[str, str]:
         "$$ ---- 属性 ----",
         *props,
         "$",
-        "$$ ---- 左右纵梁（INCLUDE）----",
-        "INCLUDE parts/rails_v2.fem",
-        "$",
+        "$$ ---- 左右纵梁 ----",
     ]
+    if single_file:
+        sections.append(rails_text)
+    else:
+        sections.append("INCLUDE parts/rails_v2.fem")
+        sections.append("$")
     for index in range(1, 9):
         x_center = -560.0 + (index - 1) * 160.0
         sections.extend(_cross_beam(x_center, 10 + index, 3 if index <= 4 else 2, 4 if index % 2 else 5))
@@ -470,14 +479,24 @@ def build_complex_fem_source_files() -> dict[str, str]:
     sections.extend(_bumper(-1.0, 8, 6, "后保险杠"))
     sections.extend(_pillars_and_rods())
     sections.extend(["", "ENDDATA", ""])
+    if single_file:
+        return {"frame_assembly_v2.fem": "\n".join(sections)}
     return {
         "frame_assembly_v2.fem": "\n".join(sections),
-        "parts/rails_v2.fem": _rail_deck(),
+        "parts/rails_v2.fem": rails_text,
     }
 
 
-def validate_fem_source(source_dir: Path, main_filename: str = "frame_assembly.fem") -> dict[str, int]:
-    """用后端解析器实际解析生成的 FEM，确保随包模型可被系统导入。"""
+def validate_fem_source(
+    source_dir: Path,
+    main_filename: str = "frame_assembly.fem",
+    include_count: int = 1,
+) -> dict[str, int]:
+    """用后端解析器实际解析生成的 FEM，确保随包模型可被系统导入。
+
+    ``include_count`` 期望被解析器加载的 INCLUDE 子文件数量：主文件 + 子文件
+    模型传 1；自包含单文件模型传 0。
+    """
     from app.services.fem.parser import FemModelProvider
 
     main_path = source_dir / main_filename
@@ -492,8 +511,8 @@ def validate_fem_source(source_dir: Path, main_filename: str = "frame_assembly.f
         raise RuntimeError(f"FEM 校验失败：模型为空 {stats}")
     if not model.metadata.get("element_component_ids"):
         raise RuntimeError("FEM 校验失败：部件分组信息缺失（$HMCOMP 块未被识别）")
-    if stats["included_files"] != 1:
-        raise RuntimeError(f"FEM 校验失败：INCLUDE 子文件未正确加载 {model.metadata.get('included_files')}")
+    if stats["included_files"] != include_count:
+        raise RuntimeError(f"FEM 校验失败：INCLUDE 子文件数量不符，期望 {include_count}，实际 {stats['included_files']}")
     return stats
 
 
@@ -1023,7 +1042,6 @@ FULL_ZIP_NAME = "POINTPROCESS_DEMO_FULL_20260905.zip"
 FULL_SUMMARY_NAME = "POINTPROCESS_DEMO_FULL_20260905_summary.json"
 FEM_REPLACEMENT_ZIP_NAME = "POINTPROCESS_DEMO_COMPLEX_FEM_REPLACEMENT_20260905.zip"
 FEM_REPLACEMENT_SUMMARY_NAME = "POINTPROCESS_DEMO_COMPLEX_FEM_REPLACEMENT_20260905_summary.json"
-FEM_REPLACE_FOLDER = "fem_v2_replace"
 SIMPLE_FEM_MAIN = "frame_assembly_simple.fem"
 COMPLEX_FEM_MAIN = "frame_assembly_v2.fem"
 
@@ -1131,7 +1149,7 @@ def _build_full_package(out_dir: Path, seed: int) -> None:
             "replace demo: import this package, then upload the complex FEM replacement package",
         ],
         "import_guide": "系统内选择 导入 → 上传该 zip → 预览 → 确认导入，即可一次性恢复全部内容（含 FEM 模型）",
-        "replacement_guide": "在项目 FEM 预览页点击「重新导入模型文件夹」，选择复杂替换包解压后的 fem_v2_replace 文件夹，即可替换为复杂模型并重新渲染",
+        "replacement_guide": "在项目 FEM 预览页点击「重新导入 .fem 文件」，选择复杂替换包解压后的 frame_assembly_v2.fem，即可替换为复杂模型并重新渲染",
     }
     summary_path = out_dir / FULL_SUMMARY_NAME
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -1146,36 +1164,36 @@ def _build_full_package(out_dir: Path, seed: int) -> None:
 
 
 def _build_fem_replacement_package(out_dir: Path) -> None:
-    """单独生成第二版（复杂）FEM 源文件替换包。
+    """单独生成第二版（复杂）FEM 单文件替换包。
 
-    包内 ``fem_v2_replace/`` 文件夹（frame_assembly_v2.fem + parts/rails_v2.fem）
-    可在 FEM 预览页整体上传：把项目内第一版骨架模型替换为复杂模型并重新渲染。
+    包内是自包含的 ``frame_assembly_v2.fem``（纵梁等全部内联，无 INCLUDE），
+    可在 FEM 预览页直接选择上传：把项目内第一版骨架模型替换为复杂模型并重新渲染。
     """
     import shutil
     import tempfile
 
-    fem_files = build_complex_fem_source_files()
+    fem_files = build_complex_fem_source_files(single_file=True)
+    assert list(fem_files) == [COMPLEX_FEM_MAIN]
     with tempfile.TemporaryDirectory() as td:
-        folder = Path(td) / FEM_REPLACE_FOLDER
+        folder = Path(td)
         for relative, text in fem_files.items():
             target = folder / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(text, encoding="utf-8")
-        fem_stats = validate_fem_source(folder, main_filename=COMPLEX_FEM_MAIN)
-    print(f"复杂 FEM 校验通过: {fem_stats}")
+        fem_stats = validate_fem_source(folder, main_filename=COMPLEX_FEM_MAIN, include_count=0)
+    print(f"复杂 FEM（单文件）校验通过: {fem_stats}")
 
     readme = (
-        "PointProcess 复杂 FEM 替换包（第二版高保真车架模型）\n"
+        "PointProcess 复杂 FEM 替换文件（第二版高保真车架模型）\n"
         "====================================================\n\n"
         "用途：整体替换项目内已导入/已渲染的 FEM 模型。\n\n"
         "操作步骤：\n"
         "  1) 先导入演示全要素包 POINTPROCESS_DEMO_FULL_20260905.zip（内含第一版骨架模型）；\n"
-        "  2) 解压本 zip 得到文件夹 fem_v2_replace；\n"
-        "  3) 打开该项目的 FEM 预览页，点击「重新导入模型文件夹」，选择整个 fem_v2_replace\n"
-        "     文件夹上传；\n"
+        "  2) 打开该项目的模型预览页；\n"
+        "  3) 点击「重新导入 .fem 文件」，选择本目录中的 frame_assembly_v2.fem 上传；\n"
         "  4) 后端解析渲染完成后，页面模型即被替换为复杂模型并重新渲染。\n\n"
         "模型内容（与第一版对比）：\n"
-        "  - 主文件 frame_assembly_v2.fem + INCLUDE parts/rails_v2.fem\n"
+        "  - 单一自包含文件（无 INCLUDE 依赖，可直接单独上传）\n"
         "  - 箱型截面左右纵梁（上/下盖板 + 内/外腹板，多 PID 板厚）\n"
         "  - 8 根等距横梁（PID 交替 5.0/6.0）、前后保险杠、四角立柱与顶部封口\n"
         "  - CROD 连杆（圆形截面 PBARL 属性）、CTRIA3 过渡封口\n"
@@ -1186,16 +1204,16 @@ def _build_fem_replacement_package(out_dir: Path) -> None:
     zip_path = out_dir / FEM_REPLACEMENT_ZIP_NAME
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as package:
         for relative, text in fem_files.items():
-            package.writestr(f"{FEM_REPLACE_FOLDER}/{relative}", text)
+            package.writestr(relative, text)
         package.writestr("README-复杂FEM替换说明.txt", readme)
 
     summary = {
         "zip_path": str(zip_path),
-        "fem_mode": "complex (第二版高保真模型, frame_assembly_v2.fem)",
+        "fem_mode": "complex single-file (第二版高保真模型, frame_assembly_v2.fem)",
         "fem_stats": fem_stats,
         "file_count": 2 + len(fem_files),
         "zip_size_bytes": zip_path.stat().st_size,
-        "usage_guide": "解压后选择整个 fem_v2_replace 文件夹，在 FEM 预览页「重新导入模型文件夹」上传",
+        "usage_guide": "解压后选择 frame_assembly_v2.fem 单个文件，在 FEM 预览页「重新导入 .fem 文件」上传",
     }
     summary_path = out_dir / FEM_REPLACEMENT_SUMMARY_NAME
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
