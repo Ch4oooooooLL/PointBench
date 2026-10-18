@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Layout } from './components/Layout';
-import { AppProvider } from './context/AppContext';
+import { AppProvider, useAppContext } from './context/AppContext';
 import { AnalysisPage } from './pages/AnalysisPage';
 import { CrackRecordsPage } from './pages/CrackRecordsPage';
 import { DewesoftImportsPage } from './pages/DewesoftImportsPage';
@@ -23,9 +23,11 @@ const router = createBrowserRouter([
     path: '/',
     element: <Layout />,
     children: [
-      // 直接访问站点时默认进入模型预览主页；数据概览拆分到 /overview。
-      { index: true, element: <Navigate to="/fem-preview" replace /> },
+      // 项目工作台以总览为入口；模型预览回到专业工作区。
+      { index: true, element: <Navigate to="/overview" replace /> },
       { path: 'overview', element: <ProjectOverviewPage /> },
+      { path: 'analysis', element: <AnalysisShortcutPage /> },
+      { path: 'data-entry', element: <TestRunShortcutPage /> },
       { path: 'project-detail', element: <ProjectRowsPage /> },
       { path: 'crack-records', element: <CrackRecordsPage /> },
       { path: 'projects/new', element: <ProjectCreatePage /> },
@@ -48,6 +50,16 @@ function shouldBlockMobileAccess(): boolean {
   const coarsePointer = window.matchMedia('(pointer: coarse)').matches;
   const narrowViewport = window.matchMedia('(max-width: 768px)').matches;
   return mobileAgent || (coarsePointer && narrowViewport);
+}
+
+function AnalysisShortcutPage() {
+  const { selectedProjectId } = useAppContext();
+  return <Navigate to={selectedProjectId ? `/projects/${selectedProjectId}/analysis` : '/project-detail'} replace />;
+}
+
+function TestRunShortcutPage() {
+  const { selectedProjectId } = useAppContext();
+  return <Navigate to={selectedProjectId ? `/projects/${selectedProjectId}/test-runs/new` : '/project-detail'} replace />;
 }
 
 export function App() {

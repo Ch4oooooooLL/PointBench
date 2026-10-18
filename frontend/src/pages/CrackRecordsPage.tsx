@@ -1,7 +1,7 @@
 import { Camera, Clipboard, ImagePlus, Pencil, Plus, RefreshCw, Trash2, X } from 'lucide-react';
 import { ClipboardEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { api, crackImageUrl } from '../api/client';
-import { ProjectSelector } from '../components/ProjectSelector';
+import { ProjectContextHeader } from '../components/ProjectContextHeader';
 import { useAppContext } from '../context/AppContext';
 import { CrackRecord, Point, TestRun } from '../types';
 
@@ -83,7 +83,6 @@ export function CrackRecordsPage() {
           <p>记录并浏览各点位在指定循环次数下的裂纹图片和备注。</p>
         </div>
         <div className="crack-page-actions">
-          <ProjectSelector />
           <button className="button" onClick={refresh} disabled={!selectedProjectId}>
             <RefreshCw size={18} />
             刷新
@@ -105,6 +104,7 @@ export function CrackRecordsPage() {
 
       {selectedProject && (
         <>
+          <ProjectContextHeader active="cracks" />
           <div className="metric-grid">
             <div><span>裂纹记录</span><strong>{records.length}</strong></div>
             <div><span>涉及点位</span><strong>{groupedStats.pointCount}</strong></div>

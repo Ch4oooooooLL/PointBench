@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { FemUploadBox } from '../components/FemUploadBox';
 import { FemViewer } from '../components/FemViewer';
-import { ProjectSelector } from '../components/ProjectSelector';
+import { ProjectContextHeader } from '../components/ProjectContextHeader';
 import { useAppContext } from '../context/AppContext';
 import { FemGroupingData, FemModelPayload, FemPreviewStats, Point, PointElementBinding } from '../types';
 
@@ -184,13 +184,15 @@ export function FemPreviewPage() {
           <h1>模型预览</h1>
           <p>查看当前项目已保存的 FEM 有限元模型（Nastran/OptiStruct），渲染结果随项目保存，每次打开直接展示。</p>
         </div>
-        <ProjectSelector />
       </div>
 
       {error && <div className="alert danger">{error}</div>}
 
       {noProject ? (
-        <div className="empty panel">请先在右上角选择一个项目（或导入项目 zip 后重试）。</div>
+        <>
+          <ProjectContextHeader active="model" />
+          <div className="empty panel">请先在右上角选择一个项目（或导入项目 zip 后重试）。</div>
+        </>
       ) : loading && !hasModel ? (
         <div className="panel fem-loading">
           <div className="chart-loading-spinner" />
@@ -198,6 +200,7 @@ export function FemPreviewPage() {
         </div>
       ) : hasModel ? (
         <>
+          <ProjectContextHeader active="model" />
           {/* 三维预览：展示控件常驻顶部 */}
           <div className="panel fem-viewer-panel">
             <div className="section-head">
@@ -281,7 +284,10 @@ export function FemPreviewPage() {
           <FemModelInfo stats={stats} updatedAt={payload?.updated_at ?? null} grouping={grouping} />
         </>
       ) : (
-        <FemUploadPanel projectName={selectedProject.project_name} onUploaded={handleUploaded} onError={handleError} />
+        <>
+          <ProjectContextHeader active="model" />
+          <FemUploadPanel projectName={selectedProject.project_name} onUploaded={handleUploaded} onError={handleError} />
+        </>
       )}
     </section>
   );

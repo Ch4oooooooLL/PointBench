@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import ExcelJS from 'exceljs/dist/exceljs.min.js';
 import { api } from '../api/client';
+import { ProjectContextHeader } from '../components/ProjectContextHeader';
 import { DewesoftImport, Point, TestRun, XlsxImportPreview, XlsxImportResult, XlsxImportStrategy, XlsxPreviewItem, XlsxRowStatus } from '../types';
 import { calculateStressPreview, DEFAULT_STRESS_FORMULA } from '../utils/stressFormula';
 
@@ -434,6 +435,8 @@ export function TestRunNewPage() {
           <p>支持手动录入；XLSX 批量追加/更新测量数据；Dewesoft 数据导入入口已预留。</p>
         </div>
       </div>
+
+      <ProjectContextHeader active="entry" />
 
       <div className="mode-tabs">
         <button className={mode === 'manual' ? 'active' : ''} onClick={() => setMode('manual')}>手动录入</button>

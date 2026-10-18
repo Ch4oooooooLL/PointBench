@@ -1,4 +1,16 @@
-import { ActivitySquare, BookOpen, Box, Camera, FilePlus2, FileUp, LayoutDashboard, ListChecks, Settings, Workflow } from 'lucide-react';
+import {
+  ActivitySquare,
+  BookOpen,
+  Box,
+  Camera,
+  ClipboardPlus,
+  FilePlus2,
+  FileUp,
+  LayoutDashboard,
+  ListChecks,
+  Settings,
+  Workflow,
+} from 'lucide-react';
 import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAppContext } from '../context/AppContext';
@@ -38,39 +50,56 @@ export function Layout() {
               <span>实验数据工作台</span>
             </div>
           </div>
-          <nav>
-            <NavLink to="/fem-preview">
-              <Box size={18} />
-              模型预览
-            </NavLink>
-            <NavLink to="/overview">
-              <LayoutDashboard size={18} />
-              数据概览
-            </NavLink>
-            <NavLink to="/project-detail">
-              <ListChecks size={18} />
-              项目详情
-            </NavLink>
-            <NavLink to="/crack-records">
-              <Camera size={18} />
-              裂纹记录
-            </NavLink>
-            <NavLink to="/projects/new">
-              <FilePlus2 size={18} />
-              创建项目
-            </NavLink>
-            <NavLink to="/import">
-              <FileUp size={18} />
-              导入项目
-            </NavLink>
-            <NavLink to="/help">
-              <BookOpen size={18} />
-              使用说明
-            </NavLink>
-            <NavLink to="/workflow">
-              <Workflow size={18} />
-              使用流程
-            </NavLink>
+          <nav className="sidebar-nav" aria-label="主导航">
+            <div className="sidebar-nav-section">
+              <span className="sidebar-nav-label">项目工作区</span>
+              <NavLink to="/overview">
+                <LayoutDashboard size={18} />
+                项目总览
+              </NavLink>
+              <NavLink to="/project-detail">
+                <ListChecks size={18} />
+                点位台账
+              </NavLink>
+              <NavLink to="/fem-preview">
+                <Box size={18} />
+                模型绑定
+              </NavLink>
+              <NavLink to="/data-entry">
+                <FileUp size={18} />
+                数据录入
+              </NavLink>
+            </div>
+            <div className="sidebar-nav-section">
+              <span className="sidebar-nav-label">分析与归档</span>
+              <NavLink to="/analysis">
+                <ActivitySquare size={18} />
+                分析复核
+              </NavLink>
+              <NavLink to="/crack-records">
+                <Camera size={18} />
+                裂纹图库
+              </NavLink>
+            </div>
+            <div className="sidebar-nav-section">
+              <span className="sidebar-nav-label">管理</span>
+              <NavLink to="/projects/new">
+                <FilePlus2 size={18} />
+                创建项目
+              </NavLink>
+              <NavLink to="/import">
+                <ClipboardPlus size={18} />
+                导入项目
+              </NavLink>
+              <NavLink to="/help">
+                <BookOpen size={18} />
+                使用说明
+              </NavLink>
+              <NavLink to="/workflow">
+                <Workflow size={18} />
+                使用流程
+              </NavLink>
+            </div>
           </nav>
         </div>
         <NavLink className="settings-button" to="/settings" title="设置">

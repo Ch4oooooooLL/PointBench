@@ -65,8 +65,8 @@ export function ProjectManagerModal({ onClose }: Props) {
   function selectProject(projectId: number) {
     if (!confirmDiscardChanges()) return;
     setSelectedProjectId(projectId);
-    // 进入项目后默认落到模型预览主页。
-    navigate('/fem-preview');
+    // 进入项目后统一落到项目总览。
+    navigate('/overview');
   }
 
   async function save() {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/client';
+import { ProjectContextHeader } from '../components/ProjectContextHeader';
 import { useAppContext } from '../context/AppContext';
 
 interface Summary {
@@ -92,6 +93,7 @@ export function AnalysisPage() {
           返回项目
         </button>
       </div>
+      <ProjectContextHeader active="analysis" />
       <div className="metric-grid">
         <div><span>点位数</span><strong>{summary.point_count}</strong></div>
         <div><span>测试轮次</span><strong>{summary.run_count}</strong></div>

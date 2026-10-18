@@ -2,7 +2,7 @@ import { BarChart3, ClipboardPlus, ImageOff, Pencil, Plus, Save, Search, Trash2,
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, mediaUrl } from '../api/client';
-import { ProjectSelector } from '../components/ProjectSelector';
+import { ProjectContextHeader } from '../components/ProjectContextHeader';
 import { TrendChart } from '../components/TrendChart';
 import { useAppContext, type RiskSettings } from '../context/AppContext';
 import { Point, PointMeasurementRow, Project, TestRun, TrendItem } from '../types';
@@ -289,7 +289,6 @@ export function ProjectRowsPage() {
           <p>点位台账用于核对测点位置、照片、通道、安装状态和最新数据摘要；完整趋势和历史数据请进入点位详情或分析页查看。</p>
         </div>
         <div className="actions project-detail-actions">
-          <ProjectSelector compact />
           {editMode && <button className="button" disabled={busy} onClick={addPoint}><Plus size={18} />新增点位</button>}
           {editMode && <button className="button primary" disabled={busy} onClick={saveProject}><Save size={18} />保存</button>}
           {selectedProject && <Link className="button" to={`/projects/${selectedProject.id}/analysis`}><BarChart3 size={18} />分析</Link>}
@@ -314,6 +313,7 @@ export function ProjectRowsPage() {
 
       {!loading && selectedProject && (
         <>
+          <ProjectContextHeader active="ledger" />
           <div className="point-summary-strip">
             <div><span>项目名称</span><strong>{selectedProject.project_name || '-'}</strong></div>
             <div><span>项目编号</span><strong>{selectedProject.project_id || '-'}</strong></div>
